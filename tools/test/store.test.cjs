@@ -110,6 +110,23 @@ async function testAsync(name, fn) {
     assert.strictEqual(modern.workouts, 4);
   });
 
+  await testAsync('Home live workout loader uses the live-only RPC and keeps the summary shape', async () => {
+    rpcLog.length = 0;
+    testRpc = async name => {
+      assert.strictEqual(name, 'social_get_live_workouts');
+      return {
+        data: [{ session_id: 's-live', owner_id: 'friend-1', owner_name: 'Friend', live: true, sets_done: 2, sets_total: 5, exercise_count: 3 }],
+        error: null,
+      };
+    };
+    const result = await LB.loadSocialLiveWorkoutFeed();
+    assert.deepStrictEqual(result.liveWorkouts.map(workout => workout.ownerId), ['friend-1']);
+    assert.strictEqual(result.liveWorkouts[0].setsDone, 2);
+    assert.strictEqual(result.liveWorkouts[0].setsTotal, 5);
+    assert.deepStrictEqual(rpcLog.map(call => call.name), ['social_get_live_workouts']);
+    testRpc = async () => ({ data: null, error: null });
+  });
+
   test('Social workout/message mappers preserve snake_case fields and safe defaults', () => {
     const detail = LB.mapSocialWorkoutDetail({
       session: { session_id: 's1', owner_id: 'u1', ended: null, sets_done: 2 },

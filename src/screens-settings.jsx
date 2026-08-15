@@ -1030,8 +1030,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     // Friends loads asynchronously when the feature is enabled. Do not turn
     // that loading gap into an empty draft: saving one would overwrite the
     // user's visible profile with blank defaults before the dashboard arrives.
+    const friendsSnapshotLoaded = !!store.friends?.loadedAt;
     const profile = store.friends?.profile;
-    if (!store.friends) {
+    if (!friendsSnapshotLoaded) {
       setSocialProfileDraft(null);
       setSocialProfileMsg(null);
       return;
@@ -1040,10 +1041,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setSocialProfileLoading(false);
     setSocialProfileDraft(profile || { handle: '', friendCode: '', stepsVisible: false, workoutsVisible: false, adherenceVisible: false, metricVisibility: {}, metricSlots: LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'] });
     setSocialProfileMsg(null);
-  }, [friendsSheet, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
+  }, [friendsSheet, !!store.friends?.loadedAt, store.friends?.profile?.handle, store.friends?.profile?.friendCode, store.friends?.profile?.stepsVisible, store.friends?.profile?.workoutsVisible, store.friends?.profile?.adherenceVisible, JSON.stringify(store.friends?.profile?.metricVisibility || {}), JSON.stringify(store.friends?.profile?.metricSlots || [])]);
 
   useEffectSet(() => {
-    if (!friendsSheet || !store.settings?.showFriendsTab || store.friends || !userId) return;
+    if (!friendsSheet || !store.settings?.showFriendsTab || store.friends?.loadedAt || !userId) return;
     let live = true;
     setSocialProfileLoading(true);
     setSocialProfileLoadError(null);
@@ -1062,11 +1063,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (live) setSocialProfileLoading(false);
     });
     return () => { live = false; };
-  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends, userId, socialProfileRetry]);
+  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends?.loadedAt, userId, socialProfileRetry]);
 
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
-    if (!store.friends) {
+    if (!store.friends?.loadedAt) {
       setSocialProfileMsg({ ok: false, text: 'Loading your social profile. Please try again in a moment.' });
       return;
     }

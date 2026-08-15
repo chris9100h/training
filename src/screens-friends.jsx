@@ -390,7 +390,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     // The app-level social loader normally owns refreshes. If another boot
     // path clears the slice while this screen stays mounted, restart the
     // screen-level recovery load instead of leaving a stale empty fallback.
-    if (data) {
+    if (data?.loadedAt) {
       setLoading(false);
       return;
     }
@@ -878,7 +878,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     if (selectedFriend?.userId === friend.userId) setSelectedFriend(null);
   };
 
-  if (!data) {
+  if (!data?.loadedAt) {
     return (
       <Screen scroll={false}>
         <TopBar title="Friends" />

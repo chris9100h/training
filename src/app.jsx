@@ -2346,6 +2346,7 @@ function App() {
     let messageRefreshInFlight = null;
     let messageRefreshQueued = false;
     let badgeRefreshInFlight = null;
+    let liveWorkoutRefreshInFlight = null;
     const pendingResources = new Set();
     let feedFailures = 0;
     let badgeFailures = 0;
@@ -2394,6 +2395,26 @@ function App() {
       }).catch(() => { badgeFailures += 1; }).finally(() => { badgeRefreshInFlight = null; });
       return badgeRefreshInFlight;
     };
+    // Home only needs the live cards for its small "friend is working out"
+    // banner. Keep the full Friends dashboard and history feed lazy, but make
+    // the live-only snapshot available as soon as the app boots.
+    const refreshLiveWorkoutFeed = () => {
+      if (!live || liveWorkoutRefreshInFlight) return liveWorkoutRefreshInFlight || Promise.resolve();
+      liveWorkoutRefreshInFlight = LB.loadSocialLiveWorkoutFeed().then(feed => {
+        if (!live) return;
+        feedFailures = 0;
+        setStore(s => s ? {
+          ...s,
+          friends: {
+            ...(s.friends || {}),
+            liveWorkouts: feed?.liveWorkouts || [],
+          },
+        } : s);
+      }).catch(() => { feedFailures += 1; }).finally(() => {
+        liveWorkoutRefreshInFlight = null;
+      });
+      return liveWorkoutRefreshInFlight;
+    };
     const refreshFriends = (force = false) => {
       if (!live) return Promise.resolve();
       if (socialRefreshInFlight) {
@@ -2427,6 +2448,7 @@ function App() {
       if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
     } else {
       refreshBadge();
+      if (route.name === 'home') refreshLiveWorkoutFeed();
     }
     const nextFailureDelay = failures => [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
     const scheduleFeed = delay => {
@@ -2455,6 +2477,10 @@ function App() {
       pendingResources.clear();
       if (routeRef.current.name !== 'friends') {
         refreshBadge();
+        if (routeRef.current.name === 'home'
+            && (resources.has('feed') || resources.has('dashboard') || resources.has('relationships') || resources.has('authoritative'))) {
+          refreshLiveWorkoutFeed();
+        }
         return;
       }
       const onlyTargeted = [...resources].every(resource => resource === 'messages' || resource === 'feed');
