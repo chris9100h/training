@@ -9525,6 +9525,19 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
       sodiumMg: editItem.sodiumMg != null ? Math.round(editItem.sodiumMg * factor) : null,
     };
   }, [editItem, editGrams, editCountMode, editCountStr, store.settings?.netCarbs]); // eslint-disable-line react-hooks/exhaustive-deps
+  const editRecipeProjection = useMemoFd(() => {
+    if (!editItem || !editItemPreview) return null;
+    const nextItems = items.map(item => item.id === editItem.id
+      ? { ...item, ...editItemPreview, quantityG: Math.round(editEffectiveGrams) }
+      : item);
+    const sum = key => nextItems.reduce((a, item) => a + (item[key] || 0), 0);
+    return {
+      calories: Math.round(fdRecipeItemsCalories(nextItems, netCarbs)),
+      protein: fdRound1(sum('protein')),
+      carbs: fdRound1(sum('carbs')),
+      fat: fdRound1(sum('fat')),
+    };
+  }, [items, editItem, editItemPreview, editEffectiveGrams, netCarbs]);
   // Rescales every field on the item by the same factor (newGrams/oldGrams)
   // rather than re-deriving per-100g rates: mathematically identical, one
   // fewer intermediate step. In count mode the effective grams are the
@@ -9817,7 +9830,8 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
         </Field>
         {editItemPreview && (
           <FdMacroPreview calories={editItemPreview.calories} protein={editItemPreview.protein} carbs={editItemPreview.carbs} fat={editItemPreview.fat}
-            sugar={editItemPreview.sugar} satFat={editItemPreview.satFat} sodiumMg={editItemPreview.sodiumMg} />
+            sugar={editItemPreview.sugar} satFat={editItemPreview.satFat} sodiumMg={editItemPreview.sodiumMg}
+            recipeProjection={editRecipeProjection ? { totals: editRecipeProjection } : undefined} />
         )}
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={removeEditItem} aria-label="Remove ingredient" style={{ ...fdSideBtn, width: 44, flexShrink: 0 }}>
@@ -9847,7 +9861,15 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
           excludeRecipeId keeps this very recipe out of that list, a recipe
           cannot include itself. The Log-tab and Cooking Mode call sites pass
           neither and keep the tab hidden. */}
-      <FdIngredientPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addItems} store={store} showRecipes excludeRecipeId={recipe?.id} />
+      <FdIngredientPicker
+        open={pickerOpen}
+        onClose={() => setPickerOpen(false)}
+        onAdd={addItems}
+        store={store}
+        showRecipes
+        excludeRecipeId={recipe?.id}
+        recipeBaseTotals={totals}
+      />
     </Screen>
   );
 }
@@ -10843,7 +10865,7 @@ function FdIngredientPicker(props) {
   if (!props.open) return null;
   return React.createElement(FdIngredientPickerOpen, props);
 }
-function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excludeRecipeId, dayTotals, dayTarget, dayReplace, dayCurrentAddition }) {
+function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excludeRecipeId, dayTotals, dayTarget, dayReplace, dayCurrentAddition, recipeBaseTotals }) {
   const [confirmEl, confirm] = useConfirm();
   const [pickTab, setPickTab] = useStateFd('search');
   const [listVisibleCount, setListVisibleCount] = useStateFd(24);
@@ -11289,6 +11311,24 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
       fat: fdRound1((dayCurrentAddition.fat || 0) + stagedTotals.fat + qtyPreview.fat),
     };
   }, [dayCurrentAddition, stagedTotals, qtyPreview]);
+  const pickerRecipeProjection = useMemoFd(() => {
+    if (!recipeBaseTotals || !qtyPreview) return null;
+    return {
+      calories: (recipeBaseTotals.calories || 0) + stagedTotals.calories + qtyPreview.calories,
+      protein: fdRound1((recipeBaseTotals.protein || 0) + stagedTotals.protein + qtyPreview.protein),
+      carbs: fdRound1((recipeBaseTotals.carbs || 0) + stagedTotals.carbs + qtyPreview.carbs),
+      fat: fdRound1((recipeBaseTotals.fat || 0) + stagedTotals.fat + qtyPreview.fat),
+    };
+  }, [recipeBaseTotals, stagedTotals, qtyPreview]);
+  const pickerRecipeStagedProjection = useMemoFd(() => {
+    if (!recipeBaseTotals || !staged.length) return null;
+    return {
+      calories: (recipeBaseTotals.calories || 0) + stagedTotals.calories,
+      protein: fdRound1((recipeBaseTotals.protein || 0) + stagedTotals.protein),
+      carbs: fdRound1((recipeBaseTotals.carbs || 0) + stagedTotals.carbs),
+      fat: fdRound1((recipeBaseTotals.fat || 0) + stagedTotals.fat),
+    };
+  }, [recipeBaseTotals, staged, stagedTotals]);
 
   // Sibling Sheets, not nested in each other's children (the app's
   // documented overlay convention, docs/internals.md "Modal-/Overlay-
@@ -11485,6 +11525,11 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
               <span className="num" style={{ fontSize: 18, fontWeight: 300, color: UI.ink }}>{stagedTotals.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
               <FdMacroGhosts protein={stagedTotals.protein} carbs={stagedTotals.carbs} fat={stagedTotals.fat} />
             </div>
+            {pickerRecipeStagedProjection && (
+              <div style={{ marginBottom: 10 }}>
+                <FdRecipeMacroProjection totals={pickerRecipeStagedProjection} />
+              </div>
+            )}
             <div style={{ display: 'flex', flexDirection: 'column', gap: 2, maxHeight: 168, overflowY: 'auto' }}>
               {staged.map(i => (
                 <div key={i.tempId} style={fdDraftRow}>
@@ -11544,7 +11589,8 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
                   addition: pickerDayProjectionAddition,
                   target: dayTarget,
                   replace: dayReplace,
-                } : undefined} />
+                } : undefined}
+                recipeProjection={recipeBaseTotals ? { totals: pickerRecipeProjection } : undefined} />
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={closeQtySheet} style={{ flex: 1 }}>Cancel</Btn>
@@ -12702,7 +12748,25 @@ function FdDayMacroProjection({ baseTotals, addition, target, replace }) {
   );
 }
 
-function FdMacroPreview({ calories, protein, carbs, fat, sugar, satFat, sodiumMg, marginBottom = 16, dayProjection }) {
+// The same compact forecast for the recipe editor. Unlike the day projection,
+// this is the whole recipe batch after the currently picked ingredient (and
+// any earlier picks in the same picker visit) is added.
+function FdRecipeMacroProjection({ totals }) {
+  if (!totals) return null;
+  return (
+    <div style={{ padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
+        <span className="micro" style={{ color: 'var(--accent)' }}>Recipe after adding</span>
+        <span className="num" style={{ color: UI.warn, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>{Math.round(totals.calories)} kcal</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'center', fontSize: 12 }}>
+        <FdMacroBits protein={totals.protein} carbs={totals.carbs} fat={totals.fat} strong />
+      </div>
+    </div>
+  );
+}
+
+function FdMacroPreview({ calories, protein, carbs, fat, sugar, satFat, sodiumMg, marginBottom = 16, dayProjection, recipeProjection }) {
   return (
     <div style={{ marginBottom, textShadow: 'none' }}>
       <div style={{ padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6 }}>
@@ -12716,6 +12780,11 @@ function FdMacroPreview({ calories, protein, carbs, fat, sugar, satFat, sodiumMg
       {dayProjection && (
         <div style={{ marginTop: 8 }}>
           <FdDayMacroProjection {...dayProjection} />
+        </div>
+      )}
+      {recipeProjection && (
+        <div style={{ marginTop: 8 }}>
+          <FdRecipeMacroProjection {...recipeProjection} />
         </div>
       )}
     </div>
