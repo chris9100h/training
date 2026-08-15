@@ -189,7 +189,15 @@ function socialSanitizePlanSchedule(raw, idMap) {
   return result;
 }
 
-function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comment, setComment, sending, send }) {
+function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comment, setComment, sending, send, error }) {
+  const [cheerPickerOpen, setCheerPickerOpen] = useStateF(false);
+
+  const chooseCheer = async cheer => {
+    if (sending) return;
+    const sent = await send(`${cheer.emoji} ${cheer.text}`, 'cheer');
+    if (sent) setCheerPickerOpen(false);
+  };
+
   return (
     <div>
       <button type="button" onClick={() => setCommentsOpen(open => !open)} aria-expanded={commentsOpen} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, padding: '10px 11px', borderRadius: 4, border: `var(--hair-width) solid ${commentsOpen ? UI.goldSoft : UI.hairStrong}`, background: commentsOpen ? UI.goldFaint : 'transparent', color: commentsOpen ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>
@@ -199,9 +207,28 @@ function SocialCommentsPanel({ detail, live, commentsOpen, setCommentsOpen, comm
       {commentsOpen && <div style={{ marginTop: 8 }}>
         {live && <>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>CHEER THEM ON</div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {SOCIAL_CHEER_OPTIONS.map(cheer => <button key={cheer.text} onClick={() => send(cheer.text, 'cheer')} disabled={sending} style={{ padding: '8px 10px', borderRadius: 4, border: `var(--hair-width) solid ${UI.goldSoft}`, background: UI.goldFaint, color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, cursor: sending ? 'default' : 'pointer' }}>{cheer.text}</button>)}
-          </div>
+          <Btn kind="ghost" onClick={() => setCheerPickerOpen(true)} disabled={sending} style={{ width: '100%', padding: '10px 12px', minHeight: 0, color: UI.gold, borderColor: UI.goldSoft }}>
+            <span style={{ marginRight: 7 }}>💬</span> Cheer
+          </Btn>
+          <Sheet open={cheerPickerOpen} onClose={() => setCheerPickerOpen(false)} title="Pick a cheer" titleColor={UI.gold} center accent>
+            <div className="micro" style={{ color: UI.inkFaint, marginBottom: 12 }}>Choose a quick message to send.</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+              {SOCIAL_CHEER_OPTIONS.map(cheer => (
+                <button key={cheer.text} type="button" onClick={() => chooseCheer(cheer)} disabled={sending} style={{
+                  minWidth: 0, minHeight: 86, padding: '12px 8px', borderRadius: 6,
+                  border: `1px solid ${UI.goldSoft}`, background: UI.goldFaint,
+                  color: UI.ink, fontFamily: UI.fontUi, cursor: sending ? 'default' : 'pointer',
+                  display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 7,
+                  opacity: sending ? 0.6 : 1, WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span aria-hidden="true" style={{ fontSize: 28, lineHeight: 1 }}>{cheer.emoji}</span>
+                  <span style={{ fontSize: 11, lineHeight: 1.2, textAlign: 'center' }}>{cheer.text}</span>
+                </button>
+              ))}
+            </div>
+            {error && <div style={{ marginTop: 10, color: UI.danger, fontFamily: UI.fontUi, fontSize: 12 }}>{error}</div>}
+            <Btn kind="ghost" onClick={() => setCheerPickerOpen(false)} disabled={sending} style={{ width: '100%', marginTop: 12, minHeight: 0, padding: '10px 12px' }}>Cancel</Btn>
+          </Sheet>
         </>}
         <div style={{ marginTop: live ? 10 : 0 }}>
           <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>COMMENTS</div>
@@ -278,14 +305,16 @@ function SocialWorkoutSheet({ workout, onClose }) {
 
   const send = async (body, kind = 'comment') => {
     const text = String(body || '').trim();
-    if (!text || sending) return;
+    if (!text || sending) return false;
     setSending(true);
     try {
       const next = await LB.sendSocialWorkoutComment(workout.sessionId, text, kind);
       setDetail(current => current ? { ...current, comments: [...(current.comments || []), next] } : current);
       setComment('');
+      return true;
     } catch (e) {
       setError(e.message || 'Could not send comment');
+      return false;
     } finally {
       setSending(false);
     }
@@ -305,7 +334,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
       <span className="micro" style={{ color: live ? UI.gold : UI.inkFaint }}>{live ? 'LIVE' : 'FINISHED'}</span>
     }>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        {live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} />}
+        {live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} error={error} />}
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
           <div className="display" style={{ color: UI.ink, fontSize: 24 }}>{session.dayName || 'Workout'}</div>
           <div className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{socialDate(session.startedAt || session.date)}</div>
@@ -357,7 +386,7 @@ function SocialWorkoutSheet({ workout, onClose }) {
             })}
           </div>
         </div>}
-        {!live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} />}
+        {!live && <SocialCommentsPanel detail={detail} live={live} commentsOpen={commentsOpen} setCommentsOpen={setCommentsOpen} comment={comment} setComment={setComment} sending={sending} send={send} error={error} />}
       </div>
     </Sheet>
   );
