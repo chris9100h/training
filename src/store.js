@@ -960,6 +960,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     rest_big: sett.restBig || 180,
     rest_medium: sett.restMedium || 120,
     rest_small: sett.restSmall || 90,
+    auto_open_rest_timer: sett.autoOpenRestTimer ?? false,
     push_enabled: sett.pushEnabled ?? false,
     pushover_user_key: sett.pushoverUserKey ?? null,
     use_pushover: sett.usePushover ?? false,
@@ -1747,6 +1748,7 @@ function mapUserSettings(sett = {}) {
     restBig: sett.rest_big || 180,
     restMedium: sett.rest_medium || 120,
     restSmall: sett.rest_small || 90,
+    autoOpenRestTimer: sett.auto_open_rest_timer ?? false,
     pushEnabled: sett.push_enabled ?? false,
     pushoverUserKey: sett.pushover_user_key ?? null,
     usePushover: sett.use_pushover ?? false,
@@ -3308,6 +3310,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.restBig         !== next.settings?.restBig         ||
     prev.settings?.restMedium      !== next.settings?.restMedium      ||
     prev.settings?.restSmall       !== next.settings?.restSmall       ||
+    prev.settings?.autoOpenRestTimer !== next.settings?.autoOpenRestTimer ||
     prev.settings?.pushEnabled     !== next.settings?.pushEnabled     ||
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.usePushover      !== next.settings?.usePushover      ||
@@ -3384,6 +3387,7 @@ async function syncStore(prev, next, userId) {
       rest_big:     next.settings?.restBig     || 180,
       rest_medium:  next.settings?.restMedium  || 120,
       rest_small:   next.settings?.restSmall   || 90,
+      auto_open_rest_timer: next.settings?.autoOpenRestTimer ?? false,
       push_enabled: next.settings?.pushEnabled ?? false,
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
       use_pushover: next.settings?.usePushover ?? false,

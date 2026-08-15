@@ -391,6 +391,7 @@ CREATE TABLE public.zane_user_settings (
   rest_big integer DEFAULT 180,
   rest_medium integer DEFAULT 120,
   rest_small integer DEFAULT 90,
+  auto_open_rest_timer boolean NOT NULL DEFAULT false,
   cycle_week_view boolean DEFAULT false,
   accent_color text DEFAULT 'gold'::text,
   dark_mode text DEFAULT 'dark'::text,

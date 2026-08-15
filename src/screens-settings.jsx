@@ -3700,6 +3700,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             ))}
           </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            <Row label="Open rest timer automatically" first>
+              <Toggle on={!!store.settings?.autoOpenRestTimer} onToggle={() => setStore(s => ({ ...s, settings: { ...s.settings, autoOpenRestTimer: !s.settings?.autoOpenRestTimer } }))} />
+            </Row>
+            <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.5 }}>
+              Open the rest sheet as soon as a rest starts after a completed set. Off by default.
+            </div>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '8px 10px', background: UI.bgRaised, borderRadius: 6, border: `1px solid ${UI.hairStrong}` }}>
             {[['BIG', 'Heavy compounds, squat, deadlift, overhead press'], ['MEDIUM', 'Moderate compounds, bench, pull-up, lunge'], ['SMALL', 'Isolation, bicep curl, lateral raise, tricep extension']].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', gap: 8, alignItems: 'baseline' }}>

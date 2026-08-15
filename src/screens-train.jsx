@@ -1527,7 +1527,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), 300);
       } else {
         // Round complete: start rest
-        persistRestStart(Date.now(), restDef);
+        persistRestStart(Date.now(), restDef, { openModal: true });
         const allGroupDone = updatedSets.every(resolved) && partners.every(({ e }) => partnerWorkingSets(e).every(resolved));
         if (allGroupDone) {
           const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
@@ -1550,7 +1550,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     } else {
       if (!entry.sets[setIdx]?.warmup) {
-        persistRestStart(Date.now(), restDef);
+        persistRestStart(Date.now(), restDef, { openModal: true });
       }
       if (updatedSets.every(resolved)) {
         const nextEntry = session.entries[exIdx + 1];
@@ -1956,7 +1956,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     finishSetNavigation(setIdx, updatedSets, overlayHoldMs, advanceFocus);
     // Last warmup set done → start 3-min rest, workout timer begins when rest expires
     if (isLastWarmupSet && !session.startedAt) {
-      persistRestStart(Date.now(), 180);
+      persistRestStart(Date.now(), 180, { openModal: true });
     }
   };
 
@@ -2415,7 +2415,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       setTimeout(() => updateSession(sess => ({ ...sess, currentExIdx: nextPartner.i })), jumpDelayMs);
       return true;
     }
-    persistRestStart(Date.now(), restDef);
+    persistRestStart(Date.now(), restDef, { openModal: true });
     const lastGroupIdx = Math.max(...session.entries.map((e, i) => e.supersetGroup === group ? i : -1));
     setTimeout(() => {
       if (lastGroupIdx + 1 >= session.entries.length) requestFinishOpen();
@@ -2836,11 +2836,17 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [restStart, setRestStart] = useStateT(() => session.restStart ?? null);
   const [restDuration, setRestDuration] = useStateT(() => session.restDuration ?? null);
 
-  const persistRestStart = (val, dur) => {
+  const persistRestStart = (val, dur, { openModal = false } = {}) => {
     setRestStart(val);
     const newDur = val !== null ? (dur ?? null) : null;
     setRestDuration(newDur);
     updateSession(sess => ({ ...sess, restStart: val, restDuration: newDur }));
+    // The preference is opt-in. Only the actual start of a rest (not the
+    // +/-30s controls inside the sheet) opens the sheet, and a zero-second
+    // rest remains a no-op from the user's point of view.
+    if (val !== null && openModal && newDur > 0 && store.settings?.autoOpenRestTimer) {
+      setRestModalOpen(true);
+    }
     if (val !== null) {
       if (store.settings?.pushEnabled) {
         const def = newDur ?? restDef;
@@ -6500,11 +6506,11 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
         : e),
     }));
-    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef); return; }
+    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef, { openModal: true }); return; }
     // Superset/giant-set aware: jump to whichever partner still has open
     // sets instead of blindly advancing past the whole group.
     if (!advanceIntoGroupOrPartner(300)) {
-      persistRestStart(Date.now(), restDef);
+      persistRestStart(Date.now(), restDef, { openModal: true });
       setTimeout(() => navigate(1), 600);
     }
   };
