@@ -11176,6 +11176,7 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
   const explodePreview = useMemoFd(() => {
     if (!explodeRecipe || !explodeFactor) return null;
     const exploded = fdExplodeRecipeItems(explodeRecipe, explodeFactor, store.foodRecipes, null, !!store.settings?.netCarbs);
+    const sum = key => exploded.reduce((a, item) => a + (item[key] || 0), 0);
     return {
       count: exploded.length,
       // Sum of the per-row rounded calories fdScaleRecipeItem stores, i.e.
@@ -11186,8 +11187,20 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
       // round-of-sum figures on the Recipes-tab row and the editor's batch
       // hero, the app's documented rounding tolerance for this class.
       calories: Math.round(exploded.reduce((a, i) => a + (i.calories || 0), 0)),
+      protein: fdRound1(sum('protein')),
+      carbs: fdRound1(sum('carbs')),
+      fat: fdRound1(sum('fat')),
     };
   }, [explodeRecipe, explodeFactor, store.foodRecipes, store.settings?.netCarbs]);
+  const explodeRecipeProjection = useMemoFd(() => {
+    if (!recipeBaseTotals || !explodePreview) return null;
+    return {
+      calories: (recipeBaseTotals.calories || 0) + stagedTotals.calories + explodePreview.calories,
+      protein: fdRound1((recipeBaseTotals.protein || 0) + stagedTotals.protein + explodePreview.protein),
+      carbs: fdRound1((recipeBaseTotals.carbs || 0) + stagedTotals.carbs + explodePreview.carbs),
+      fat: fdRound1((recipeBaseTotals.fat || 0) + stagedTotals.fat + explodePreview.fat),
+    };
+  }, [recipeBaseTotals, stagedTotals, explodePreview]);
   // "Add N ingredients" on the explode sheet: the exploded rows join staged
   // like any other pick, so the batch totals above and the commit contract
   // below need zero changes. Food rows only get ensureFoodCached fired for
@@ -11635,10 +11648,17 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
               </div>
             )}
             {explodePreview && (
-              <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 16 }}>
-                <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{explodePreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
-                <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{explodePreview.count} ingredient{explodePreview.count === 1 ? '' : 's'} added</span>
-              </div>
+              <>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 14, marginBottom: 10 }}>
+                  <span className="num" style={{ fontSize: 20, fontWeight: 300, color: UI.ink }}>{explodePreview.calories}<span style={{ fontSize: 10, color: UI.inkFaint, marginLeft: 3 }}>kcal</span></span>
+                  <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}>{explodePreview.count} ingredient{explodePreview.count === 1 ? '' : 's'} added</span>
+                </div>
+                {explodeRecipeProjection && (
+                  <div style={{ marginBottom: 16 }}>
+                    <FdRecipeMacroProjection totals={explodeRecipeProjection} />
+                  </div>
+                )}
+              </>
             )}
             <div style={{ display: 'flex', gap: 8 }}>
               <Btn kind="ghost" onClick={closeExplodeSheet} style={{ flex: 1 }}>Cancel</Btn>
@@ -12753,14 +12773,21 @@ function FdDayMacroProjection({ baseTotals, addition, target, replace }) {
 // any earlier picks in the same picker visit) is added.
 function FdRecipeMacroProjection({ totals }) {
   if (!totals) return null;
+  const metric = (label, key, color, align) => (
+    <span className="num" style={{ color, fontSize: 11, fontWeight: 700, textAlign: align, whiteSpace: 'nowrap' }}>
+      {label} {Math.round(totals[key] || 0)}g
+    </span>
+  );
   return (
     <div style={{ padding: '10px 12px', background: 'rgba(var(--accent-rgb),0.06)', border: `var(--hair-width) dashed ${UI.hairStrong}`, borderRadius: 6, textShadow: 'none' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 8, marginBottom: 7 }}>
         <span className="micro" style={{ color: 'var(--accent)' }}>Recipe after adding</span>
         <span className="num" style={{ color: UI.warn, fontSize: 13, fontWeight: 700, whiteSpace: 'nowrap' }}>{Math.round(totals.calories)} kcal</span>
       </div>
-      <div style={{ display: 'flex', justifyContent: 'center', fontSize: 12 }}>
-        <FdMacroBits protein={totals.protein} carbs={totals.carbs} fat={totals.fat} strong />
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+        {metric('P', 'protein', FD_MACRO_COLORS.protein, 'left')}
+        {metric('C', 'carbs', FD_MACRO_COLORS.carbs, 'center')}
+        {metric('F', 'fat', FD_MACRO_COLORS.fat, 'right')}
       </div>
     </div>
   );
