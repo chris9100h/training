@@ -22,6 +22,18 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.793',
+    date: '2026-08-15',
+    title: 'Smoother workouts, calmer Friends 💪',
+    items: [
+      '⏱️ Want the rest timer right in front of you? Turn on “Open rest timer automatically” in Settings → Training → Session → Rest timers. It opens after a completed set and respects Supersets and Giant Sets without interrupting the middle of a round.',
+      '📶 Short connection or database problems no longer have to throw you out of your account. Active workouts and sets logged offline stay on your device and sync when the connection returns.',
+      '🤝 Friends starts faster and no longer unexpectedly reloads the whole page while you are looking at it.',
+      '📐 Friends navigation now fits neatly on the screen, with no horizontal scrolling.',
+      '✨ A broad reliability pass also made loading, syncing and recovery from temporary connection problems safer across the app.'
+    ],
+  },
+  {
     id: 'v2.776',
     date: '2026-08-13',
     title: 'Train together, on your terms 🤝',
