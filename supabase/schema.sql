@@ -422,10 +422,10 @@ CREATE TABLE public.zane_user_settings (
   show_water_tab boolean NOT NULL DEFAULT false,   -- 0222: independent of show_health_tab, see docs/database.md
   show_food_tab boolean NOT NULL DEFAULT false,    -- 0222
   show_friends_tab boolean NOT NULL DEFAULT false, -- 0264: opt-in Friends preview tab
-  social_push_messages boolean NOT NULL DEFAULT true, -- 20260815090000: direct/group message push
-  social_push_friend_requests boolean NOT NULL DEFAULT true, -- 20260815090000
-  social_push_finished_comments boolean NOT NULL DEFAULT false, -- 20260815090000
-  social_push_friend_started boolean NOT NULL DEFAULT false, -- 20260815090000
+  social_push_messages boolean NOT NULL DEFAULT true, -- 20260815090739: direct/group message push
+  social_push_friend_requests boolean NOT NULL DEFAULT true, -- 20260815090739
+  social_push_finished_comments boolean NOT NULL DEFAULT false, -- 20260815090739
+  social_push_friend_started boolean NOT NULL DEFAULT false, -- 20260815090739
   weight_fill_down boolean NOT NULL DEFAULT true,
   manual_calories boolean NOT NULL DEFAULT false,
   onboarding_completed boolean DEFAULT false,
