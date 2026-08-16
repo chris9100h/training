@@ -2602,8 +2602,8 @@ function App() {
     // durable app data, and syncStore deliberately has no friends write path.
     // Do not let one of those read-only refreshes wake the durable sync queue:
     // otherwise a stale unrelated local write can turn a successful social RPC
-    // into a red "not synced" indicator. Keep the snapshot persisted locally,
-    // but leave the normal write/retry state untouched.
+    // into a red "not synced" indicator. The local snapshot helper deliberately
+    // omits this volatile surface, so leave the cache untouched as well.
     const previous = prevStore.current;
     const onlyFriendsChanged = previous && previous !== store && (() => {
       const keys = new Set([...Object.keys(previous), ...Object.keys(store)]);
@@ -2616,7 +2616,6 @@ function App() {
     prevStore.current = store;
     pendingStore.current = store;
     if (onlyFriendsChanged) {
-      scheduleLocalSave();
       return;
     }
     if (store !== syncBase.current) setSyncStatus('pending');

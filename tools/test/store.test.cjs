@@ -196,6 +196,14 @@ async function testAsync(name, fn) {
     assert.strictEqual(loaded.base, loaded.store);
   });
 
+  test('local cache omits the volatile Friends snapshot so it cannot consume the offline quota', () => {
+    const state = { user: { name: 'A' }, sessions: [], friends: { messages: [{ body: 'hello' }] } };
+    assert.strictEqual(LB.saveSyncedState(state, 'friends-cache-user'), true);
+    const loaded = LB.loadLocalState('friends-cache-user');
+    assert.strictEqual(loaded.store.friends, undefined);
+    assert.deepStrictEqual(loaded.store.sessions, []);
+  });
+
   test('saveLocalState folds a distinct base into the same atomic entry only while local edits are pending', () => {
     const base = { settings: { unit: 'kg' }, sessions: [] };
     const edited = { settings: { unit: 'lbs' }, sessions: [] };

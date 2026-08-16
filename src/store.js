@@ -6053,15 +6053,27 @@ function loadLocalState(userId) {
 // "equals store") so the next boot parses a smaller payload. Repeated idle
 // saves reuse the previous serialized string when the immutable store/base
 // references did not change.
+function stripFriendsSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || !Object.prototype.hasOwnProperty.call(snapshot, 'friends')) return snapshot;
+  const { friends: _friends, ...durable } = snapshot;
+  return durable;
+}
+
 function saveLocalState(store, base, userId) {
   try {
     const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
     const baseIsStore = !base || base === store;
     const effectiveBase = baseIsStore ? store : base;
+    // Friends is a volatile, server-authoritative surface. Persisting its
+    // message/feed/group snapshot doubles the cache during pending writes and
+    // can exceed iOS localStorage quota, which then falsely turns the global
+    // sync indicator red. Training data remains fully cached offline.
+    const persistedStore = stripFriendsSnapshot(store);
+    const persistedBase = baseIsStore ? null : stripFriendsSnapshot(base);
     const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
       ? prev.raw
-      : JSON.stringify({ v: 2, store, base: baseIsStore ? null : base });
+      : JSON.stringify({ v: 2, store: persistedStore, base: persistedBase });
     if (prev.raw !== raw) localStorage.setItem(pairKey, raw);
     // Best-effort cleanup of the pre-migration two-key format: a failure
     // here does not affect the atomic pair write above, which already
