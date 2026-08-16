@@ -2079,6 +2079,49 @@ async function testAsync(name, fn) {
     assert.strictEqual(row.targetsSnapshot.caloriesTraining, 2200);
   });
 
+  test('adaptiveTdeeHistoryRow: preserves a kept-without-apply decision', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const row = LB.adaptiveTdeeHistoryRow({ dailyLogs: days }, 'user-1', '2025-01-14', {
+      decision: 'kept',
+      source: 'live',
+      targetsSnapshot: { caloriesTraining: 2200, weeklyAverageCalories: 2086 },
+    });
+    assert.ok(row);
+    assert.strictEqual(row.decision, 'kept');
+    assert.strictEqual(row.targetsSnapshot.weeklyAverageCalories, 2086);
+  });
+
+  test('canUndoMacroApply: allows undo only while the applied targets are still active', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedTargets: applied,
+      lastApplyPreviousTargets: previous,
+      lastApplyRolledBackAt: null,
+    } };
+    assert.strictEqual(LB.canUndoMacroApply(settings), true);
+    assert.strictEqual(LB.canUndoMacroApply({ ...settings, macroTargets: { ...applied, carbsTraining: 251 } }), false);
+    assert.strictEqual(LB.canUndoMacroApply({ ...settings, macroCalc: { ...settings.macroCalc, lastApplyRolledBackAt: '2025-01-15T12:00:00.000Z' } }), false);
+  });
+
+  test('rollbackMacroApply: restores the previous snapshot and is one-shot', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedAt: '2025-01-14', lastAppliedTargets: applied,
+      lastApplyPreviousTargets: previous, lastApplyRolledBackAt: null,
+    } };
+    const rolledBack = LB.rollbackMacroApply(settings, '2025-01-15T12:00:00.000Z');
+    assert.deepStrictEqual(rolledBack.macroTargets, previous);
+    assert.strictEqual(rolledBack.macroCalc.lastAppliedTargets, applied);
+    assert.strictEqual(rolledBack.macroCalc.lastApplyRolledBackAt, '2025-01-15T12:00:00.000Z');
+    assert.strictEqual(LB.rollbackMacroApply(rolledBack, '2025-01-16T12:00:00.000Z'), rolledBack);
+    assert.strictEqual(settings.macroTargets, applied);
+  });
+
   test('reconstructAdaptiveTdeeHistory: uses only reliable macroCalc anchors', () => {
     const days = [];
     for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });

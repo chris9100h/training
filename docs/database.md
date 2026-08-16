@@ -582,12 +582,13 @@ Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
 - tdee_kcal/avg_calories_kcal (integer): gelöster Erhaltungsbedarf und durchschnittliche Kalorienaufnahme
 - weight_start_kg/weight_end_kg/weight_change_kg (numeric): Mittelwerte der ersten und zweiten Hälfte der Wiegedaten sowie deren Veränderung
 - weight_rate_kg_week (numeric), day_span (integer), calorie_days/weigh_ins (integer): Wochenrate und Transparenzwerte zur Datenbasis
-- decision (applied | skipped | reconstructed): Apply, Skip oder aus den vorhandenen Logs nachgebaut
+- decision (applied | kept | skipped | reconstructed): Apply, Leave as is, Skip oder aus den vorhandenen Logs nachgebaut
 - source (live | reconstructed): beim Check-in live berechnet oder nachträglich rekonstruiert
-- targets_snapshot (jsonb, nullable): eingefrorener Check-in-Vorschlag mit Training/Rest-Zielen, Wochenmittel, deltaKcal, Ziel und Rate; decision zeigt, ob er angewendet oder übersprungen wurde
+- targets_snapshot (jsonb, nullable): eingefrorener Check-in-Vorschlag mit Training/Rest-Zielen, Wochenmittel, deltaKcal, Ziel und Rate; decision zeigt, ob er angewendet, bewusst beibehalten oder übersprungen wurde
 - Ältere Snapshots ohne Wochenmittel werden beim Laden kompatibel ergänzt und einmalig zurückgeschrieben; die ursprüngliche Entscheidung und der Live-/Rebuilt-Status bleiben dabei erhalten.
 - calculated_at, decided_at, created_at, updated_at (timestamptz)
 - Store field: store.adaptiveTdeeHistory. Die bestehende zane_user_settings.macro_calc-Shape bleibt der aktuelle Formular-/Check-in-Zustand; die Historie wird nicht in dieses JSONB hineingeschrieben.
+- Beim letzten adaptiven Apply ergänzt `macroCalc` den persönlichen Vorher-Snapshot `lastApplyPreviousTargets` (Objekt oder `null`) und `lastApplyRolledBackAt` (ISO-Zeitstempel oder `null`). Damit kann ein versehentliches Apply einmalig zurückgesetzt werden; der Undo erscheint nur, solange die aktiven persönlichen Ziele noch exakt dem letzten `lastAppliedTargets`-Snapshot entsprechen, damit spätere manuelle oder synchronisierte Änderungen nicht überschrieben werden. Die JSONB-Spalte bleibt unverändert, daher ist dafür keine Migration nötig.
 - RLS: ausschließlich eigene Zeilen, kein Coach-Zugriff. Data-API-Rechte sind ausdrücklich auf authenticated beschränkt.
 - Backup: Teil des persönlichen User-Backups. Beim Restore wird die deterministische ID für den Ziel-User neu gebildet.
 

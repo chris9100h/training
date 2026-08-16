@@ -3055,6 +3055,7 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 // lose a fight for attention against the coach-info / SET-EDIT clutter.
 function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
   const calc = store.settings?.macroCalc || {};
+  const [confirmEl, confirm] = useConfirm();
   const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
   // Offered while coached too now: a coach's numbers still always win (see
   // effectiveMacroTargets, unchanged), Apply below only ever touches the
@@ -3125,6 +3126,23 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   // taken over since, or automation could since be off), "I did tap Apply on
   // this date" stays true, and that's the thing to confirm here.
   const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
+  const canUndoLastApply = LB.canUndoMacroApply(store.settings);
+  const hasRollbackSnapshot = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets')
+    && calc.lastAppliedTargets != null;
+  const undoLastApply = async () => {
+    // Re-check at click time: a background sync may have changed the active
+    // targets since this render. Never replace a newer/manual value.
+    if (!LB.canUndoMacroApply(store.settings)) {
+      await confirm('The active targets changed after that Apply, so restoring the older values is no longer safe.', {
+        title: 'Cannot undo', ok: 'OK', cancel: null,
+      });
+      return;
+    }
+    if (!await confirm('Restore the personal macro targets that were active before this Apply?', {
+      title: 'Undo last Apply?', ok: 'Restore targets', cancel: 'Keep them',
+    })) return;
+    setStore(s => ({ ...s, settings: LB.rollbackMacroApply(s.settings) }));
+  };
 
   return (
     <>
@@ -3194,7 +3212,9 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
           <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>ALGORITHM ESTIMATE</span>
           {appliedDaysAgo != null && (
             <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-              {appliedDaysAgo <= 0 ? 'applied today' : appliedDaysAgo === 1 ? 'applied yesterday' : `applied ${appliedDaysAgo}d ago`}
+              {calc.lastApplyRolledBackAt
+                ? 'applied, then rolled back'
+                : appliedDaysAgo <= 0 ? 'applied today' : appliedDaysAgo === 1 ? 'applied yesterday' : `applied ${appliedDaysAgo}d ago`}
             </span>
           )}
         </div>
@@ -3238,6 +3258,25 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             </div>
           );
         })()}
+
+        {canUndoLastApply && (
+          <button data-reorder-ignore="true" onClick={undoLastApply} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            width: '100%', marginTop: 10, padding: '8px 10px',
+            background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+            borderRadius: 5, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10,
+            fontWeight: 700, letterSpacing: '0.05em', cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10, color: 'var(--accent)' }} />
+            Undo last Apply
+          </button>
+        )}
+        {!canUndoLastApply && hasRollbackSnapshot && !calc.lastApplyRolledBackAt && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Undo unavailable because the active targets changed after that Apply.
+          </div>
+        )}
 
         {status === 'insufficient' && (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
@@ -3306,6 +3345,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
         )}
       </div>
     </HealthChartCard>
+    {confirmEl}
     {/* Only reached when gain/cut is picked with no rate on file yet, see
         setGoal above: asks once, up front, rather than silently defaulting
         a number the user never chose. */}
@@ -3357,7 +3397,7 @@ function AdaptiveTdeeChart({ history }) {
       .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
     const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
     const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
-    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'kept' ? 'Kept as is' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
     const displayWeight = kg => {
       const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
       return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
@@ -3448,7 +3488,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
     () => history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null),
     [history, isLbs]
   );
-  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'kept' ? 'Kept as is' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
   const loading = loadStatus === 'loading' && !history.length;
   const loadError = loadStatus === 'error' && !history.length;
   return (
@@ -3502,7 +3542,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
                 <div key={row.asOfDate} style={{ background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderRadius: 6, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 5 }}>
                     <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.ink }}>{LB.fmtDayLabel(row.asOfDate, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: row.decision === 'applied' ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{statusLabel(row)}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: row.decision === 'applied' ? 'var(--accent)' : row.decision === 'kept' ? UI.gold : UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{statusLabel(row)}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
                     <span className="num" style={{ fontSize: 20, color: 'var(--accent)' }}>{row.tdee}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span></span>
@@ -3532,11 +3572,12 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
 
 // The sheet the "Weekly check-in ready" CTA opens. A read-only report (window
 // average calories, weight trend, the freshly solved maintenance figure) plus
-// the one real decision: apply the recalibrated targets or skip this week.
-// Skipping still counts as "handled", same as Apply: lastCheckinAt moves to
-// today either way, that is what stops the nag, not whether the numbers
-// actually changed. Never applies anything on its own; see MacroEstimatorSheet
-// for the same "estimate is a prefill, not a save" philosophy this mirrors.
+// three explicit decisions: skip the result for now, record the check-in while
+// keeping the current macros, or apply the recalibrated targets. Skip and Keep
+// both count as handled: lastCheckinAt moves to today either way, that is what
+// stops the nag. Only Apply touches macroTargets. Never applies anything on its
+// own; see MacroEstimatorSheet for the same "estimate is a prefill, not a save"
+// philosophy this mirrors.
 function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMacros, coachingMacros, onOpenSettings }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
@@ -3608,13 +3649,12 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
     : null;
 
-  // Both actions count as "handled this week": only Apply also touches
-  // macroTargets, lastCheckinAt moves to today either way. lastAppliedAt is
-  // separate and only ever set on an actual Apply, a plain historical marker
-  // ("the algorithm's numbers were last accepted on this date") for
-  // MacroSourceCard to surface, not something a later Skip should touch or
-  // clear.
-  const finish = (applyTargets) => {
+  // All three actions count as "handled this week": only Apply also touches
+  // macroTargets. lastAppliedAt is separate and only ever set on an actual
+  // Apply; Keep records the new suggestion in history without pretending it
+  // became active, and leaves the previous applied snapshot untouched.
+  const finish = (decision) => {
+    const applyTargets = decision === 'applied';
     const asOfDate = LB.todayISO();
     const previousRows = LB.reconstructAdaptiveTdeeHistory(store, userId, [
       calc.lastCheckinAt,
@@ -3622,7 +3662,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     ]);
     const currentRow = adaptive?.ok
       ? LB.adaptiveTdeeHistoryRow(store, userId, asOfDate, {
-        decision: applyTargets && newTargets ? 'applied' : 'skipped',
+        decision: applyTargets && newTargets ? 'applied' : decision,
         source: 'live',
         targetsSnapshot: targetSnapshot,
       })
@@ -3653,7 +3693,15 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
           // what the algorithm actually said next to whatever is active NOW,
           // and macroTargets can drift away from this (a hand-edit, a coach
           // taking over) without this record changing to match it.
-          ...(applyTargets && newTargets ? { lastAppliedAt: LB.todayISO(), lastAppliedTargets: newTargets } : {}),
+          ...(applyTargets && newTargets ? {
+            lastAppliedAt: LB.todayISO(),
+            lastAppliedTargets: newTargets,
+            // Keep the exact personal targets that Apply replaced so an
+            // accidental tap can be reversed once. A null snapshot means the
+            // user had no personal targets before this first Apply.
+            lastApplyPreviousTargets: s.settings.macroTargets ?? null,
+            lastApplyRolledBackAt: null,
+          } : {}),
         },
       },
     }));
@@ -3817,9 +3865,12 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
                 <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
                 <span>You can adjust how the algorithm splits these macros anytime in settings.</span>
               </button>
-              <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-                <Btn kind="ghost" onClick={() => finish(false)} style={{ flex: 1 }}>Skip for now</Btn>
-                <Btn onClick={() => finish(true)} style={{ flex: 1 }}>Apply</Btn>
+              <div style={{ marginTop: 18 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <Btn kind="ghost" onClick={() => finish('skipped')}>Skip</Btn>
+                  <Btn kind="ghost" onClick={() => finish('kept')}>Leave as is</Btn>
+                </div>
+                <Btn onClick={() => finish('applied')} style={{ width: '100%', marginTop: 8 }}>Apply</Btn>
               </div>
             </>
           ) : (
@@ -3827,7 +3878,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
                 Log a bodyweight to see the recalibrated targets.
               </div>
-              <Btn kind="ghost" onClick={() => finish(false)} style={{ width: '100%' }}>Skip for now</Btn>
+              <Btn kind="ghost" onClick={() => finish('skipped')} style={{ width: '100%' }}>Skip</Btn>
             </>
           )}
         </>
@@ -4811,6 +4862,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         calc.lastCheckinAt ?? null,
         calc.lastAppliedAt ?? null,
         calc.lastAppliedTargets ?? null,
+        calc.lastApplyPreviousTargets ?? null,
+        calc.lastApplyRolledBackAt ?? null,
         calc.trainingDays ?? null,
         calc.goal ?? null,
         calc.rateKgPerWeek ?? null,

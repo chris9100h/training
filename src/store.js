@@ -8887,6 +8887,33 @@ function effectiveMacroTargets(personal, coachingMacros) {
   return null;
 }
 
+// A TDEE Apply is deliberately undoable once, but only while the active
+// personal targets are still exactly the values that Apply wrote. This guards
+// against silently overwriting a later manual edit (or a newer synced change).
+// The previous snapshot property must exist even when its value is null,
+// because "there were no personal targets before Apply" is a valid state.
+function canUndoMacroApply(settings) {
+  const calc = settings?.macroCalc || {};
+  const hasPrevious = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets');
+  if (!hasPrevious || calc.lastApplyRolledBackAt != null || calc.lastAppliedTargets == null) return false;
+  return syncValuesEqual(settings?.macroTargets ?? null, calc.lastAppliedTargets);
+}
+
+// Pure state transition used by the Health screen and unit tests. Keeping the
+// guard in the store layer gives every caller the same protection.
+function rollbackMacroApply(settings, rolledBackAt = new Date().toISOString()) {
+  if (!canUndoMacroApply(settings)) return settings;
+  const calc = settings.macroCalc || {};
+  return {
+    ...settings,
+    macroTargets: calc.lastApplyPreviousTargets,
+    macroCalc: {
+      ...calc,
+      lastApplyRolledBackAt: rolledBackAt,
+    },
+  };
+}
+
 // Compute the persisted adherence + target snapshot for a daily log at save
 // time, so a later target change never rewrites history. Returns
 // { adherence, targetsSnap }, both null when targets/macros are incomplete.
@@ -12747,7 +12774,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,

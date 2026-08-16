@@ -360,7 +360,7 @@ CREATE TABLE public.zane_adaptive_tdee_history (
   CONSTRAINT zane_adaptive_tdee_history_day_span_check CHECK ((day_span > 0)),
   CONSTRAINT zane_adaptive_tdee_history_calorie_days_check CHECK ((calorie_days > 0)),
   CONSTRAINT zane_adaptive_tdee_history_weigh_ins_check CHECK ((weigh_ins > 1)),
-  CONSTRAINT zane_adaptive_tdee_history_decision_check CHECK ((decision = ANY (ARRAY['applied'::text, 'skipped'::text, 'reconstructed'::text]))),
+  CONSTRAINT zane_adaptive_tdee_history_decision_check CHECK ((decision = ANY (ARRAY['applied'::text, 'kept'::text, 'skipped'::text, 'reconstructed'::text]))),
   CONSTRAINT zane_adaptive_tdee_history_source_check CHECK ((source = ANY (ARRAY['live'::text, 'reconstructed'::text])))
 );
 
