@@ -2923,7 +2923,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
     const rd = session.restDuration ?? null;
-    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+    // A rest persisted before the first working set is the large post-warmup
+    // countdown.  It must never reopen the ordinary Rest sheet after a reload;
+    // expiry will promote the session to startedAt below.
+    return !!(session.startedAt && rs && rd && Date.now() >= rs + rd * 1000);
   });
   const [confirmEl, confirm] = useConfirm();
   // Autoreg v2 P0: one-tap readiness prompt (Fresh / Normal / Rough), shown once
@@ -4665,7 +4668,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // 0) or a rest that elapsed while backgrounded. fireRestDone's
       // restFiredRef guard makes this idempotent, so a session that MOUNTS
       // already-expired (restExpired init true) or a second resume won't re-beep.
-      if (!restExpiredRef.current) { setRestExpired(true); fireRestDone(); }
+      // On a cold mount an expired post-warmup rest already has
+      // restExpired=true, so the old guard skipped fireRestDone forever and
+      // left the workout stuck before its first working set. The synchronous
+      // restFiredRef guard inside fireRestDone keeps this one-shot even when a
+      // visibility resume and the mount effect arrive together.
+      if (!restExpiredRef.current || !sessionRef.current.startedAt) {
+        setRestExpired(true);
+        fireRestDone();
+      }
       return;
     }
     setRestExpired(false);

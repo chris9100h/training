@@ -5904,6 +5904,11 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const bwB = LB.bodyweightForDate(store.dailyLogs, cmp.date);
   const volDelta = volA - volB;
   const volDeltaRounded = Math.round(volDelta);
+  // Cleanup is an intentional rebuild, not a performance comparison. A
+  // normal session may still use cleanup as its baseline, but a cleanup
+  // session itself must never paint its reduced loads as regressions. Deload
+  // remains non-comparative on either side, as before.
+  const comparisonSuppressed = !!(s.isDeload || s.isCleanup || cmp.isDeload);
   const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
   // isCardio may be missing on entries loaded from DB (not a DB column), fall
   // back to the exercise's movement_type, matching SessionDetailScreen.
@@ -5992,8 +5997,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
           </button>
         </div>
 
-        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
-          {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: comparisonSuppressed ? UI.inkFaint : volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
+          {comparisonSuppressed
+            ? 'Comparison not shown for cleanup/deload'
+            : <>{volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume</>}
           {/* Both sides get their own line: an explicit compare is just as often
               "today (post-cleanup) vs a pre-cleanup baseline" as the other way
               round, and only cmp used to be checked here, so that first case
@@ -6033,15 +6040,17 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               // however: cleanup is the intended last baseline for the rebuild.
               // Deload remains non-comparative on either side.
               const reducedInS = s.isDeload || (s.isCleanup && !s.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, s.dayId));
-              const reducedLoad = reducedInS || cmp.isDeload;
+              const reducedLoad = comparisonSuppressed || reducedInS || cmp.isDeload;
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
-                    {cmpEntry ? (
+                    {cmpEntry && !comparisonSuppressed ? (
                       <span className="num" style={{ fontSize: 12, color: entryDeltaRounded > 0 ? UI.gold : entryDeltaRounded < 0 ? UI.danger : UI.inkFaint, flexShrink: 0 }}>
                         {entryDeltaRounded > 0 ? '↑' : entryDeltaRounded < 0 ? '↓' : '—'} {Math.abs(entryDeltaRounded).toLocaleString('en-US')} {UI.unit()}
                       </span>
+                    ) : comparisonSuppressed ? (
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT COMPARED</span>
                     ) : (
                       <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
                     )}
@@ -6059,8 +6068,8 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     // exercise you already had a baseline for) when cmpEntry exists.
                     // If the whole exercise is new (NOT LOGGED THEN), there's nothing
                     // to have improved on, so every set stays neutral instead of "+".
-                    const icon = !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
-                    const iconColor = (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                    const icon = comparisonSuppressed ? '—' : !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = comparisonSuppressed ? UI.inkFaint : (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                       : declined ? UI.danger : UI.inkFaint;
                     const isLastSet = si === maxLen - 1;
                     const currIsTechnique = isTechniqueSet(curr);

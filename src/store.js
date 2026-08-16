@@ -2700,7 +2700,19 @@ function diffCollectionById(prevList, nextList) {
 // untouched server row back as a brand-new insert; if the user changed it
 // afterwards, the fingerprint no longer matches and the edit is uploaded.
 function diffWindowedCollectionById(prevList, nextList, collection) {
-  const diff = diffCollectionById(prevList, nextList);
+  // A lazy history row may have been removed after the first offline attempt.
+  // The confirmed server row is kept as a tombstone only after it was present
+  // in the local store (see rememberLocalDeletedRows below); carrying it into
+  // the next diff makes retries survive the sync base not containing that old
+  // row. Merely fetching a row never creates a tombstone, so stock backfills
+  // cannot accidentally turn into deletes.
+  const currentIds = new Set((nextList || []).map(row => row?.id).filter(id => id != null));
+  const remembered = _localDeletedRows.get(collection);
+  const deletedRows = remembered
+    ? [...remembered.values()].filter(row => row?.id != null && !currentIds.has(row.id))
+    : [];
+  const diff = diffCollectionById([...(prevList || []), ...deletedRows.filter(row => !(prevList || []).some(p => p?.id === row.id))], nextList);
+  if (diff.removed.length) rememberLocalDeletedRows(collection, diff.removed);
   const confirmed = _localConfirmedRows.get(collection);
   if (!confirmed || !diff.upsert.length) return diff;
   diff.upsert = diff.upsert.filter(row => {
@@ -2949,13 +2961,22 @@ async function syncStore(prev, next, userId) {
   let sessionUpserts = [];
   let sessionsUpsertOp = null;
   if (prev.sessions !== next.sessions) {
-    const prevSessMap = new Map(prev.sessions.map(x => [x.id, x]));
-    const nextSessIds = new Set(next.sessions.map(x => x.id));
+    const nextSessionIds = new Set(next.sessions.map(x => x.id));
+    const rememberedSessionDeletes = _localDeletedRows.get('sessions');
+    const carriedDeletedSessions = rememberedSessionDeletes
+      ? [...rememberedSessionDeletes.values()].filter(row => row?.id != null && !nextSessionIds.has(row.id))
+      : [];
+    const prevSessMap = new Map([
+      ...prev.sessions.map(x => [x.id, x]),
+      ...carriedDeletedSessions.filter(row => !prev.sessions.some(x => x.id === row.id)).map(x => [x.id, x]),
+    ]);
+    const nextSessIds = nextSessionIds;
     const upsert = next.sessions.filter(s => {
       const p = prevSessMap.get(s.id);
       return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
     });
-    const removed = prev.sessions.filter(s => !nextSessIds.has(s.id));
+    const removed = [...prevSessMap.values()].filter(s => !nextSessIds.has(s.id));
+    if (removed.length) rememberLocalDeletedRows('sessions', removed);
     if (upsert.length) {
       // Kept OUT of `ops`: that array is awaited below as one fail-fast batch,
       // so a single unrelated table failing anywhere in the same diff (a food
@@ -6040,6 +6061,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // forget which exercises the user had switched back to full load and the
       // per-exercise chip would flip back to showing them as reduced.
       ...(mem.cleanupOptOuts ? { cleanupOptOuts: mem.cleanupOptOuts } : {}),
+      // Old sessions keep only an entries digest after local compaction. Carry
+      // that marker through the cache-first merge as well as the private diff
+      // base; otherwise every cold start turns the empty relational payload
+      // into a fresh session change and re-upserts it unnecessarily.
+      ...(!keepCachedEntries && !mergedEntries && !(s.entries || []).length && mem._offlineEntriesDigest
+        ? { _offlineEntriesDigest: mem._offlineEntriesDigest }
+        : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -6089,6 +6117,33 @@ const _localSnapshotState = new Map();
 // Keep the registry bounded too: it is a process-local aid, never an archive.
 const _localConfirmedRows = new Map();
 const LOCAL_CONFIRMED_ROWS_MAX = 1000;
+// Rows fetched lazily and then deleted while offline need a durable marker.
+// Keep the complete row when available so a future boot can reconstruct the
+// last server baseline and emit the DELETE again. This registry is process
+// local; saveLocalState persists its entries into the paired baseline.
+const _localDeletedRows = new Map();
+
+function rememberLocalDeletedRows(collection, rows) {
+  if (!collection || !Array.isArray(rows) || !rows.length) return;
+  let map = _localDeletedRows.get(collection);
+  if (!map) { map = new Map(); _localDeletedRows.set(collection, map); }
+  for (const row of rows) {
+    if (!row || row.id == null) continue;
+    map.set(row.id, { ...row, __localDeletedTombstone: true });
+  }
+}
+
+function augmentBaselineWithDeletedRows(store, base) {
+  if (!_localDeletedRows.size) return base;
+  let out = base && typeof base === 'object' ? base : { ...(store || {}) };
+  for (const [collection, rowsById] of _localDeletedRows) {
+    const existing = Array.isArray(out[collection]) ? out[collection] : [];
+    const ids = new Set(existing.map(row => row?.id).filter(id => id != null));
+    const missing = [...rowsById.values()].filter(row => row?.id != null && !ids.has(row.id));
+    if (missing.length) out = { ...out, [collection]: [...existing, ...missing] };
+  }
+  return out;
+}
 
 function markLocalRowsConfirmed(collection, rows) {
   if (!collection || !Array.isArray(rows)) return;
@@ -6158,6 +6213,13 @@ function localCachePendingIds(store, base, now = new Date()) {
     const ids = new Set();
     const dateKey = key === 'adaptiveTdeeHistory' ? 'asOfDate' : 'date';
     const cutoff = historyWindowCutoffISO(now, key === 'sessions' ? HISTORY_WINDOW_DAYS : LOCAL_CACHE_WINDOWS[key]);
+    const currentIds = new Set(current.map(row => row?.id).filter(id => id != null));
+    // A deleted lazy row is intentionally absent from the live store, but its
+    // baseline tombstone must survive compaction until the server confirms the
+    // DELETE. Without this guard an old row was trimmed immediately on reload.
+    (previous || []).forEach(row => {
+      if (row?.__localDeletedTombstone && row.id != null && !currentIds.has(row.id)) ids.add(row.id);
+    });
     if (!previous && current.length) {
       // An older cache can predate a collection entirely. Preserve what it has
       // rather than guessing that those rows are safe to discard, except for
@@ -6426,6 +6488,7 @@ function loadLocalState(userId) {
     // A user switch must never let lazy rows from the previous account
     // influence the next account's pending-diff decision.
     _localConfirmedRows.clear();
+    _localDeletedRows.clear();
     const pairKey = `logbook-pair-${userId}`;
     let pairRaw = localStorage.getItem(pairKey);
     if (pairRaw) {
@@ -6528,20 +6591,24 @@ function saveLocalState(store, base, userId) {
   try {
     const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
-    const baseIsStore = !base || base === store;
+    const persistedBaseline = augmentBaselineWithDeletedRows(store, base);
+    const baseIsStore = !persistedBaseline || persistedBaseline === store;
     // Friends is a volatile, server-authoritative surface. Persisting its
     // message/feed/group snapshot doubles the cache during pending writes and
     // can exceed iOS localStorage quota, which then falsely turns the global
     // sync indicator red. Training data remains fully cached offline.
-    const protectedIds = baseIsStore ? {} : localCachePendingIds(store, base);
+    // Include the durable delete tombstones in the protection pass. Passing
+    // the pre-augmented base here would compact an old deleted row out of the
+    // very baseline that is supposed to retry its DELETE after a reload.
+    const protectedIds = baseIsStore ? {} : localCachePendingIds(store, persistedBaseline);
     const persistedStore = compactLocalSnapshot(store, protectedIds);
-    const candidateBase = baseIsStore ? null : compactLocalSnapshot(base, protectedIds);
+    const candidateBase = baseIsStore ? null : compactLocalSnapshot(persistedBaseline, protectedIds);
     // A separately-created object can still represent the exact same durable
     // state (for example after a reload or a JSON round-trip). Only omit the
     // base when that is proven; any real difference keeps the full baseline for
     // offline recovery and conflict detection.
     const baseEquivalent = !baseIsStore && syncValuesEqual(persistedStore, candidateBase);
-    const effectiveBase = baseIsStore || baseEquivalent ? store : base;
+    const effectiveBase = baseIsStore || baseEquivalent ? store : persistedBaseline;
     const persistedBase = baseIsStore || baseEquivalent ? null : candidateBase;
     const encodedBase = persistedBase ? encodeLocalBaseline(persistedStore, persistedBase) : null;
     const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
@@ -6557,6 +6624,11 @@ function saveLocalState(store, base, userId) {
       localStorage.removeItem(`logbook-base-${userId}`);
     } catch (_) {}
     _localSnapshotState.set(userId, { storeRef: store, baseRef: effectiveBase, raw });
+    // A successful save with no remaining baseline difference means the sync
+    // queue has acknowledged every tombstone that was pending at that point.
+    // If a newer edit is still pending, persistedBaseline differs from store
+    // and the markers remain for the next retry.
+    if (baseIsStore || baseEquivalent) _localDeletedRows.clear();
     return true;
   } catch (_) {
     return false;
@@ -6607,10 +6679,12 @@ function clearLocal(userId) {
       localStorage.removeItem(`logbook-base-${userId}`);
       localStorage.removeItem(`logbook-pair-${userId}`);
       _localSnapshotState.delete(userId);
+      _localDeletedRows.clear();
       return;
     }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
     _localSnapshotState.clear();
+    _localDeletedRows.clear();
   } catch (_) {}
 }
 
@@ -7098,46 +7172,68 @@ async function loadSocialMessageState(userId) {
 // committed; the small local outbox retries after the next auth/online/focus
 // event. The server still re-checks the event and caller, so an old outbox
 // entry is harmless and is discarded on a permanent 4xx response.
-const SOCIAL_NOTIFY_OUTBOX_KEY = 'zane-social-notification-outbox-v1';
-let _socialNotifyFlushPromise = null;
+const SOCIAL_NOTIFY_OUTBOX_KEY_PREFIX = 'zane-social-notification-outbox-v2:';
+const _socialNotifyFlushPromises = new Map();
 
-function readSocialNotifyOutbox() {
+async function socialNotifyUserId() {
   try {
-    const rows = JSON.parse(localStorage.getItem(SOCIAL_NOTIFY_OUTBOX_KEY) || '[]');
+    const { data } = await _supabase.auth.getSession();
+    return data?.session?.user?.id || null;
+  } catch (_) { return null; }
+}
+
+function socialNotifyOutboxKey(userId) {
+  return `${SOCIAL_NOTIFY_OUTBOX_KEY_PREFIX}${userId}`;
+}
+
+function readSocialNotifyOutbox(userId) {
+  if (!userId) return [];
+  try {
+    const rows = JSON.parse(localStorage.getItem(socialNotifyOutboxKey(userId)) || '[]');
     if (!Array.isArray(rows)) return [];
     return rows.filter(row => row && typeof row.event === 'string' && typeof row.id === 'string').slice(-200);
   } catch (_) { return []; }
 }
 
-function writeSocialNotifyOutbox(rows) {
+function writeSocialNotifyOutbox(userId, rows) {
+  if (!userId) return;
   try {
-    if (!rows.length) localStorage.removeItem(SOCIAL_NOTIFY_OUTBOX_KEY);
-    else localStorage.setItem(SOCIAL_NOTIFY_OUTBOX_KEY, JSON.stringify(rows.slice(-200)));
+    const key = socialNotifyOutboxKey(userId);
+    if (!rows.length) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(rows.slice(-200)));
   } catch (_) {}
 }
 
-function enqueueSocialNotify(event, eventId) {
-  const rows = readSocialNotifyOutbox();
+function enqueueSocialNotify(userId, event, eventId) {
+  const rows = readSocialNotifyOutbox(userId);
   if (!rows.some(row => row.event === event && row.id === String(eventId))) {
     rows.push({ event, id: String(eventId), queuedAt: Date.now() });
-    writeSocialNotifyOutbox(rows);
+    writeSocialNotifyOutbox(userId, rows);
   }
 }
 
-async function flushSocialNotificationOutbox() {
-  if (_socialNotifyFlushPromise) return _socialNotifyFlushPromise;
-  _socialNotifyFlushPromise = (async () => {
+async function flushSocialNotificationOutbox(userIdArg = null) {
+  const userId = userIdArg || await socialNotifyUserId();
+  if (!userId) return null;
+  const existing = _socialNotifyFlushPromises.get(userId);
+  if (existing) return existing;
+  const promise = (async () => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
-    let rows = readSocialNotifyOutbox();
+    let rows = readSocialNotifyOutbox(userId);
     let lastResponse = null;
     while (rows.length) {
       const current = rows[0];
+      // fnFetch reads the current Supabase session. If the account changed
+      // after this queue started, never send A's event with B's token and
+      // never discard A's row based on B's 4xx response.
+      if (await socialNotifyUserId() !== userId) break;
       const response = await fnFetch(SOCIAL_NOTIFY_URL, { event: current.event, id: current.id });
       lastResponse = response;
       if (!response) break;
+      if (await socialNotifyUserId() !== userId) break;
       if (response.ok || [400, 401, 403, 404].includes(response.status)) {
         rows.shift();
-        writeSocialNotifyOutbox(rows);
+        writeSocialNotifyOutbox(userId, rows);
         continue;
       }
       // 409 (session row not replicated yet), 429, 5xx and network errors
@@ -7147,14 +7243,17 @@ async function flushSocialNotificationOutbox() {
       break;
     }
     return lastResponse;
-  })().finally(() => { _socialNotifyFlushPromise = null; });
-  return _socialNotifyFlushPromise;
+  })().finally(() => { if (_socialNotifyFlushPromises.get(userId) === promise) _socialNotifyFlushPromises.delete(userId); });
+  _socialNotifyFlushPromises.set(userId, promise);
+  return promise;
 }
 
-async function notifySocialEvent(event, eventId) {
+async function notifySocialEvent(event, eventId, userIdArg = null) {
   if (!event || !eventId) return null;
-  enqueueSocialNotify(event, eventId);
-  return flushSocialNotificationOutbox();
+  const userId = userIdArg || await socialNotifyUserId();
+  if (!userId) return null;
+  enqueueSocialNotify(userId, event, eventId);
+  return flushSocialNotificationOutbox(userId);
 }
 
 async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
@@ -7261,7 +7360,7 @@ async function sendSocialMessage({ senderId, recipientId = null, groupId = null,
     sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
   }).select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').single();
   if (error) throw error;
-  void notifySocialEvent('message', data?.id);
+  void notifySocialEvent('message', data?.id, senderId);
   return mapSocialMessage(data);
 }
 

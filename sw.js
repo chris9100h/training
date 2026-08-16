@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.826';
+const CACHE = 'zane-v2.827';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. They are runtime-only: the worker never downloads the
 // whole VIP catalogue during install. The page tells the worker which one
@@ -167,7 +167,9 @@ async function pruneBackgroundCache(keepValue) {
   await Promise.all(keys.map(request => {
     const url = new URL(request.url);
     const basePath = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '') + '/Background/';
-    const isPhoto = url.origin === self.location.origin && url.pathname.startsWith(basePath);
+    const isPhoto = url.origin === self.location.origin
+      && url.pathname.startsWith(basePath)
+      && !url.pathname.endsWith('/index.json');
     if (!isPhoto || (keepPath && url.pathname === keepPath)) return undefined;
     return cache.delete(request);
   }));
@@ -295,7 +297,10 @@ self.addEventListener('fetch', e => {
     // remains network-only and is what discovers a newer worker.
     const appAssetUrl = url.origin + url.pathname;
     const isAppAsset = !url.search && ASSETS.includes(appAssetUrl);
-    const isBackgroundPhoto = url.pathname.includes('/Background/');
+    // The catalogue is a normal JSON resource, not a VIP photo. Treating it
+    // as a photo made every catalogue fetch trigger pruneBackgroundCache(),
+    // which could delete the selected image (and the catalogue itself).
+    const isBackgroundPhoto = url.pathname.includes('/Background/') && !url.pathname.endsWith('/index.json');
     if (isAppAsset || isBackgroundPhoto) {
       e.respondWith(
         caches.match(e.request).then(cached => {

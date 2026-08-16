@@ -1976,7 +1976,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // The date the quantity sheet is about to write to. Normally curDate, but a
   // staged row carries the date it was picked on and survives day navigation,
   // so editing tomorrow's staged pick from today must still be judged future.
-  const qtyEditingStagedDate = editingStagedId ? staged.find(e => e.id === editingStagedId)?.date : null;
+  const qtyEditingStagedRow = editingStagedId ? staged.find(e => e.id === editingStagedId) : null;
+  const qtyEditingStagedDate = qtyEditingStagedRow?.date ?? null;
+  // Staged rows survive date navigation. If one is edited while another day
+  // is visible, the amount sheet must not pretend that the edit will land in
+  // the currently visible day's forecast.
+  const qtyStagedProjectionOnCurrentDate = !editingStagedId || qtyEditingStagedRow?.date === curDate;
   const qtyTargetIsFuture = (qtyEditingStagedDate || curDate) > today;
 
   // Plan Mode (settings.planMode, off by default): entries carry a `planned`
@@ -5942,7 +5947,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {qtyPreview && (
               <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat}
                 sugar={qtyPreview.sugar} satFat={qtyPreview.satFat} sodiumMg={qtyPreview.sodiumMg}
-                dayProjection={{
+                dayProjection={qtyStagedProjectionOnCurrentDate ? {
                   baseTotals: projectedWithStagedTotals,
                   addition: editingMealItemId ? mealItemsProjectedTotals : qtyPreview,
                   target: dayTarget,
@@ -5955,7 +5960,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     : editingEntry && editingEntry.date === curDate ? editingEntry
                     : editingStagedId ? staged.find(e => e.id === editingStagedId && e.date === curDate) || null
                     : null,
-                }} />
+                } : undefined} />
             )}
             <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
@@ -6882,7 +6887,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         onClose={() => setIngredientPickerOpen(false)}
         onAdd={addIngredientsToEntry}
         store={store}
-        dayTotals={projectedTotals}
+        dayTotals={projectedWithStagedTotals}
         dayTarget={dayTarget}
         dayReplace={ingredientEditorEntry?.date === curDate ? ingredientEditorEntry : null}
         dayCurrentAddition={ingredientTotals}

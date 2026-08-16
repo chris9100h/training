@@ -11,7 +11,8 @@
 (function () {
   var ua = navigator.userAgent || '';
   var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-  if (ios && /CriOS\//i.test(ua)) document.documentElement.classList.add('ios-chrome');
+  var standalone = !!(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  if (ios && /CriOS\//i.test(ua) && !standalone) document.documentElement.classList.add('ios-chrome');
 })();
 </script>
 <meta name="theme-color" content="#07060a" />

@@ -636,6 +636,9 @@ function App() {
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
   const syncing                   = useRefA(false); // true while a sync is in flight
+  const inFlightSync              = useRefA(null);  // promise for the current account's sync request
+  const syncGeneration             = useRefA(0);     // invalidates completions after account switches
+  const signoutFlushInFlight       = useRefA(false); // prevents a parallel fire-and-forget sync
   const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
@@ -655,6 +658,7 @@ function App() {
   const adminSupportUnreadRequest  = useRefA(0);
 
   useEffectA(() => {
+    syncGeneration.current += 1;
     userIdRef.current = userId;
     previousMedsEnabled.current = null;
     adminSupportUnreadRevision.current += 1;
@@ -1435,6 +1439,7 @@ function App() {
     // scheduled with the old uid could otherwise fire after an account switch
     // and upsert one account's data stamped with another's user_id.
     if (uid !== userIdRef.current) return;
+    if (signoutFlushInFlight.current) return;
     // Auth recovery must finish before an RLS write is attempted. Keeping the
     // pending snapshot local is safer than firing a burst of guaranteed 401s
     // while the refresh endpoint is recovering.
@@ -1453,12 +1458,36 @@ function App() {
       return;
     }
     syncing.current = true;
+    const generation = syncGeneration.current;
+    const baseAtStart = syncBase.current;
+    const targetAtStart = target;
+    const isCurrent = () => generation === syncGeneration.current && uid === userIdRef.current;
     let ok = false;
-    LB.syncStore(syncBase.current, target, uid)
-      .then(() => { syncBase.current = target; scheduleLocalSave(0); ok = true; })
+    const request = LB.syncStore(baseAtStart, targetAtStart, uid);
+    inFlightSync.current = request;
+    request
+      .then(() => {
+        // The request may finish after SIGNED_OUT/SIGNED_IN. Its server write
+        // belongs to the old JWT, but its completion must never advance the
+        // new account's baseline or serialize the old baseline under it.
+        if (!isCurrent()) return;
+        syncBase.current = targetAtStart;
+        scheduleLocalSave(0);
+        ok = true;
+      })
       .catch(err => console.error('Supabase sync failed, will retry', err))
       .finally(() => {
+        if (inFlightSync.current === request) inFlightSync.current = null;
         syncing.current = false;
+        if (!isCurrent()) {
+          // If the new account's first store update happened while the old
+          // request was in flight, its effect may have seen syncing=true. Give
+          // that pending target one clean chance now, but never touch the old
+          // baseline or status.
+          const currentUid = userIdRef.current;
+          if (currentUid && !signoutFlushInFlight.current) flushSync(currentUid);
+          return;
+        }
         if (ok) {
           clearTimeout(retryTimer.current);
           retryTimer.current = null;
@@ -1607,26 +1636,47 @@ function App() {
     // reason as in flushSync), so whatever is pending stays unflushed. Report
     // failure, the caller then keeps the local cache instead of wiping it.
     if (uid !== userIdRef.current) return false;
-    const target = pendingStore.current;
-    // Nothing pending: there is no unsynced change a wipe could destroy.
-    if (!target || target === syncBase.current || !uid) return true;
-    // Only the sync path sets this. The timeout ends the WAIT, it can never
-    // report success: without the flag, a 5s stall resolved the race exactly
-    // like a completed write (and so did the catch below), the caller wiped
-    // the local cache, and the change was gone with nothing left to retry.
+    if (!uid) return true;
+    // Never start a second write while the normal queue is already in flight:
+    // two requests racing the same base can both appear successful while one
+    // completion advances the wrong account's baseline. The flag also stops
+    // flushSync's automatic "more edits landed" follow-up until this final
+    // sign-out decision is complete.
+    signoutFlushInFlight.current = true;
     let landed = false;
-    const timeout = new Promise(resolve => setTimeout(resolve, 5000));
-    try {
-      await Promise.race([
-        LB.syncStore(syncBase.current, target, uid).then(() => {
-          syncBase.current = target;
-          setStorageFull(!LB.saveSyncedState(target, uid));
-          landed = true;
-        }),
-        timeout,
+    const deadline = Date.now() + 5000;
+    const waitWithDeadline = promise => {
+      const remaining = Math.max(0, deadline - Date.now());
+      if (!remaining) return Promise.resolve(false);
+      return Promise.race([
+        Promise.resolve(promise).then(() => true, () => false),
+        new Promise(resolve => setTimeout(() => resolve(false), remaining)),
       ]);
+    };
+    try {
+      const inFlight = inFlightSync.current;
+      if (inFlight) await waitWithDeadline(inFlight);
+      if (Date.now() >= deadline || uid !== userIdRef.current) return false;
+      const target = pendingStore.current;
+      // Nothing pending after the existing request settled: there is no
+      // unsynced change a wipe could destroy.
+      if (!target || target === syncBase.current) return true;
+      const generation = syncGeneration.current;
+      const baseAtStart = syncBase.current;
+      const finalRequest = LB.syncStore(baseAtStart, target, uid);
+      inFlightSync.current = finalRequest;
+      const finished = await waitWithDeadline(finalRequest.then(() => {
+        if (generation !== syncGeneration.current || uid !== userIdRef.current) return;
+        syncBase.current = target;
+        setStorageFull(!LB.saveSyncedState(target, uid));
+        landed = true;
+      }));
+      if (!finished) landed = false;
+      if (inFlightSync.current === finalRequest) inFlightSync.current = null;
     } catch (err) {
       console.error('flushBeforeSignOut: final sync attempt failed', err);
+    } finally {
+      signoutFlushInFlight.current = false;
     }
     return landed;
   }, []);
@@ -2162,6 +2212,11 @@ function App() {
         // with the old uid after an in-session account switch, and drop its
         // stale pending state.
         clearTimeout(retryTimer.current);
+        // Invalidate an old account's in-flight completion immediately; the
+        // userId effect below is intentionally redundant because Auth events
+        // can arrive before React commits the new state.
+        syncGeneration.current += 1;
+        userIdRef.current = session.user.id;
         pendingStore.current = null;
         LB.rememberOfflineUser(session.user.id);
         LB.clearAuthRecovery();
@@ -2194,6 +2249,10 @@ function App() {
         setPhase('invite');
       } else if (event === 'SIGNED_OUT') {
         onboardingChecked.current = false;
+        // Do this before clearing the refs so a late A-sync cannot serialize
+        // its baseline into the next account's local cache.
+        syncGeneration.current += 1;
+        userIdRef.current = null;
         unitPicked.current = false;
         recoveryInProgress.current = false;
         // Only a deliberate LB.signOut() (Settings → Sign out / Delete all
@@ -3156,7 +3215,7 @@ function App() {
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
-      {store && friendsTabEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
+      {store && friendsDataEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
           onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}

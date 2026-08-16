@@ -3688,10 +3688,12 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
     : null;
 
-  // All three actions count as "handled this week": only Apply also touches
-  // macroTargets. lastAppliedAt is separate and only ever set on an actual
-  // Apply; Keep records the new suggestion in history without pretending it
-  // became active, and leaves the previous applied snapshot untouched.
+  // Apply and Leave as is count as handled for this week. Skip deliberately
+  // does not: it dismisses this report without moving lastCheckinAt, so the
+  // check-in remains available and is offered again on the next render.
+  // lastAppliedAt is separate and only ever set on an actual Apply; Keep
+  // records the new suggestion in history without pretending it became active,
+  // and leaves the previous applied snapshot untouched.
   const finish = (decision) => {
     const applyTargets = decision === 'applied';
     const asOfDate = LB.todayISO();
@@ -3727,7 +3729,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
         ...(applyTargets && newTargets ? { macroTargets: newTargets } : {}),
         macroCalc: {
           ...s.settings.macroCalc,
-          lastCheckinAt: LB.todayISO(),
+          ...(decision !== 'skipped' ? { lastCheckinAt: asOfDate } : {}),
           // A snapshot, not a pointer at macroTargets: the point is showing
           // what the algorithm actually said next to whatever is active NOW,
           // and macroTargets can drift away from this (a hand-edit, a coach

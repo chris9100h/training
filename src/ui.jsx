@@ -1247,6 +1247,14 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
   // the intensity chain sheets, just vertically centered. Opt-in, so no other
   // sheet changes.
   const cardLike = floating || center;
+  // Chrome iOS uses a layout-height root while its native keyboard is open.
+  // Keep the backdrop in the fixed coordinate space for that frame; the
+  // keyboard padding below is measured in the same layout coordinates. Using
+  // the normal iOS absolute layer here double-counts the keyboard gap and can
+  // move the sheet's hit targets hundreds of pixels away from the controls.
+  // Once the keyboard is gone, return to the local layer so embedded flows
+  // retain their correct stacking context.
+  const sheetPosition = effectiveKbHeight > 0 ? 'fixed' : localViewportLayerPosition();
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
   const shadowLayers = [cardLike ? '0 4px 18px rgba(0,0,0,0.4)' : '0 -10px 28px rgba(0,0,0,0.5)'];
   if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
@@ -1261,7 +1269,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} aria-hidden={false} style={{
-      position: localViewportLayerPosition(), top: 0, left: 0, right: 0, bottom: keyboardHeight,
+      position: sheetPosition, top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
