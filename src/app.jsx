@@ -2346,6 +2346,10 @@ function App() {
     let messageRefreshInFlight = null;
     let messageRefreshQueued = false;
     let badgeRefreshInFlight = null;
+    let pendingRequestsTimer = null;
+    let pendingRequestsInFlight = null;
+    let pendingRequestsQueued = false;
+    let pendingRequestsFailures = 0;
     let liveWorkoutRefreshInFlight = null;
     const pendingResources = new Set();
     let feedFailures = 0;
@@ -2394,6 +2398,26 @@ function App() {
         if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...badge } } : s);
       }).catch(() => { badgeFailures += 1; }).finally(() => { badgeRefreshInFlight = null; });
       return badgeRefreshInFlight;
+    };
+    const refreshPendingRequests = (force = false) => {
+      if (!live) return Promise.resolve();
+      if (pendingRequestsInFlight) {
+        pendingRequestsQueued = pendingRequestsQueued || force;
+        return pendingRequestsInFlight;
+      }
+      pendingRequestsInFlight = LB.loadSocialPendingFriendRequests().then(pending => {
+        pendingRequestsFailures = 0;
+        if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...pending } } : s);
+      }).catch(() => {
+        pendingRequestsFailures += 1;
+      }).finally(() => {
+        pendingRequestsInFlight = null;
+        if (pendingRequestsQueued && live) {
+          pendingRequestsQueued = false;
+          setTimeout(() => refreshPendingRequests(true), 0);
+        }
+      });
+      return pendingRequestsInFlight;
     };
     // Home only needs the live cards for its small "friend is working out"
     // banner. Keep the full Friends dashboard and history feed lazy, but make
@@ -2448,6 +2472,7 @@ function App() {
       if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
     } else {
       refreshBadge();
+      refreshPendingRequests();
       if (route.name === 'home') refreshLiveWorkoutFeed();
     }
     const nextFailureDelay = failures => [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
@@ -2460,6 +2485,16 @@ function App() {
       }, delay);
     };
     if (route.name === 'friends') scheduleFeed(10000);
+
+    const schedulePendingRequests = delay => {
+      clearTimeout(pendingRequestsTimer);
+      if (!live || routeRef.current.name === 'friends') return;
+      pendingRequestsTimer = setTimeout(async () => {
+        await refreshPendingRequests();
+        schedulePendingRequests(pendingRequestsFailures ? nextFailureDelay(pendingRequestsFailures) : 120000 + Math.floor(Math.random() * 15001));
+      }, delay);
+    };
+    if (route.name !== 'friends') schedulePendingRequests(120000 + Math.floor(Math.random() * 15001));
 
     const scheduleBadge = delay => {
       clearTimeout(badgeTimer);
@@ -2477,6 +2512,7 @@ function App() {
       pendingResources.clear();
       if (routeRef.current.name !== 'friends') {
         refreshBadge();
+        if (resources.has('relationships') || resources.has('dashboard') || resources.has('authoritative')) refreshPendingRequests(true);
         if (routeRef.current.name === 'home'
             && (resources.has('feed') || resources.has('dashboard') || resources.has('relationships') || resources.has('authoritative'))) {
           refreshLiveWorkoutFeed();
@@ -2507,6 +2543,7 @@ function App() {
       clearTimeout(refreshTimer);
       clearTimeout(feedTimer);
       clearTimeout(badgeTimer);
+      clearTimeout(pendingRequestsTimer);
       document.removeEventListener('visibilitychange', onVisible);
       unsubscribe?.();
     };
