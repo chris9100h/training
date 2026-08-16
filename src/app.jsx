@@ -2557,8 +2557,28 @@ function App() {
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
+    // `friends` is a UI-only snapshot. The social badge, the pending-request
+    // banner, and the live-workout card all refresh it without changing any
+    // durable app data, and syncStore deliberately has no friends write path.
+    // Do not let one of those read-only refreshes wake the durable sync queue:
+    // otherwise a stale unrelated local write can turn a successful social RPC
+    // into a red "not synced" indicator. Keep the snapshot persisted locally,
+    // but leave the normal write/retry state untouched.
+    const previous = prevStore.current;
+    const onlyFriendsChanged = previous && previous !== store && (() => {
+      const keys = new Set([...Object.keys(previous), ...Object.keys(store)]);
+      for (const key of keys) {
+        if (key === 'friends') continue;
+        if (previous[key] !== store[key]) return false;
+      }
+      return true;
+    })();
     prevStore.current = store;
     pendingStore.current = store;
+    if (onlyFriendsChanged) {
+      scheduleLocalSave();
+      return;
+    }
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
     // Full-store serialization is debounced and moved into idle time. The
