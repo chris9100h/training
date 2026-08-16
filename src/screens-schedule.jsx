@@ -4838,7 +4838,14 @@ function PlanWizard({ store, setStore, go }) {
     </>
   );
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  // Chrome on iOS already gets a local, viewport-sized containing block from
+  // the app shell. Applying the visualViewport offset a second time here
+  // moves the dialog away from its hit targets after the keyboard closes.
+  const overlayStyle = localViewportLayerPosition() === 'absolute'
+    ? { ...overlayBase, position: 'absolute', inset: 0 }
+    : vp
+      ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height }
+      : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}

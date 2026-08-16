@@ -3,7 +3,8 @@
    Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
    btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
    Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
-   NumInput, Field, TextInput, isLightCanvasActive. */
+   NumInput, Field, TextInput, isLightCanvasActive,
+   localViewportLayerPosition. */
 
 const UI = {
   bg:       'var(--bg)',
@@ -43,6 +44,18 @@ function isLightCanvasActive() {
   const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
   if (parts.length !== 3 || parts.some(isNaN)) return false;
   return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
+
+// Chrome on iOS has a WebKit viewport bug where fixed layers can be painted
+// against the browser's old toolbar/keyboard geometry while their hit-test
+// boxes use the current geometry. The app shell creates a local containing
+// block for those layers on that browser; portals mounted directly under body
+// need the same absolute-vs-fixed choice explicitly.
+function localViewportLayerPosition() {
+  return typeof document !== 'undefined'
+    && document.documentElement.classList.contains('ios-chrome')
+    ? 'absolute'
+    : 'fixed';
 }
 
 // ─── Screen ─────────────────────────────────────────────────────────
@@ -1248,7 +1261,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} aria-hidden={false} style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
+      position: localViewportLayerPosition(), top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
@@ -1362,7 +1375,7 @@ function ImageLightbox({ src, onClose }) {
   if (!src) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label="Image preview" onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
+      position: localViewportLayerPosition(), inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
     }}>
