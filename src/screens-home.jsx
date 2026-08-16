@@ -6,6 +6,11 @@
 const { useState, useEffect, useMemo, useRef } = React;
 
 const SKIP_REASONS = ['Tired', 'Sick', 'Stress', 'Forgot', 'Rest day', 'No particular reason'];
+// A failed write can recover on its own within a heartbeat (token refresh,
+// connection hand-off, or a single transient 5xx). Do not flash the Home DB
+// indicator red for those short-lived errors; the underlying sync status still
+// remains error and keeps retrying in the background.
+const SYNC_ERROR_DISPLAY_DELAY_MS = 4000;
 
 // Ceiling on how many windowed-out sessions the post-workout recap pulls back
 // per mount, across all batches. One comparison needs at most one prior session
@@ -1250,6 +1255,15 @@ function TierChip({ tier }) {
 
 function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRetrySync }) {
   const [confirmEl, confirm] = useConfirm();
+  const [syncErrorVisible, setSyncErrorVisible] = useState(false);
+  useEffect(() => {
+    if (storageFull || syncStatus !== 'error') {
+      setSyncErrorVisible(false);
+      return;
+    }
+    const timer = setTimeout(() => setSyncErrorVisible(true), SYNC_ERROR_DISPLAY_DELAY_MS);
+    return () => clearTimeout(timer);
+  }, [storageFull, syncStatus]);
   const trainBg = store.settings?.vipBackground || 'icons/zane-logo.png';
   const isCustomBg = trainBg !== 'icons/zane-logo.png';
   const isLightMode = (store.settings?.darkMode ?? 'dark') === 'light';
@@ -3064,15 +3078,16 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
             <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
               <span style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 900, letterSpacing: '0.10em', color: UI.gold, lineHeight: 1 }}>ZANE</span>
               {(() => {
-                const isProblem = storageFull || syncStatus === 'error';
-                const isSaving  = syncStatus === 'pending' && !storageFull;
+                const isProblem = storageFull || syncErrorVisible;
+                const isRetrying = !storageFull && syncStatus === 'error' && !syncErrorVisible;
+                const isSaving  = !storageFull && (syncStatus === 'pending' || isRetrying);
                 const color = isProblem ? UI.danger : isSaving ? UI.warn : UI.ok;
                 const pulse = isProblem ? 'pulseDot 1.4s ease-in-out infinite' : 'none';
                 return (
                   <i
                     className="fa-solid fa-dumbbell"
                     onClick={isProblem ? onRetrySync : undefined}
-                    title={isProblem ? 'Not synced, tap to retry' : isSaving ? 'Saving…' : 'Connected'}
+                    title={isProblem ? 'Not synced, tap to retry' : isRetrying ? 'Retrying…' : isSaving ? 'Saving…' : 'Connected'}
                     style={{ fontSize: 15, color, animation: pulse, cursor: isProblem ? 'pointer' : 'default' }}
                   />
                 );
