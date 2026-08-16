@@ -1956,9 +1956,13 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       }
     }
     finishSetNavigation(setIdx, updatedSets, overlayHoldMs, advanceFocus);
-    // Last warmup set done → start 3-min rest, workout timer begins when rest expires
+    // Last warmup set done → start the full-screen post-warmup countdown. Keep
+    // the rest state so that overlay can count down and start the workout at
+    // expiry, but do not open the separate Rest sheet on top of it: that would
+    // duplicate the countdown when the auto-open-rest preference is enabled.
     if (isLastWarmupSet && !session.startedAt) {
-      persistRestStart(Date.now(), 180, { openModal: true });
+      persistRestStart(Date.now(), 180, { openModal: false });
+      setRestModalOpen(false);
     }
   };
 
