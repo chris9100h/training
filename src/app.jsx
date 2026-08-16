@@ -12,6 +12,12 @@ const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
 // and must not be allowed to wipe the local pending diff.
 const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 
+// A database outage can happen while the browser still reports itself online,
+// so the browser's `online` event alone is not enough to recover sync. Keep the
+// fallback probe deliberately sparse: one attempt after five seconds, then
+// 15/30/60 seconds. This is a reachability check, not a polling loop.
+const SYNC_RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000];
+
 const ADMIN_SUPPORT_EMAIL = 'office@btc-prime.biz';
 
 // Entries newer than the last-seen id. New users / first run after the feature
@@ -169,6 +175,20 @@ function askControllerSwVersion(timeoutMs = 1500) {
       ctrl.postMessage({ type: 'GET_VERSION' }, [ch.port2]);
     } catch (_) { finish(null); }
   });
+}
+
+// Keep the decorative background cache scoped to the account currently shown
+// by the app. The worker receives only a same-origin path (or null on logout /
+// for a normal user); it never gets involved in auth or app-shell caching.
+function tellServiceWorkerBackground(value) {
+  if (!('serviceWorker' in navigator)) return;
+  let url = null;
+  if (value) {
+    try { url = new URL(value, window.location.href).href; } catch (_) { url = null; }
+  }
+  navigator.serviceWorker.ready
+    .then(reg => (reg.active || navigator.serviceWorker.controller)?.postMessage({ type: 'SET_BACKGROUND', url }))
+    .catch(() => {});
 }
 
 // App-shell versions are intentionally monotonic. A late response from an old
@@ -483,7 +503,7 @@ function mergeStagedCollection(key, freshRows, curRows, baseRows) {
   const localOnly = (curRows || []).filter(row =>
     !serverIds.has(row.id) && !baseIds.has(row.id) && (!serverDates || !serverDates.has(row.date))
   );
-  return [...localOnly, ...LB.mergeCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds)];
+  return [...localOnly, ...LB.mergeWindowedCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds, key)];
 }
 
 // Profile identity edits can happen while the staged boot payload is still
@@ -626,6 +646,7 @@ function App() {
   const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
   const previousRouteName         = useRefA(null);
   const foregroundRefresh         = useRefA(null); // one in-flight health refresh across all foreground events
+  const syncProbePromise          = useRefA(null); // de-duplicates foreground/automatic DB probes
   const lastForegroundRefreshAt   = useRefA(0);    // start time of the last accepted soft refresh
   const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
   const stagedBootHydrating       = useRefA(false); // prevents feature-on effects duplicating stage two queries
@@ -640,6 +661,17 @@ function App() {
     adminSupportUnreadRequest.current += 1;
     adminSupportUnreadRef.current = null;
   }, [userId]);
+  useEffectA(() => {
+    const selected = phase === 'ready' && userId ? store?.settings?.vipBackground : null;
+    const syncBackgroundCache = () => tellServiceWorkerBackground(selected);
+    syncBackgroundCache();
+    if (!('serviceWorker' in navigator)) return undefined;
+    // A deploy can replace an older controller after this effect already ran.
+    // Re-send the account selection to the new worker so an old catalogue is
+    // pruned even when no app state changed during the handoff.
+    navigator.serviceWorker.addEventListener('controllerchange', syncBackgroundCache);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', syncBackgroundCache);
+  }, [phase, userId, store?.settings?.vipBackground]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { authStatusRef.current = authStatus; }, [authStatus]);
   // React state updates are batched. Recovery code often needs to start a
@@ -980,19 +1012,19 @@ function App() {
           const delMedLogs = delDel(base?.medicationLogs, s.medicationLogs);
           const delMedPlanItems = delDel(base?.medicationPlanItems, s.medicationPlanItems);
           const delMedPillboxChecks = delDel(base?.medicationPillboxChecks, s.medicationPillboxChecks);
-          const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
-          const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
-          const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
-          const nextBp      = [...localOnlyBp,      ...LB.mergeCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp)];
-          const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
-          const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
-          const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
+          const nextDaily   = [...localOnlyDaily,   ...LB.mergeWindowedCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily, 'dailyLogs')];
+          const nextCardio  = [...localOnlyCardio,  ...LB.mergeWindowedCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio, 'cardioLogs')];
+          const nextGlucose = [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose, 'glucoseLogs')];
+          const nextBp      = [...localOnlyBp,      ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp, 'bloodPressureLogs')];
+          const nextTemp    = [...localOnlyTemp,    ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp, 'bodyTempLogs')];
+          const nextWater   = [...localOnlyWater,   ...LB.mergeWindowedCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater, 'waterLogs')];
+          const nextFood    = [...localOnlyFood,    ...LB.mergeWindowedCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood, 'foodLogs')];
           const nextMedPlans = fresh.medicationsLoaded ? [...localOnlyMedPlans, ...LB.mergeCollectionById(fresh.medicationPlans || [], s.medicationPlans, base?.medicationPlans, delMedPlans)] : (s.medicationPlans || []);
           const nextMeds = fresh.medicationsLoaded ? [...localOnlyMeds, ...LB.mergeCollectionById(fresh.medications || [], s.medications, base?.medications, delMeds)] : (s.medications || []);
           const nextMedSlots = fresh.medicationsLoaded ? [...localOnlyMedSlots, ...LB.mergeCollectionById(fresh.medicationScheduleSlots || [], s.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlots)] : (s.medicationScheduleSlots || []);
-          const nextMedLogs = fresh.medicationsLoaded ? [...localOnlyMedLogs, ...LB.mergeCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs)] : (s.medicationLogs || []);
+          const nextMedLogs = fresh.medicationsLoaded ? [...localOnlyMedLogs, ...LB.mergeWindowedCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs, 'medicationLogs')] : (s.medicationLogs || []);
           const nextMedPlanItems = fresh.medicationsLoaded ? [...localOnlyMedPlanItems, ...LB.mergeCollectionById(fresh.medicationPlanItems || [], s.medicationPlanItems, base?.medicationPlanItems, delMedPlanItems)] : (s.medicationPlanItems || []);
-          const nextMedPillboxChecks = fresh.medicationsLoaded ? [...localOnlyMedPillboxChecks, ...LB.mergeCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks)] : (s.medicationPillboxChecks || []);
+          const nextMedPillboxChecks = fresh.medicationsLoaded ? [...localOnlyMedPillboxChecks, ...LB.mergeWindowedCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks, 'medicationPillboxChecks')] : (s.medicationPillboxChecks || []);
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed,
           // which forced a full re-render of the active screen on EVERY
@@ -1367,7 +1399,10 @@ function App() {
     const target = pendingStore.current;
     if (!uid || !target) return true;
     const ok = LB.saveLocalState(target, syncBase.current, uid);
-    if (!ok) setStorageFull(true);
+    // A quota/private-mode failure is recoverable. Clear the warning again
+    // after the very next successful atomic snapshot instead of leaving the
+    // home indicator red for the rest of the session.
+    setStorageFull(!ok);
     return ok;
   }, [cancelScheduledLocalSave]);
 
@@ -1381,7 +1416,7 @@ function App() {
         localSaveTimer.current = null;
         const uid = userIdRef.current;
         const target = pendingStore.current;
-        if (uid && target && !LB.saveLocalState(target, syncBase.current, uid)) setStorageFull(true);
+        if (uid && target) setStorageFull(!LB.saveLocalState(target, syncBase.current, uid));
       };
       if (typeof requestIdleCallback === 'function') {
         task.idleId = requestIdleCallback(run, { timeout: 1200 });
@@ -1406,7 +1441,17 @@ function App() {
     if (authStatusRef.current !== 'online') return;
     if (syncing.current) return;
     const target = pendingStore.current;
-    if (!target || target === syncBase.current || !uid) return;
+    if (!target || target === syncBase.current || !uid) {
+      // A transient offline/auth event can turn the indicator red even though
+      // there is no diff left to write. The retry button must be able to clear
+      // that stale local status once the session and network are healthy again.
+      if (uid && navigator.onLine && authStatusRef.current === 'online') {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+        setSyncStatus('synced');
+      }
+      return;
+    }
     syncing.current = true;
     let ok = false;
     LB.syncStore(syncBase.current, target, uid)
@@ -1415,6 +1460,8 @@ function App() {
       .finally(() => {
         syncing.current = false;
         if (ok) {
+          clearTimeout(retryTimer.current);
+          retryTimer.current = null;
           // More edits landed mid-flight? Keep flushing. Otherwise we're synced.
           if (pendingStore.current !== syncBase.current) { setSyncStatus('pending'); flushSync(uid); }
           else setSyncStatus('synced');
@@ -1427,6 +1474,119 @@ function App() {
         }
       });
   }, [scheduleLocalSave]);
+
+  // A failed write already has its own serialized retry path above. This
+  // separate probe covers the other important case: the browser remains
+  // "online", but a DB/RPC request failed and there is no pending local diff.
+  // get_runtime_config is a small authenticated RPC, so it proves the API and
+  // database are reachable without reloading the whole store.
+  const probeSyncConnection = useCallbackA((uid) => {
+    // navigator.onLine is only a browser hint (and is notably unreliable in
+    // iOS/PWA). The authenticated RPC below is the actual reachability test.
+    if (!uid || uid !== userIdRef.current || authStatusRef.current !== 'online') {
+      return Promise.resolve(false);
+    }
+    if (syncProbePromise.current) return syncProbePromise.current;
+
+    // Promise.resolve also turns a synchronous failure (for example an older
+    // cached bundle without the helper) into the same retryable path.
+    const probe = Promise.resolve()
+      .then(() => LB.fetchRuntimeConfig())
+      .then(() => {
+        if (uid !== userIdRef.current) return false;
+        if (pendingStore.current !== syncBase.current) {
+          setSyncStatus('pending');
+          flushSync(uid);
+        } else {
+          setSyncStatus('synced');
+        }
+        return true;
+      })
+      .catch(err => {
+        console.error('Supabase reconnect probe failed, will retry', err);
+        if (uid === userIdRef.current) setSyncStatus('error');
+        return false;
+      });
+    const trackedProbe = probe.finally(() => {
+      if (syncProbePromise.current === trackedProbe) syncProbePromise.current = null;
+    });
+    syncProbePromise.current = trackedProbe;
+    return trackedProbe;
+  }, [flushSync]);
+
+  // Retry a DB reachability failure even when the browser never transitions
+  // from offline to online. The backoff is bounded and this effect owns only
+  // the no-pending-diff probe; pending writes continue through flushSync's
+  // serialized 15-second retry path so the two loops cannot create a storm.
+  useEffectA(() => {
+    if (syncStatus !== 'error' || !userId) return undefined;
+    let cancelled = false;
+    let attempt = 0;
+    let timer = null;
+
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = SYNC_RECONNECT_DELAYS_MS[Math.min(attempt, SYNC_RECONNECT_DELAYS_MS.length - 1)];
+      timer = setTimeout(attemptReconnect, delay);
+    };
+    const attemptReconnect = async () => {
+      if (cancelled) return;
+      const uid = userIdRef.current;
+      if (!uid || authStatusRef.current !== 'online') {
+        attempt = Math.min(attempt + 1, SYNC_RECONNECT_DELAYS_MS.length - 1);
+        schedule();
+        return;
+      }
+      if (pendingStore.current !== syncBase.current) {
+        setSyncStatus('pending');
+        flushSync(uid);
+        return;
+      }
+      const recovered = await probeSyncConnection(uid);
+      if (cancelled || recovered) return;
+      attempt = Math.min(attempt + 1, SYNC_RECONNECT_DELAYS_MS.length - 1);
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [syncStatus, userId, flushSync, probeSyncConnection]);
+
+  // A transient reachability/auth event can mark the indicator red even when
+  // the local snapshot is already fully synced. Reconcile on foreground and
+  // after Auth recovery so the status reflects the current state, not a stale
+  // event from earlier in the session.
+  const reconcileSyncStatus = useCallbackA(() => {
+    const uid = userIdRef.current;
+    if (!uid || authStatusRef.current !== 'online') return;
+    if (pendingStore.current !== syncBase.current) {
+      setSyncStatus('pending');
+      flushSync(uid);
+    } else if (syncStatus === 'error') {
+      probeSyncConnection(uid);
+    } else {
+      setSyncStatus('synced');
+    }
+  }, [flushSync, probeSyncConnection, syncStatus]);
+
+  useEffectA(() => {
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') reconcileSyncStatus();
+    };
+    window.addEventListener('focus', reconcile);
+    window.addEventListener('pageshow', reconcile);
+    window.addEventListener('zane-auth-recovered', reconcile);
+    document.addEventListener('visibilitychange', reconcile);
+    return () => {
+      window.removeEventListener('focus', reconcile);
+      window.removeEventListener('pageshow', reconcile);
+      window.removeEventListener('zane-auth-recovered', reconcile);
+      document.removeEventListener('visibilitychange', reconcile);
+    };
+  }, [reconcileSyncStatus]);
 
   // One-shot, awaitable flush for the sign-out flow. Unlike flushSync (fire-
   // and-forget, auto-retried on a 15s timer), SIGNED_OUT wipes the local
@@ -1460,7 +1620,7 @@ function App() {
       await Promise.race([
         LB.syncStore(syncBase.current, target, uid).then(() => {
           syncBase.current = target;
-          if (!LB.saveSyncedState(target, uid)) setStorageFull(true);
+          setStorageFull(!LB.saveSyncedState(target, uid));
           landed = true;
         }),
         timeout,
@@ -1575,7 +1735,10 @@ function App() {
           // unchanged and skips them; a genuine offline edit still differs and
           // is pushed. First boot / no base → entries:[] fallback (one re-sync,
           // then self-heals once the post-boot flush saves the merged base).
-          const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
+          const diffBase = LB.withCarriedWindowCollections(
+            { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) },
+            base,
+          );
           syncBase.current = diffBase;
           let merged = fresh;
           // fresh.coaching is deliberately undefined when loadFromSupabase's
@@ -1853,14 +2016,14 @@ function App() {
               exercises: [...localOnlyExercises, ...mergeById(fresh.exercises, cur.exercises, base?.exercises, delExIds)],
               schedules: [...localOnlySchedules, ...mergeById(fresh.schedules, cur.schedules, base?.schedules, delSchIds)],
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
-              dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
-              cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
-              waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
-              foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
+              dailyLogs: [...localOnlyDailyLogs, ...LB.mergeWindowedCollectionById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds, 'dailyLogs')],
+              cardioLogs: [...localOnlyCardioLogs, ...LB.mergeWindowedCollectionById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds, 'cardioLogs')],
+              waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
+              foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
               foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
-              foodTemplateDays: [...localOnlyTemplateDays, ...mergeById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds)],
+              foodTemplateDays: [...localOnlyTemplateDays, ...LB.mergeWindowedCollectionById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds, 'foodTemplateDays')],
               foodMealPlans: [...localOnlyMealPlans, ...mergeById(fresh.foodMealPlans, cur.foodMealPlans, base?.foodMealPlans, delMealPlanIds)],
               // mergeById, not a bare server-wins filter: for an id present on
               // both sides these three used to take the server row outright,
@@ -1876,9 +2039,9 @@ function App() {
               medicationPlans: [...localOnlyMedPlans, ...mergeById(fresh.medicationPlans || [], cur.medicationPlans, base?.medicationPlans, delMedPlanIds)],
               medications: [...localOnlyMeds, ...mergeById(fresh.medications || [], cur.medications, base?.medications, delMedIds)],
               medicationScheduleSlots: [...localOnlyMedSlots, ...mergeById(fresh.medicationScheduleSlots || [], cur.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlotIds)],
-              medicationLogs: [...localOnlyMedLogs, ...mergeById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds)],
+              medicationLogs: [...localOnlyMedLogs, ...LB.mergeWindowedCollectionById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds, 'medicationLogs')],
               medicationPlanItems: [...localOnlyMedPlanItems, ...mergeById(fresh.medicationPlanItems || [], cur.medicationPlanItems, base?.medicationPlanItems, delMedPlanItemIds)],
-              medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...mergeById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds)],
+              medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...LB.mergeWindowedCollectionById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds, 'medicationPillboxChecks')],
               mesoStates,
               planDrafts,
               // TDEE history is loaded by HealthScreen separately because it
@@ -2346,6 +2509,10 @@ function App() {
     let messageRefreshInFlight = null;
     let messageRefreshQueued = false;
     let badgeRefreshInFlight = null;
+    let pendingRequestsTimer = null;
+    let pendingRequestsInFlight = null;
+    let pendingRequestsQueued = false;
+    let pendingRequestsFailures = 0;
     let liveWorkoutRefreshInFlight = null;
     const pendingResources = new Set();
     let feedFailures = 0;
@@ -2394,6 +2561,26 @@ function App() {
         if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...badge } } : s);
       }).catch(() => { badgeFailures += 1; }).finally(() => { badgeRefreshInFlight = null; });
       return badgeRefreshInFlight;
+    };
+    const refreshPendingRequests = (force = false) => {
+      if (!live) return Promise.resolve();
+      if (pendingRequestsInFlight) {
+        pendingRequestsQueued = pendingRequestsQueued || force;
+        return pendingRequestsInFlight;
+      }
+      pendingRequestsInFlight = LB.loadSocialPendingFriendRequests().then(pending => {
+        pendingRequestsFailures = 0;
+        if (live) setStore(s => s ? { ...s, friends: { ...(s.friends || {}), ...pending } } : s);
+      }).catch(() => {
+        pendingRequestsFailures += 1;
+      }).finally(() => {
+        pendingRequestsInFlight = null;
+        if (pendingRequestsQueued && live) {
+          pendingRequestsQueued = false;
+          setTimeout(() => refreshPendingRequests(true), 0);
+        }
+      });
+      return pendingRequestsInFlight;
     };
     // Home only needs the live cards for its small "friend is working out"
     // banner. Keep the full Friends dashboard and history feed lazy, but make
@@ -2448,6 +2635,7 @@ function App() {
       if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
     } else {
       refreshBadge();
+      refreshPendingRequests();
       if (route.name === 'home') refreshLiveWorkoutFeed();
     }
     const nextFailureDelay = failures => [5000, 10000, 30000, 60000][Math.min(Math.max(failures - 1, 0), 3)];
@@ -2460,6 +2648,16 @@ function App() {
       }, delay);
     };
     if (route.name === 'friends') scheduleFeed(10000);
+
+    const schedulePendingRequests = delay => {
+      clearTimeout(pendingRequestsTimer);
+      if (!live || routeRef.current.name === 'friends') return;
+      pendingRequestsTimer = setTimeout(async () => {
+        await refreshPendingRequests();
+        schedulePendingRequests(pendingRequestsFailures ? nextFailureDelay(pendingRequestsFailures) : 120000 + Math.floor(Math.random() * 15001));
+      }, delay);
+    };
+    if (route.name !== 'friends') schedulePendingRequests(120000 + Math.floor(Math.random() * 15001));
 
     const scheduleBadge = delay => {
       clearTimeout(badgeTimer);
@@ -2477,6 +2675,7 @@ function App() {
       pendingResources.clear();
       if (routeRef.current.name !== 'friends') {
         refreshBadge();
+        if (resources.has('relationships') || resources.has('dashboard') || resources.has('authoritative')) refreshPendingRequests(true);
         if (routeRef.current.name === 'home'
             && (resources.has('feed') || resources.has('dashboard') || resources.has('relationships') || resources.has('authoritative'))) {
           refreshLiveWorkoutFeed();
@@ -2507,6 +2706,7 @@ function App() {
       clearTimeout(refreshTimer);
       clearTimeout(feedTimer);
       clearTimeout(badgeTimer);
+      clearTimeout(pendingRequestsTimer);
       document.removeEventListener('visibilitychange', onVisible);
       unsubscribe?.();
     };
@@ -2520,8 +2720,27 @@ function App() {
   // A failed sync leaves syncBase unchanged so the pending diff is retried later.
   useEffectA(() => {
     if (!store || !userId || phase !== 'ready') return;
+    // `friends` is a UI-only snapshot. The social badge, the pending-request
+    // banner, and the live-workout card all refresh it without changing any
+    // durable app data, and syncStore deliberately has no friends write path.
+    // Do not let one of those read-only refreshes wake the durable sync queue:
+    // otherwise a stale unrelated local write can turn a successful social RPC
+    // into a red "not synced" indicator. The local snapshot helper deliberately
+    // omits this volatile surface, so leave the cache untouched as well.
+    const previous = prevStore.current;
+    const onlyFriendsChanged = previous && previous !== store && (() => {
+      const keys = new Set([...Object.keys(previous), ...Object.keys(store)]);
+      for (const key of keys) {
+        if (key === 'friends') continue;
+        if (previous[key] !== store[key]) return false;
+      }
+      return true;
+    })();
     prevStore.current = store;
     pendingStore.current = store;
+    if (onlyFriendsChanged) {
+      return;
+    }
     if (store !== syncBase.current) setSyncStatus('pending');
     flushSync(userId);
     // Full-store serialization is debounced and moved into idle time. The
@@ -2676,7 +2895,7 @@ function App() {
       checkForceUpdate();
       LB.flushSocialNotificationOutbox?.();
       if (pendingStore.current !== syncBase.current) flushSync(uid);
-      else setSyncStatus('synced');
+      else probeSyncConnection(uid);
     };
     if (!navigator.onLine) setSyncStatus('error');
     window.addEventListener('offline', onOffline);
@@ -2685,7 +2904,7 @@ function App() {
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online',  onOnline);
     };
-  }, [userId, flushSync]);
+  }, [userId, flushSync, probeSyncConnection]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
   useEffectA(() => {
@@ -2783,7 +3002,12 @@ function App() {
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.
   window.__goHome = () => go({ name: 'home' });
-  const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
+  const onRetrySync = () => {
+    setStorageFull(false);
+    const uid = userIdRef.current || userId;
+    if (pendingStore.current !== syncBase.current) flushSync(uid);
+    else probeSyncConnection(uid);
+  };
 
   // An update may be installed while the user is anywhere in the app, but a
   // reload is only safe on a quiet Home surface. Route checks protect editors;

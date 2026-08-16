@@ -877,8 +877,15 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   useEffectSet(() => {
     setAdminPlanSelectedDayId(adminPlanDetail?.days?.[0]?.id || null);
   }, [adminPlanDetail]);
+  // Only the recent window can ever be considered "new" (NEW_SIGNUP_DAYS
+  // below), so retaining an unbounded list of historical user ids has no
+  // functional value. Keep a generous tail for slow admin devices.
+  const SEEN_SIGNUPS_MAX = 1000;
   const [seenSignups, setSeenSignups] = useStateSet(() => {
-    try { return new Set(JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]')); } catch (_) { return new Set(); }
+    try {
+      const parsed = JSON.parse(localStorage.getItem('logbook-seen-signups') || '[]');
+      return new Set((Array.isArray(parsed) ? parsed : []).slice(-SEEN_SIGNUPS_MAX));
+    } catch (_) { return new Set(); }
   });
   const [nowS, setNowS] = useStateSet(Date.now());
   const [importing, setImporting] = useStateSet(false);
@@ -1372,8 +1379,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
       const next = new Set(prev); next.add(uid);
-      try { localStorage.setItem('logbook-seen-signups', JSON.stringify([...next])); } catch (_) {}
-      return next;
+      const bounded = [...next].slice(-SEEN_SIGNUPS_MAX);
+      try { localStorage.setItem('logbook-seen-signups', JSON.stringify(bounded)); } catch (_) {}
+      return new Set(bounded);
     });
   };
 
@@ -1382,8 +1390,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setSeenSignups(prev => {
       const next = new Set(prev);
       uids.forEach(id => next.add(id));
-      try { localStorage.setItem('logbook-seen-signups', JSON.stringify([...next])); } catch (_) {}
-      return next;
+      const bounded = [...next].slice(-SEEN_SIGNUPS_MAX);
+      try { localStorage.setItem('logbook-seen-signups', JSON.stringify(bounded)); } catch (_) {}
+      return new Set(bounded);
     });
   };
 
@@ -2500,8 +2509,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           // mounted for its close animation), so a corrupt value under this
           // key would otherwise throw on every single visit to Settings.
           let dismissed = [];
-          try { dismissed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]'); }
-          catch (_) { dismissed = []; }
+          try {
+            const parsed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+            dismissed = Array.isArray(parsed) ? parsed : [];
+          } catch (_) { dismissed = []; }
           const hiddenCount = activeSessions.filter(s => s.is_finished && dismissed.includes(s.session_id)).length;
           const visibleSessions = activeSessions.filter(s => !s.is_finished || !dismissed.includes(s.session_id));
           const sortedSessions = [...visibleSessions].sort((a, b) =>

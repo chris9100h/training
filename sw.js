@@ -1,9 +1,9 @@
-const CACHE = 'zane-v2.799';
+const CACHE = 'zane-v2.823';
 // Decorative background photos live in their own cache, deliberately decoupled
-// from CACHE's version. CACHE bumps on every deploy (often several times a
-// day); PHOTOS_CACHE only bumps by hand when the photo files themselves
-// change, so a routine deploy never re-downloads ~7MB of unchanged images.
-// activate() below intentionally never deletes this cache.
+// from CACHE's version. They are runtime-only: the worker never downloads the
+// whole VIP catalogue during install. The page tells the worker which one
+// background belongs to the currently loaded account; every other photo is
+// removed from this cache. The app shell remains fully precached and untouched.
 const PHOTOS_CACHE = 'zane-photos-v2';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
@@ -69,27 +69,6 @@ const PUBLIC_PAGES = [
   BASE_PATH + '/src/autoreg-guide-page.js',
 ];
 
-// Decorative background photos + their index. Purely cosmetic, and their file
-// names/extensions drift (e.g. .png vs .PNG on case-sensitive hosting), so a
-// single 404 here must NOT abort the whole SW install. Precached best-effort
-// into PHOTOS_CACHE (see above), not the versioned CACHE.
-const PHOTO_ASSETS = [
-  BASE + '/Background/Appy.png',
-  BASE + '/Background/phoenix.png',
-  BASE + '/Background/marine.png',
-  BASE + '/Background/prince_abu.png',
-  BASE + '/Background/Chris1.PNG',
-  BASE + '/Background/Chris2.PNG',
-  BASE + '/Background/akxyl.png',
-  BASE + '/Background/IMG_6817.png',
-  BASE + '/Background/Brettski.PNG',
-  BASE + '/Background/IMG_6950.png',
-  BASE + '/Background/Diane.PNG',
-  BASE + '/Background/JClow.png',
-  BASE + '/Background/WS.png',
-  BASE + '/Background/index.json',
-];
-
 // CDN libraries the app boots with. Precached best-effort so the app is fully
 // offline-capable right after the first load, but kept out of the atomic
 // addAll() above so a CDN hiccup can never abort the install. Babel is included
@@ -134,18 +113,6 @@ self.addEventListener('install', e => {
           CDN_ASSETS.map(u => fetch(new Request(u, { mode: 'cors', cache: 'no-store' })).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
         )
       )
-    ).then(() =>
-      // PHOTOS_CACHE is stable across deploys (activate() never wipes it), so
-      // once it's populated there's nothing to do here: re-fetching ~7MB of
-      // unchanged photos on every install would defeat the whole point.
-      caches.has(PHOTOS_CACHE).then(exists => {
-        if (exists) return;
-        return caches.open(PHOTOS_CACHE).then(c =>
-          Promise.allSettled(
-            PHOTO_ASSETS.map(u => fetch(u, { cache: 'no-store' }).then(res => { if (res.ok) return c.put(u, res); }).catch(() => {}))
-          )
-        );
-      })
     )
   );
 });
@@ -162,6 +129,13 @@ self.addEventListener('activate', e => {
 
 self.addEventListener('message', e => {
   if (e.data?.type === 'SKIP_WAITING') { self.skipWaiting(); return; }
+  if (e.data?.type === 'SET_BACKGROUND') {
+    // The page is the authority for the current account's selected image.
+    // Clearing is also used on logout and before a new account is hydrated,
+    // so a previous user's VIP image does not remain in this origin's cache.
+    e.waitUntil(pruneBackgroundCache(e.data?.url || null));
+    return;
+  }
   // Authoritative answer to "which app-shell version is actually running".
   // The page cannot work this out by listing CacheStorage: skipWaiting() hands
   // control to this worker as soon as it activates, BEFORE the activate
@@ -170,6 +144,40 @@ self.addEventListener('message', e => {
   // cache and record the wrong version. Only the running worker knows.
   if (e.data?.type === 'GET_VERSION') { e.ports?.[0]?.postMessage(CACHE); return; }
 });
+
+function backgroundUrl(value) {
+  if (!value) return null;
+  try {
+    const url = new URL(value, self.location.href);
+    const basePath = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '') + '/Background/';
+    if (url.origin !== self.location.origin || !url.pathname.startsWith(basePath)) return null;
+    if (url.pathname.endsWith('/index.json')) return null;
+    return url;
+  } catch (_) {
+    return null;
+  }
+}
+
+async function pruneBackgroundCache(keepValue) {
+  const keep = backgroundUrl(keepValue);
+  const keepPath = keep?.pathname || null;
+  if (!keep && !(await caches.has(PHOTOS_CACHE))) return;
+  const cache = await caches.open(PHOTOS_CACHE);
+  const keys = await cache.keys();
+  await Promise.all(keys.map(request => {
+    const url = new URL(request.url);
+    const basePath = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '') + '/Background/';
+    const isPhoto = url.origin === self.location.origin && url.pathname.startsWith(basePath);
+    if (!isPhoto || (keepPath && url.pathname === keepPath)) return undefined;
+    return cache.delete(request);
+  }));
+}
+
+function cacheBackgroundResponse(request, response) {
+  return caches.open(PHOTOS_CACHE)
+    .then(cache => cache.put(request, response))
+    .then(() => pruneBackgroundCache(request.url));
+}
 
 self.addEventListener('push', e => {
   // A non-JSON payload (a test push, a truncated delivery) throws here; every
@@ -291,13 +299,17 @@ self.addEventListener('fetch', e => {
     if (isAppAsset || isBackgroundPhoto) {
       e.respondWith(
         caches.match(e.request).then(cached => {
-          if (cached) return cached;
+          if (cached) {
+            if (isBackgroundPhoto) e.waitUntil(pruneBackgroundCache(e.request.url));
+            return cached;
+          }
           return fetch(e.request, { cache: 'no-store' }).then(res => {
             if (res.redirected) res = new Response(res.body, res);
             if (res.ok) {
               const clone = res.clone();
-              const target = isBackgroundPhoto ? PHOTOS_CACHE : CACHE;
-              e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
+              e.waitUntil(isBackgroundPhoto
+                ? cacheBackgroundResponse(e.request, clone).catch(() => {})
+                : caches.open(CACHE).then(c => c.put(e.request, clone).catch(() => {})));
             }
             return res;
           }).catch(() => {
@@ -329,12 +341,9 @@ self.addEventListener('fetch', e => {
           if (res.redirected) res = new Response(res.body, res);
           if (res.ok) {
             const clone = res.clone();
-            // A photo that missed precaching (e.g. a transient 404 during
-            // install, or one added to Background/ after this list was last
-            // synced: matched by path, not exact PHOTO_ASSETS membership, so
-            // the routing survives the catalog's normal growth) belongs in
-            // PHOTOS_CACHE, not the short-lived versioned CACHE: otherwise
-            // it'd get wiped again on the next deploy.
+            // A background photo fetched at runtime belongs in PHOTOS_CACHE,
+            // not the short-lived versioned CACHE: otherwise it would get
+            // wiped again on the next deploy.
             const target = url.pathname.includes('/Background/') ? PHOTOS_CACHE : CACHE;
             e.waitUntil(caches.open(target).then(c => c.put(e.request, clone)).catch(() => {}));
           }
