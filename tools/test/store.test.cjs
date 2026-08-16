@@ -2122,6 +2122,24 @@ async function testAsync(name, fn) {
     assert.strictEqual(settings.macroTargets, applied);
   });
 
+  test('macroApplyRollbackInfo: recovers a legacy apply from the prior history snapshot', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60, caloriesTraining: 2260, proteinRest: 150, carbsRest: 180, fatRest: 60, caloriesRest: 2100 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55, caloriesTraining: 2260, proteinRest: 160, carbsRest: 190, fatRest: 55, caloriesRest: 2100 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedAt: '2025-01-14', lastAppliedTargets: applied,
+    } };
+    const history = [{ asOfDate: '2025-01-07', decision: 'applied', targetsSnapshot: { ...previous, weeklyAverageCalories: 2200 } }];
+    const info = LB.macroApplyRollbackInfo(settings, history);
+    assert.strictEqual(info.available, true);
+    assert.strictEqual(info.source, 'history');
+    assert.strictEqual(info.previousDate, '2025-01-07');
+    assert.strictEqual(JSON.stringify(info.previousTargets), JSON.stringify(previous));
+    const rolledBack = LB.rollbackMacroApply(settings, history, '2025-01-15T12:00:00.000Z');
+    assert.strictEqual(JSON.stringify(rolledBack.macroTargets), JSON.stringify(previous));
+    assert.strictEqual(JSON.stringify(rolledBack.macroCalc.lastApplyPreviousTargets), JSON.stringify(previous));
+    assert.strictEqual(rolledBack.macroCalc.lastApplyRolledBackAt, '2025-01-15T12:00:00.000Z');
+  });
+
   test('reconstructAdaptiveTdeeHistory: uses only reliable macroCalc anchors', () => {
     const days = [];
     for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });

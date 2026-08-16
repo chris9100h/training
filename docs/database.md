@@ -590,6 +590,7 @@ Stand nicht unlesbar macht. Eine Zeile je User und Berechnungstag.
 - Store field: store.adaptiveTdeeHistory. Die bestehende zane_user_settings.macro_calc-Shape bleibt der aktuelle Formular-/Check-in-Zustand; die Historie wird nicht in dieses JSONB hineingeschrieben.
 - Beim letzten adaptiven Apply ergänzt `macroCalc` den persönlichen Vorher-Snapshot `lastApplyPreviousTargets` (Objekt oder `null`) und `lastApplyRolledBackAt` (ISO-Zeitstempel oder `null`). Damit kann ein versehentliches Apply einmalig zurückgesetzt werden; der Undo erscheint nur, solange die aktiven persönlichen Ziele noch exakt dem letzten `lastAppliedTargets`-Snapshot entsprechen, damit spätere manuelle oder synchronisierte Änderungen nicht überschrieben werden. Die JSONB-Spalte bleibt unverändert, daher ist dafür keine Migration nötig.
 - RLS: ausschließlich eigene Zeilen, kein Coach-Zugriff. Data-API-Rechte sind ausdrücklich auf authenticated beschränkt.
+- Bestandsnutzer ohne `lastApplyPreviousTargets` werden rückwirkend über den letzten früheren `applied`-Verlaufseintrag mit `targets_snapshot` unterstützt; fehlt dieser Verlauf, bleibt der Undo bewusst deaktiviert statt Makros zu erraten.
 - Backup: Teil des persönlichen User-Backups. Beim Restore wird die deterministische ID für den Ziel-User neu gebildet.
 
 Die erste historische Zeile kann beim Laden aus lastCheckinAt/lastAppliedAt

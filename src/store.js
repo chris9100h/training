@@ -8887,30 +8887,103 @@ function effectiveMacroTargets(personal, coachingMacros) {
   return null;
 }
 
+const ADAPTIVE_TDEE_TARGET_FIELDS = [
+  'proteinTraining', 'carbsTraining', 'fatTraining', 'caloriesTraining',
+  'proteinRest', 'carbsRest', 'fatRest', 'caloriesRest',
+];
+
+function adaptiveTdeeTargetSnapshot(value) {
+  if (!value || typeof value !== 'object') return null;
+  const snapshot = {};
+  ADAPTIVE_TDEE_TARGET_FIELDS.forEach(key => {
+    if (value[key] != null) snapshot[key] = value[key];
+  });
+  return hasMacroTargets(snapshot) ? snapshot : null;
+}
+
 // A TDEE Apply is deliberately undoable once, but only while the active
 // personal targets are still exactly the values that Apply wrote. This guards
 // against silently overwriting a later manual edit (or a newer synced change).
-// The previous snapshot property must exist even when its value is null,
-// because "there were no personal targets before Apply" is a valid state.
-function canUndoMacroApply(settings) {
+// Newer clients have lastApplyPreviousTargets. For older Applies, the last
+// earlier applied history row is a safe compatibility source when it carries
+// the old target snapshot. A missing history row remains unavailable rather
+// than guessing.
+function macroApplyRollbackInfo(settings, history = []) {
   const calc = settings?.macroCalc || {};
   const hasPrevious = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets');
-  if (!hasPrevious || calc.lastApplyRolledBackAt != null || calc.lastAppliedTargets == null) return false;
-  return syncValuesEqual(settings?.macroTargets ?? null, calc.lastAppliedTargets);
+  const appliedTargets = calc.lastAppliedTargets ?? null;
+  const activeMatches = appliedTargets != null
+    && syncValuesEqual(settings?.macroTargets ?? null, appliedTargets);
+  const base = {
+    available: false,
+    source: null,
+    previousTargets: null,
+    previousDate: null,
+    activeMatches,
+    hasPrevious,
+    reason: 'missing_apply',
+  };
+  if (appliedTargets == null) return base;
+  if (calc.lastApplyRolledBackAt != null) return { ...base, reason: 'already_rolled_back' };
+
+  let previousTargets = null;
+  let source = null;
+  let previousDate = null;
+  if (hasPrevious) {
+    // null is a meaningful snapshot: the first Apply may have replaced no
+    // personal targets at all, and Undo must be able to restore that state.
+    previousTargets = calc.lastApplyPreviousTargets;
+    source = 'snapshot';
+  } else {
+    const appliedDate = calc.lastAppliedAt;
+    const prior = (history || [])
+      .filter(row => row?.decision === 'applied'
+        && row.asOfDate && (!appliedDate || row.asOfDate < appliedDate)
+        && row.targetsSnapshot)
+      .sort((a, b) => String(b.asOfDate).localeCompare(String(a.asOfDate)))
+      .find(row => adaptiveTdeeTargetSnapshot(row.targetsSnapshot));
+    if (prior) {
+      previousTargets = adaptiveTdeeTargetSnapshot(prior.targetsSnapshot);
+      previousDate = prior.asOfDate;
+      source = 'history';
+    }
+  }
+
+  const previousAvailable = hasPrevious || previousTargets != null;
+  return {
+    ...base,
+    available: previousAvailable && activeMatches,
+    source,
+    previousTargets,
+    previousDate,
+    reason: !activeMatches ? 'targets_changed' : previousAvailable ? null : 'previous_missing',
+  };
 }
 
-// Pure state transition used by the Health screen and unit tests. Keeping the
-// guard in the store layer gives every caller the same protection.
-function rollbackMacroApply(settings, rolledBackAt = new Date().toISOString()) {
-  if (!canUndoMacroApply(settings)) return settings;
+function canUndoMacroApply(settings, history = []) {
+  return macroApplyRollbackInfo(settings, history).available;
+}
+
+// Pure state transition used by the Health screen and unit tests. The second
+// argument remains a timestamp for existing callers; passing an array enables
+// legacy-history recovery, with an optional third argument for the timestamp.
+function rollbackMacroApply(settings, historyOrTimestamp = [], maybeTimestamp) {
+  const history = Array.isArray(historyOrTimestamp) ? historyOrTimestamp : [];
+  const rolledBackAt = Array.isArray(historyOrTimestamp)
+    ? (maybeTimestamp || new Date().toISOString())
+    : (historyOrTimestamp || new Date().toISOString());
+  const info = macroApplyRollbackInfo(settings, history);
+  if (!info.available) return settings;
   const calc = settings.macroCalc || {};
+  const nextCalc = {
+    ...calc,
+    ...(info.hasPrevious ? {} : { lastApplyPreviousTargets: info.previousTargets }),
+    lastApplyRolledBackAt: rolledBackAt,
+  };
   return {
     ...settings,
-    macroTargets: calc.lastApplyPreviousTargets,
-    macroCalc: {
-      ...calc,
-      lastApplyRolledBackAt: rolledBackAt,
-    },
+    macroTargets: info.previousTargets,
+    macroCalc: nextCalc,
   };
 }
 
@@ -12774,7 +12847,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, macroApplyRollbackInfo, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,

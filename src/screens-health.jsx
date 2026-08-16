@@ -3053,9 +3053,38 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 // one thing. Deliberately kept visually quiet in every automation state
 // except "due": that row is the one thing in the lower box that must never
 // lose a fight for attention against the coach-info / SET-EDIT clutter.
-function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
+function MacroSourceCard({ store, setStore, userId, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
   const calc = store.settings?.macroCalc || {};
   const [confirmEl, confirm] = useConfirm();
+  const [legacyHistory, setLegacyHistory] = useStateH(null);
+  const [legacyHistoryStatus, setLegacyHistoryStatus] = useStateH('idle');
+  const hasPreviousSnapshot = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets');
+  const needsLegacyHistory = !!userId && !!calc.lastAppliedAt && calc.lastAppliedTargets != null && !hasPreviousSnapshot;
+  useEffectH(() => {
+    if (!needsLegacyHistory || !userId) {
+      setLegacyHistoryStatus('idle');
+      return;
+    }
+    const existing = store.adaptiveTdeeHistory || [];
+    if (existing.length) {
+      setLegacyHistory(existing);
+      setLegacyHistoryStatus('ready');
+      return;
+    }
+    let cancelled = false;
+    setLegacyHistoryStatus('loading');
+    LB.loadAdaptiveTdeeHistory(userId).then(rows => {
+      if (cancelled) return;
+      setLegacyHistory(rows || []);
+      setLegacyHistoryStatus('ready');
+    }).catch(error => {
+      if (cancelled) return;
+      console.warn('legacy adaptive TDEE rollback history load failed:', error);
+      setLegacyHistory([]);
+      setLegacyHistoryStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [needsLegacyHistory, userId, store.adaptiveTdeeHistory]);
   const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
   // Offered while coached too now: a coach's numbers still always win (see
   // effectiveMacroTargets, unchanged), Apply below only ever touches the
@@ -3126,13 +3155,13 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   // taken over since, or automation could since be off), "I did tap Apply on
   // this date" stays true, and that's the thing to confirm here.
   const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
-  const canUndoLastApply = LB.canUndoMacroApply(store.settings);
-  const hasRollbackSnapshot = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets')
-    && calc.lastAppliedTargets != null;
+  const rollbackHistory = [...(store.adaptiveTdeeHistory || []), ...(legacyHistory || [])];
+  const rollbackInfo = LB.macroApplyRollbackInfo(store.settings, rollbackHistory);
+  const canUndoLastApply = rollbackInfo.available;
   const undoLastApply = async () => {
     // Re-check at click time: a background sync may have changed the active
     // targets since this render. Never replace a newer/manual value.
-    if (!LB.canUndoMacroApply(store.settings)) {
+    if (!LB.canUndoMacroApply(store.settings, rollbackHistory)) {
       await confirm('The active targets changed after that Apply, so restoring the older values is no longer safe.', {
         title: 'Cannot undo', ok: 'OK', cancel: null,
       });
@@ -3141,7 +3170,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
     if (!await confirm('Restore the personal macro targets that were active before this Apply?', {
       title: 'Undo last Apply?', ok: 'Restore targets', cancel: 'Keep them',
     })) return;
-    setStore(s => ({ ...s, settings: LB.rollbackMacroApply(s.settings) }));
+    setStore(s => ({ ...s, settings: LB.rollbackMacroApply(s.settings, rollbackHistory) }));
   };
 
   return (
@@ -3272,9 +3301,19 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             Undo last Apply
           </button>
         )}
-        {!canUndoLastApply && hasRollbackSnapshot && !calc.lastApplyRolledBackAt && (
+        {needsLegacyHistory && legacyHistoryStatus === 'loading' && !canUndoLastApply && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Looking for the previous target snapshot…
+          </div>
+        )}
+        {!canUndoLastApply && rollbackInfo.reason === 'targets_changed' && (
           <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
             Undo unavailable because the active targets changed after that Apply.
+          </div>
+        )}
+        {!canUndoLastApply && needsLegacyHistory && legacyHistoryStatus === 'ready' && rollbackInfo.reason === 'previous_missing' && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Undo unavailable because no earlier target snapshot was saved.
           </div>
         )}
 
@@ -5555,7 +5594,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // the others (an adherence trend with no targets to compare against isn't
   // useful alone).
   const macroSourceCard = (
-    <MacroSourceCard store={store} setStore={setStore} dragHandle={handle} tf={tf} setTf={setTf}
+    <MacroSourceCard store={store} setStore={setStore} userId={userId} dragHandle={handle} tf={tf} setTf={setTf}
       coachHasMacros={coachHasMacros} fromCoach={fromCoach} selfCoachedMacros={selfCoachedMacros}
       hasTargets={!!effectiveTargets} onSetTarget={() => setTargetOpen(true)} onOpenCheckin={() => setCheckinOpen(true)}
       onOpenHistory={() => setTdeeHistoryOpen(true)}
