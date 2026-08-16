@@ -6685,6 +6685,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       });
       await new Promise(resolve => requestAnimationFrame(resolve));
     }
+    try {
+      await Promise.all([
+        document.fonts?.load('600 64px "Inter"'),
+        document.fonts?.load('300 64px "JetBrains Mono"'),
+        document.fonts?.load('700 64px "Big Shoulders Display"'),
+      ].filter(Boolean));
+    } catch (_) {}
     if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
     try {
       const element = recapRef.current;
@@ -6750,7 +6757,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           gridTemplateColumns: capturing ? 'repeat(3, minmax(0, 1fr))' : undefined,
           gap: capturing ? 20 : 14,
           padding: capturing ? '28px 30px 32px' : 2,
-          width: capturing ? 1200 : 'auto',
+          width: capturing ? 1500 : 'auto',
           maxWidth: capturing ? 'none' : '100%',
           boxSizing: 'border-box',
           position: 'relative',
@@ -6821,15 +6828,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           ), target.calories != null ? `${target.calories} kcal target` : 'averages')}
 
           {section('MOVEMENT & HEALTH', (
-            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px 10px' }}>
               {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
               {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
               {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
               {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
               {metric('Cardio', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
               {metric('Cardio sessions', snapshot.cardioSessions || null)}
-              {metric('Weight change', snapshot.weightChange != null ? `${snapshot.weightChange > 0 ? '+' : ''}${fmt(snapshot.weightChange, 1)}` : null, snapshot.weightChange != null ? weightUnit : '')}
-              {metric('Training days', snapshot.stats.trainingsDone || null)}
             </div>
           ))}
 
