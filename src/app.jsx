@@ -12,6 +12,12 @@ const WHATS_NEW_KEY = 'logbook-whatsnew-seen';
 // and must not be allowed to wipe the local pending diff.
 const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 
+// A database outage can happen while the browser still reports itself online,
+// so the browser's `online` event alone is not enough to recover sync. Keep the
+// fallback probe deliberately sparse: one attempt after five seconds, then
+// 15/30/60 seconds. This is a reachability check, not a polling loop.
+const SYNC_RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000];
+
 const ADMIN_SUPPORT_EMAIL = 'office@btc-prime.biz';
 
 // Entries newer than the last-seen id. New users / first run after the feature
@@ -626,6 +632,7 @@ function App() {
   const pendingForceNonce         = useRefA(null); // admin_force_update() broadcast nonce seen but not yet applied
   const previousRouteName         = useRefA(null);
   const foregroundRefresh         = useRefA(null); // one in-flight health refresh across all foreground events
+  const syncProbePromise          = useRefA(null); // de-duplicates foreground/automatic DB probes
   const lastForegroundRefreshAt   = useRefA(0);    // start time of the last accepted soft refresh
   const lastForegroundEventAt     = useRefA(0);    // coalesces pageshow, visibility and focus bursts
   const stagedBootHydrating       = useRefA(false); // prevents feature-on effects duplicating stage two queries
@@ -1413,7 +1420,11 @@ function App() {
       // A transient offline/auth event can turn the indicator red even though
       // there is no diff left to write. The retry button must be able to clear
       // that stale local status once the session and network are healthy again.
-      if (uid && navigator.onLine && authStatusRef.current === 'online') setSyncStatus('synced');
+      if (uid && navigator.onLine && authStatusRef.current === 'online') {
+        clearTimeout(retryTimer.current);
+        retryTimer.current = null;
+        setSyncStatus('synced');
+      }
       return;
     }
     syncing.current = true;
@@ -1424,6 +1435,8 @@ function App() {
       .finally(() => {
         syncing.current = false;
         if (ok) {
+          clearTimeout(retryTimer.current);
+          retryTimer.current = null;
           // More edits landed mid-flight? Keep flushing. Otherwise we're synced.
           if (pendingStore.current !== syncBase.current) { setSyncStatus('pending'); flushSync(uid); }
           else setSyncStatus('synced');
@@ -1437,6 +1450,81 @@ function App() {
       });
   }, [scheduleLocalSave]);
 
+  // A failed write already has its own serialized retry path above. This
+  // separate probe covers the other important case: the browser remains
+  // "online", but a DB/RPC request failed and there is no pending local diff.
+  // get_runtime_config is a small authenticated RPC, so it proves the API and
+  // database are reachable without reloading the whole store.
+  const probeSyncConnection = useCallbackA((uid) => {
+    if (!uid || uid !== userIdRef.current || !navigator.onLine || authStatusRef.current !== 'online') {
+      return Promise.resolve(false);
+    }
+    if (syncProbePromise.current) return syncProbePromise.current;
+
+    const probe = LB.fetchRuntimeConfig()
+      .then(() => {
+        if (uid !== userIdRef.current) return false;
+        if (pendingStore.current !== syncBase.current) {
+          setSyncStatus('pending');
+          flushSync(uid);
+        } else {
+          setSyncStatus('synced');
+        }
+        return true;
+      })
+      .catch(err => {
+        console.error('Supabase reconnect probe failed, will retry', err);
+        if (uid === userIdRef.current) setSyncStatus('error');
+        return false;
+      });
+    const trackedProbe = probe.finally(() => {
+      if (syncProbePromise.current === trackedProbe) syncProbePromise.current = null;
+    });
+    syncProbePromise.current = trackedProbe;
+    return trackedProbe;
+  }, [flushSync]);
+
+  // Retry a DB reachability failure even when the browser never transitions
+  // from offline to online. The backoff is bounded and this effect owns only
+  // the no-pending-diff probe; pending writes continue through flushSync's
+  // serialized 15-second retry path so the two loops cannot create a storm.
+  useEffectA(() => {
+    if (syncStatus !== 'error' || phase !== 'ready' || !userId) return undefined;
+    let cancelled = false;
+    let attempt = 0;
+    let timer = null;
+
+    const schedule = () => {
+      if (cancelled) return;
+      const delay = SYNC_RECONNECT_DELAYS_MS[Math.min(attempt, SYNC_RECONNECT_DELAYS_MS.length - 1)];
+      timer = setTimeout(attemptReconnect, delay);
+    };
+    const attemptReconnect = async () => {
+      if (cancelled) return;
+      const uid = userIdRef.current;
+      if (!uid || !navigator.onLine || authStatusRef.current !== 'online') {
+        attempt = Math.min(attempt + 1, SYNC_RECONNECT_DELAYS_MS.length - 1);
+        schedule();
+        return;
+      }
+      if (pendingStore.current !== syncBase.current) {
+        setSyncStatus('pending');
+        flushSync(uid);
+        return;
+      }
+      const recovered = await probeSyncConnection(uid);
+      if (cancelled || recovered) return;
+      attempt = Math.min(attempt + 1, SYNC_RECONNECT_DELAYS_MS.length - 1);
+      schedule();
+    };
+
+    schedule();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [syncStatus, phase, userId, flushSync, probeSyncConnection]);
+
   // A transient reachability/auth event can mark the indicator red even when
   // the local snapshot is already fully synced. Reconcile on foreground and
   // after Auth recovery so the status reflects the current state, not a stale
@@ -1447,10 +1535,12 @@ function App() {
     if (pendingStore.current !== syncBase.current) {
       setSyncStatus('pending');
       flushSync(uid);
+    } else if (syncStatus === 'error') {
+      probeSyncConnection(uid);
     } else {
       setSyncStatus('synced');
     }
-  }, [flushSync]);
+  }, [flushSync, probeSyncConnection, syncStatus]);
 
   useEffectA(() => {
     const reconcile = () => {
@@ -2772,7 +2862,7 @@ function App() {
       checkForceUpdate();
       LB.flushSocialNotificationOutbox?.();
       if (pendingStore.current !== syncBase.current) flushSync(uid);
-      else setSyncStatus('synced');
+      else probeSyncConnection(uid);
     };
     if (!navigator.onLine) setSyncStatus('error');
     window.addEventListener('offline', onOffline);
@@ -2781,7 +2871,7 @@ function App() {
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online',  onOnline);
     };
-  }, [userId, flushSync]);
+  }, [userId, flushSync, probeSyncConnection]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
   useEffectA(() => {
@@ -2879,7 +2969,12 @@ function App() {
   // Global hook so shared components (TopBar/ScreenHead long-press-to-home)
   // can jump home without threading `go` through every screen that renders them.
   window.__goHome = () => go({ name: 'home' });
-  const onRetrySync = () => { setStorageFull(false); flushSync(userId); };
+  const onRetrySync = () => {
+    setStorageFull(false);
+    const uid = userIdRef.current || userId;
+    if (pendingStore.current !== syncBase.current) flushSync(uid);
+    else probeSyncConnection(uid);
+  };
 
   // An update may be installed while the user is anywhere in the app, but a
   // reload is only safe on a quiet Home surface. Route checks protect editors;
