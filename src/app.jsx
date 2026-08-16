@@ -1456,12 +1456,17 @@ function App() {
   // get_runtime_config is a small authenticated RPC, so it proves the API and
   // database are reachable without reloading the whole store.
   const probeSyncConnection = useCallbackA((uid) => {
-    if (!uid || uid !== userIdRef.current || !navigator.onLine || authStatusRef.current !== 'online') {
+    // navigator.onLine is only a browser hint (and is notably unreliable in
+    // iOS/PWA). The authenticated RPC below is the actual reachability test.
+    if (!uid || uid !== userIdRef.current || authStatusRef.current !== 'online') {
       return Promise.resolve(false);
     }
     if (syncProbePromise.current) return syncProbePromise.current;
 
-    const probe = LB.fetchRuntimeConfig()
+    // Promise.resolve also turns a synchronous failure (for example an older
+    // cached bundle without the helper) into the same retryable path.
+    const probe = Promise.resolve()
+      .then(() => LB.fetchRuntimeConfig())
       .then(() => {
         if (uid !== userIdRef.current) return false;
         if (pendingStore.current !== syncBase.current) {
@@ -1489,7 +1494,7 @@ function App() {
   // the no-pending-diff probe; pending writes continue through flushSync's
   // serialized 15-second retry path so the two loops cannot create a storm.
   useEffectA(() => {
-    if (syncStatus !== 'error' || phase !== 'ready' || !userId) return undefined;
+    if (syncStatus !== 'error' || !userId) return undefined;
     let cancelled = false;
     let attempt = 0;
     let timer = null;
@@ -1502,7 +1507,7 @@ function App() {
     const attemptReconnect = async () => {
       if (cancelled) return;
       const uid = userIdRef.current;
-      if (!uid || !navigator.onLine || authStatusRef.current !== 'online') {
+      if (!uid || authStatusRef.current !== 'online') {
         attempt = Math.min(attempt + 1, SYNC_RECONNECT_DELAYS_MS.length - 1);
         schedule();
         return;
@@ -1523,7 +1528,7 @@ function App() {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [syncStatus, phase, userId, flushSync, probeSyncConnection]);
+  }, [syncStatus, userId, flushSync, probeSyncConnection]);
 
   // A transient reachability/auth event can mark the indicator red even when
   // the local snapshot is already fully synced. Reconcile on foreground and
@@ -1531,7 +1536,7 @@ function App() {
   // event from earlier in the session.
   const reconcileSyncStatus = useCallbackA(() => {
     const uid = userIdRef.current;
-    if (!uid || !navigator.onLine || authStatusRef.current !== 'online') return;
+    if (!uid || authStatusRef.current !== 'online') return;
     if (pendingStore.current !== syncBase.current) {
       setSyncStatus('pending');
       flushSync(uid);
