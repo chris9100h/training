@@ -6618,6 +6618,15 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
   const adherence = snapshot.stats.adherence != null ? Math.round(snapshot.stats.adherence) : null;
   const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
   const weightUnit = UI.unit();
+  // Exported posters use the same watermark treatment as plan/session sharing:
+  // VIPs get their selected background, everyone else gets the ZANE mark.
+  // The logo only exists in capture mode, so the normal sheet stays compact.
+  const shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const shotIsCustom = shotLogo !== 'icons/zane-logo.png';
+  const shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const shotLogoStyle = shotIsCustom
+    ? { width: '72%', maxWidth: 700, opacity: 0.13, objectFit: 'contain' }
+    : { width: '68%', maxWidth: 660, opacity: shotIsLight ? 0.10 : 0.06, filter: shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
   const fmt = (value, digits = 0) => {
     if (value == null || !Number.isFinite(Number(value))) return '—';
     return Number(value).toLocaleString('en-US', { maximumFractionDigits: digits });
@@ -6632,8 +6641,8 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       <div style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 3 }}>{label}</div>
     </div>
   );
-  const section = (title, children, note = null) => (
-    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
+  const section = (title, children, note = null, wide = false) => (
+    <Card style={{ padding: capturing ? 18 : 14, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { position: 'relative', zIndex: 1 } : {}), ...(capturing && wide ? { gridColumn: '1 / -1' } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
         {note && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{note}</span>}
@@ -6668,11 +6677,22 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       parent.style.minHeight = 'auto';
     }
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const logo = recapRef.current.querySelector('img[data-shot-avatar]');
+    if (logo && !logo.complete) {
+      await new Promise(resolve => {
+        logo.addEventListener('load', resolve, { once: true });
+        logo.addEventListener('error', resolve, { once: true });
+      });
+      await new Promise(resolve => requestAnimationFrame(resolve));
+    }
+    if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
     try {
       const element = recapRef.current;
       const canvas = await html2canvas(element, {
         backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
         scale: 2, useCORS: true, logging: false,
+        scrollX: 0, scrollY: 0,
+        width: element.scrollWidth, windowWidth: element.scrollWidth,
         height: element.scrollHeight, windowHeight: element.scrollHeight,
       });
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
@@ -6724,8 +6744,20 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           </div>
         )}
 
-        <div ref={recapRef} style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 2, background: 'var(--bg)', backgroundImage: 'var(--bg-texture)' }}>
-          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}` }}>
+        <div ref={recapRef} style={{
+          display: capturing ? 'grid' : 'flex',
+          flexDirection: capturing ? undefined : 'column',
+          gridTemplateColumns: capturing ? 'repeat(2, minmax(0, 1fr))' : undefined,
+          gap: capturing ? 20 : 14,
+          padding: capturing ? '28px 30px 32px' : 2,
+          width: capturing ? 1020 : 'auto',
+          maxWidth: capturing ? 'none' : '100%',
+          boxSizing: 'border-box',
+          position: 'relative',
+          background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
+        }}>
+          {capturing && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}><img src={shotLogo} data-shot-avatar="1" style={shotLogoStyle} /></div>}
+          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { gridColumn: '1 / -1', position: 'relative', zIndex: 1 } : {}) }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
               <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
               <span style={{ flex: 1 }} />
@@ -6809,11 +6841,11 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           ))}
 
           {!snapshot.hasData && (
-            <Card style={{ padding: 16, textAlign: 'center', borderLeft: `3px solid ${UI.inkFaint}` }}>
+            <Card style={{ padding: 16, textAlign: 'center', borderLeft: `3px solid ${UI.inkFaint}`, ...(capturing ? { gridColumn: '1 / -1', position: 'relative', zIndex: 1 } : {}) }}>
               <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>Nothing is logged for this week on this device.</div>
             </Card>
           )}
-          <div style={{ textAlign: 'center', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 9, lineHeight: '14px', padding: '2px 12px 4px' }}>Based on the data currently loaded on this device. Today's nutrition score is provisional until the food day is closed.</div>
+          <div style={{ gridColumn: capturing ? '1 / -1' : undefined, position: capturing ? 'relative' : undefined, zIndex: capturing ? 1 : undefined, textAlign: 'center', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 9, lineHeight: '14px', padding: '2px 12px 4px' }}>Based on the data currently loaded on this device. Today's nutrition score is provisional until the food day is closed.</div>
         </div>
 
         {!capturing && (
