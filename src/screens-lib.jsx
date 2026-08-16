@@ -3252,13 +3252,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
 // that loads second. Renaming or removing these needs a matching update
 // there too.
 // Sessions eligible for comparison against `s`: same dayId, ended, excluding
-// itself, newest first. Deload and cleanup sessions excluded for the same
-// reason as prevEntryMap below (artificially light, not a fair comparison
-// baseline). Shared by the Compare button (SessionDetailScreen) and the session
-// picker (SessionCompareScreen).
+// itself, newest first. Deloads are intentionally excluded because they are
+// non-comparative. Cleanup sessions remain in the chain: the post-cleanup
+// session must compare against the cleanup baseline instead of jumping back to
+// the pre-cleanup cycle. Shared by the Compare button (SessionDetailScreen) and
+// the session picker (SessionCompareScreen).
 function sameDaySessions(sessions, s) {
   return sessions
-    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+    .filter(x => x.ended && x.id !== s.id && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
 }
 
@@ -3360,7 +3361,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
         else prev = cyclePrev;
       } else {
         const candidates = store.sessions
-          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+          .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
           .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
         for (const x of candidates) {
           if (!(x.entries || []).length) {
@@ -3941,7 +3942,7 @@ function SessionDetailScreen({ store, setStore, go, sessionId, justFinished, bac
   };
 
   const prevSameDay = store.sessions
-    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload && !x.isCleanup)
+    .filter(x => x.ended && x.id !== s.id && x.ended < s.ended && x.dayId === s.dayId && !x.isDeload)
     .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''))[0];
   const volDelta = prevSameDay != null ? vol - LB.totalVolume(prevSameDay, store.exercises, store.dailyLogs) : null;
   const compareCandidates = sameDaySessions(store.sessions, s);

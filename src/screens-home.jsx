@@ -1723,7 +1723,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // ONCE instead of re-spreading and re-sorting the whole history per entry
     // (was O(entries x n log n), the single heaviest computation on Home).
     return [...store.sessions]
-      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload && !x.isCleanup)
+      // Cleanup is a real progression baseline: the week after cleanup must
+      // compare against the reduced session, not jump back over it to the
+      // pre-cleanup cycle. Deload remains excluded because it is explicitly
+      // non-comparative.
+      .filter(x => x.ended && x.id !== doneSession.id && x.dayId === doneSession.dayId && x.ended < doneSession.ended && !x.isDeload)
       .sort((a, b) => (b.ended || '').localeCompare(a.ended || ''));
   }, [doneSession, store.sessions]);
 
