@@ -1367,7 +1367,10 @@ function App() {
     const target = pendingStore.current;
     if (!uid || !target) return true;
     const ok = LB.saveLocalState(target, syncBase.current, uid);
-    if (!ok) setStorageFull(true);
+    // A quota/private-mode failure is recoverable. Clear the warning again
+    // after the very next successful atomic snapshot instead of leaving the
+    // home indicator red for the rest of the session.
+    setStorageFull(!ok);
     return ok;
   }, [cancelScheduledLocalSave]);
 
@@ -1381,7 +1384,7 @@ function App() {
         localSaveTimer.current = null;
         const uid = userIdRef.current;
         const target = pendingStore.current;
-        if (uid && target && !LB.saveLocalState(target, syncBase.current, uid)) setStorageFull(true);
+        if (uid && target) setStorageFull(!LB.saveLocalState(target, syncBase.current, uid));
       };
       if (typeof requestIdleCallback === 'function') {
         task.idleId = requestIdleCallback(run, { timeout: 1200 });
@@ -1434,6 +1437,37 @@ function App() {
       });
   }, [scheduleLocalSave]);
 
+  // A transient reachability/auth event can mark the indicator red even when
+  // the local snapshot is already fully synced. Reconcile on foreground and
+  // after Auth recovery so the status reflects the current state, not a stale
+  // event from earlier in the session.
+  const reconcileSyncStatus = useCallbackA(() => {
+    const uid = userIdRef.current;
+    if (!uid || !navigator.onLine || authStatusRef.current !== 'online') return;
+    if (pendingStore.current !== syncBase.current) {
+      setSyncStatus('pending');
+      flushSync(uid);
+    } else {
+      setSyncStatus('synced');
+    }
+  }, [flushSync]);
+
+  useEffectA(() => {
+    const reconcile = () => {
+      if (document.visibilityState === 'visible') reconcileSyncStatus();
+    };
+    window.addEventListener('focus', reconcile);
+    window.addEventListener('pageshow', reconcile);
+    window.addEventListener('zane-auth-recovered', reconcile);
+    document.addEventListener('visibilitychange', reconcile);
+    return () => {
+      window.removeEventListener('focus', reconcile);
+      window.removeEventListener('pageshow', reconcile);
+      window.removeEventListener('zane-auth-recovered', reconcile);
+      document.removeEventListener('visibilitychange', reconcile);
+    };
+  }, [reconcileSyncStatus]);
+
   // One-shot, awaitable flush for the sign-out flow. Unlike flushSync (fire-
   // and-forget, auto-retried on a 15s timer), SIGNED_OUT wipes the local
   // cache/pending diff unconditionally and immediately (see below): if that
@@ -1466,7 +1500,7 @@ function App() {
       await Promise.race([
         LB.syncStore(syncBase.current, target, uid).then(() => {
           syncBase.current = target;
-          if (!LB.saveSyncedState(target, uid)) setStorageFull(true);
+          setStorageFull(!LB.saveSyncedState(target, uid));
           landed = true;
         }),
         timeout,
