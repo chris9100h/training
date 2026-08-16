@@ -6010,15 +6010,52 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
 // surface a warning instead of letting the local cache silently stop updating.
 const _localSnapshotState = new Map();
 
+function stripFriendsSnapshot(snapshot) {
+  if (!snapshot || typeof snapshot !== 'object' || !Object.prototype.hasOwnProperty.call(snapshot, 'friends')) return snapshot;
+  const { friends: _friends, ...durable } = snapshot;
+  return durable;
+}
+
 function loadLocalState(userId) {
   try {
     const pairKey = `logbook-pair-${userId}`;
-    const pairRaw = localStorage.getItem(pairKey);
+    let pairRaw = localStorage.getItem(pairKey);
     if (pairRaw) {
       const parsed = JSON.parse(pairRaw);
-      const store = parsed.store;
-      if (!store) return { store: null, base: null };
-      const base = parsed.base ?? store;
+      const originalStore = parsed.store;
+      if (!originalStore) return { store: null, base: null };
+
+      // Friends is server-authoritative and deliberately not part of the
+      // offline cache. Strip it on read as well as on write so a cache created
+      // by an older bundle cannot keep those snapshots around indefinitely.
+      const store = stripFriendsSnapshot(originalStore);
+      const originalBase = parsed.base;
+      let base = originalBase == null || originalBase === originalStore
+        ? store
+        : stripFriendsSnapshot(originalBase);
+
+      // A separately parsed base may contain the exact same durable state as
+      // store. Treat it as the same snapshot so it does not consume a second
+      // copy of the local quota. The comparison is key-order-insensitive and
+      // ignores only the already-stripped volatile Friends surface.
+      const equivalentBase = base !== store && syncValuesEqual(store, base);
+      if (equivalentBase) base = store;
+
+      const needsRewrite = store !== originalStore
+        || (originalBase != null && base !== originalBase)
+        || equivalentBase;
+      if (needsRewrite) {
+        const compactRaw = JSON.stringify({ v: 2, store, base: base === store ? null : base });
+        try {
+          // Best effort only. localStorage.setItem is atomic; if quota/private
+          // mode rejects this write, the original pair remains intact and the
+          // next normal save retries the compaction.
+          localStorage.setItem(pairKey, compactRaw);
+          pairRaw = compactRaw;
+        } catch (_) {
+          pairRaw = null;
+        }
+      }
       _localSnapshotState.set(userId, { storeRef: store, baseRef: base, raw: pairRaw });
       return { store, base };
     }
@@ -6053,24 +6090,24 @@ function loadLocalState(userId) {
 // "equals store") so the next boot parses a smaller payload. Repeated idle
 // saves reuse the previous serialized string when the immutable store/base
 // references did not change.
-function stripFriendsSnapshot(snapshot) {
-  if (!snapshot || typeof snapshot !== 'object' || !Object.prototype.hasOwnProperty.call(snapshot, 'friends')) return snapshot;
-  const { friends: _friends, ...durable } = snapshot;
-  return durable;
-}
-
 function saveLocalState(store, base, userId) {
   try {
     const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
     const baseIsStore = !base || base === store;
-    const effectiveBase = baseIsStore ? store : base;
     // Friends is a volatile, server-authoritative surface. Persisting its
     // message/feed/group snapshot doubles the cache during pending writes and
     // can exceed iOS localStorage quota, which then falsely turns the global
     // sync indicator red. Training data remains fully cached offline.
     const persistedStore = stripFriendsSnapshot(store);
-    const persistedBase = baseIsStore ? null : stripFriendsSnapshot(base);
+    const candidateBase = baseIsStore ? null : stripFriendsSnapshot(base);
+    // A separately-created object can still represent the exact same durable
+    // state (for example after a reload or a JSON round-trip). Only omit the
+    // base when that is proven; any real difference keeps the full baseline for
+    // offline recovery and conflict detection.
+    const baseEquivalent = !baseIsStore && syncValuesEqual(persistedStore, candidateBase);
+    const effectiveBase = baseIsStore || baseEquivalent ? store : base;
+    const persistedBase = baseIsStore || baseEquivalent ? null : candidateBase;
     const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
       ? prev.raw
       : JSON.stringify({ v: 2, store: persistedStore, base: persistedBase });

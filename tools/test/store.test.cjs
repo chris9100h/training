@@ -218,6 +218,38 @@ async function testAsync(name, fn) {
     assert.strictEqual(rawSynced.base, null, 'base is omitted from the pair entry once local state is confirmed synced');
   });
 
+  test('local cache compacts equal separately-parsed snapshots and drops stale Friends data', () => {
+    const store = {
+      settings: { unit: 'kg', accent: 'gold' },
+      sessions: [],
+      friends: { messages: [{ body: 'stale' }] },
+    };
+    // Different key order and a different Friends snapshot must still be
+    // recognised as equal durable state: Friends is volatile and excluded.
+    const base = {
+      sessions: [],
+      friends: { messages: [{ body: 'older' }] },
+      settings: { accent: 'gold', unit: 'kg' },
+    };
+    storeWindow.__testLocalStorage.setItem('logbook-pair-equal-user', JSON.stringify({ v: 2, store, base }));
+    const loaded = LB.loadLocalState('equal-user');
+    assert.strictEqual(loaded.store.friends, undefined, 'Friends must not be hydrated from local storage');
+    assert.strictEqual(loaded.base, loaded.store, 'an equal durable base must reuse the store reference');
+    const compacted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-equal-user'));
+    assert.strictEqual(compacted.base, null, 'equal snapshots must be persisted without a duplicate base');
+    assert.strictEqual(compacted.store.friends, undefined, 'stale Friends data must be removed on load');
+  });
+
+  test('saveLocalState keeps a genuinely different baseline despite Friends stripping', () => {
+    const store = { settings: { unit: 'lbs' }, sessions: [], friends: { messages: [] } };
+    const base = { settings: { unit: 'kg' }, sessions: [], friends: { messages: [] } };
+    assert.strictEqual(LB.saveLocalState(store, base, 'different-user'), true);
+    const persisted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-different-user'));
+    assert.ok(persisted.base, 'a real durable edit must retain the offline baseline');
+    assert.strictEqual(persisted.store.friends, undefined);
+    assert.strictEqual(persisted.base.friends, undefined);
+  });
+
   test('loadLocalState falls back to the pre-migration two-key format, then saveLocalState migrates it', () => {
     const legacyBase = { settings: { unit: 'kg' } };
     const legacyStore = { settings: { unit: 'lbs' } };
