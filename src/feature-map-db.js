@@ -12,7 +12,7 @@
    - hidden: optional; true = kept in the catalog but not shown (curated out)
 */
 window.FEATURE_MAP = {
-  version: 'v47 (2026-08-16)',
+  version: 'v48 (2026-08-16)',
   categories: [
     { id: "overview", label: "Overview", icon: "fa-bolt", blurb: "The short version." },
     { id: "start", label: "Getting started", icon: "fa-flag-checkered", blurb: "Create your account and get set up." },
@@ -24,7 +24,7 @@ window.FEATURE_MAP = {
     { id: "progress", label: "Progress & records", icon: "fa-chart-line", blurb: "See how the numbers are moving." },
     { id: "health", label: "Health & nutrition", icon: "fa-heart-pulse", blurb: "Track the stuff around training." },
     { id: "cardio", label: "Cardio", icon: "fa-person-running", blurb: "Plan and log conditioning work." },
-    { id: "friends", label: "Friends & social", icon: "fa-user-group", blurb: "Train together, share selectively and stay in touch." },
+    { id: "friends", label: "Friends & social", icon: "fa-users", blurb: "Train together, share selectively and stay in touch." },
     { id: "coachClient", label: "Coaching (as a lifter)", icon: "fa-user", blurb: "Work with a coach inside the app." },
     { id: "coachCoach", label: "Coaching (as a coach)", icon: "fa-user-tie", blurb: "Tools for running your roster." },
   ],
