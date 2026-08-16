@@ -4304,19 +4304,19 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           </span>
         </div>
       )}
-      {tgtCal != null && (
-        <>
-          <div style={{ height: 'var(--hair-width)', background: UI.hairStrong, margin: '6px 0' }} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
-            {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
-              <div key={i} style={{ textAlign: 'center' }}>
-                <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                  {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
+      {(tgtProt != null || tgtCarb != null || tgtFat != null) && (
+        // Keep the target strip visually identical to Today: the calorie goal
+        // remains part of the computed weekly stats, but this compact strip is
+        // intentionally the three macro targets only in both cards.
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+          {[tgtProt, tgtCarb, tgtFat].map((v, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>
+                {v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span>
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );
