@@ -43,7 +43,14 @@ function loadStore() {
   };
   const sandbox = {
     window: { supabase: { createClient: (_url, _key, options) => { testClientOptions = options; return fakeClient; } }, addEventListener() {}, dispatchEvent(event) { windowEventLog.push(event); }, __STORE_TEST__: true },
-    localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
+    localStorage: {
+      _d: {},
+      get length() { return Object.keys(this._d).length; },
+      key(i) { return Object.keys(this._d)[i] ?? null; },
+      getItem(k) { return this._d[k] ?? null; },
+      setItem(k, v) { this._d[k] = String(v); },
+      removeItem(k) { delete this._d[k]; },
+    },
     CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
   };
@@ -204,6 +211,153 @@ async function testAsync(name, fn) {
     assert.deepStrictEqual(loaded.store.sessions, []);
   });
 
+  test('local cache keeps a bounded offline working set without mutating the live store', () => {
+    const today = LB.todayISO();
+    const oldSession = {
+      id: 'old-session', date: '2020-01-01', ended: '2020-01-01T10:00:00.000Z',
+      currentExIdx: 4, entries: [{ exId: 'ex-old', sets: [{ kg: 80, reps: 8 }] }],
+    };
+    const recentSession = {
+      id: 'recent-session', date: today, ended: `${today}T10:00:00.000Z`,
+      entries: [{ exId: 'ex-recent', sets: [{ kg: 80, reps: 8 }] }],
+    };
+    const activeSession = {
+      id: 'active-session', date: '2020-01-01', ended: null,
+      entries: [{ exId: 'ex-active', sets: [{ kg: 80, reps: 8 }] }],
+    };
+    const state = {
+      inProgress: 'active-session',
+      sessions: [oldSession, recentSession, activeSession],
+      skips: [{ id: 'skip-old', date: '2020-01-01', dayName: 'PUSH' }, { id: 'skip-now', date: today, dayName: 'PULL' }],
+      statusPeriods: [{ id: 'status-old', mode: 'sick', startedAt: '2020-01-01T00:00:00.000Z', endedAt: '2020-01-03T00:00:00.000Z' }, { id: 'status-now', mode: 'vacation', startedAt: `${today}T00:00:00.000Z`, endedAt: null }],
+      foodLogs: [{ id: 'food-old', date: '2020-01-01', quantityG: 100 }, { id: 'food-now', date: today, quantityG: 100 }],
+      dailyLogs: [{ id: 'daily-old', date: '2020-01-01', weight: 80 }, { id: 'daily-now', date: today, weight: 81 }],
+      waterLogs: [{ id: 'water-old', date: '2020-01-01', amountMl: 500 }, { id: 'water-now', date: today, amountMl: 500 }],
+      foodTemplateDays: [{ id: 'template-day-old', date: '2020-01-01' }, { id: 'template-day-now', date: today }],
+      medicationLogs: [{ id: 'med-old', date: '2020-01-01', doseQty: 1 }, { id: 'med-now', date: today, doseQty: 1 }],
+      medicationPillboxChecks: [{ id: 'pill-old', date: '2020-01-01' }, { id: 'pill-now', date: today }],
+      cardioLogs: [{ id: 'cardio-old', date: '2020-01-01', durationMinutes: 20 }, { id: 'cardio-now', date: today, durationMinutes: 20 }],
+      adaptiveTdeeHistory: [{ id: 'tdee-old', asOfDate: '2020-01-01', tdeeKcal: 2200 }, { id: 'tdee-now', asOfDate: today, tdeeKcal: 2300 }],
+    };
+    assert.strictEqual(LB.saveSyncedState(state, 'retention-user'), true);
+    const persisted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-retention-user'));
+    assert.strictEqual(state.sessions[0].entries.length, 1, 'compaction must not mutate the live store');
+    assert.deepStrictEqual(persisted.store.sessions.find(s => s.id === 'old-session').entries, []);
+    assert.strictEqual(persisted.store.sessions.find(s => s.id === 'old-session').currentExIdx, undefined);
+    assert.strictEqual(persisted.store.sessions.find(s => s.id === 'recent-session').entries.length, 1);
+    assert.strictEqual(persisted.store.sessions.find(s => s.id === 'active-session').entries.length, 1);
+    assert.strictEqual(persisted.store.skips.some(s => s.id === 'skip-old'), false);
+    assert.strictEqual(persisted.store.skips.some(s => s.id === 'skip-now'), true);
+    assert.strictEqual(persisted.store.statusPeriods.some(s => s.id === 'status-old'), false);
+    assert.strictEqual(persisted.store.statusPeriods.some(s => s.id === 'status-now'), true);
+    assert.strictEqual(persisted.store.foodLogs.some(l => l.id === 'food-old'), false);
+    assert.strictEqual(persisted.store.dailyLogs.some(l => l.id === 'daily-old'), false);
+    assert.strictEqual(persisted.store.waterLogs.some(l => l.id === 'water-old'), false);
+    assert.strictEqual(persisted.store.foodTemplateDays.some(l => l.id === 'template-day-old'), false);
+    assert.strictEqual(persisted.store.medicationLogs.some(l => l.id === 'med-old'), false);
+    assert.strictEqual(persisted.store.medicationPillboxChecks.some(l => l.id === 'pill-old'), false);
+    assert.strictEqual(persisted.store.cardioLogs.some(l => l.id === 'cardio-old'), false);
+    assert.strictEqual(persisted.store.adaptiveTdeeHistory.some(l => l.id === 'tdee-old'), false);
+    assert.strictEqual(persisted.store.dailyLogs.some(l => l.id === 'daily-now'), true);
+    assert.strictEqual(persisted.store.foodLogs.some(l => l.id === 'food-now'), true);
+    assert.strictEqual(persisted.store.waterLogs.some(l => l.id === 'water-now'), true);
+    assert.strictEqual(persisted.store.foodTemplateDays.some(l => l.id === 'template-day-now'), true);
+    assert.strictEqual(persisted.store.medicationLogs.some(l => l.id === 'med-now'), true);
+    assert.strictEqual(persisted.store.medicationPillboxChecks.some(l => l.id === 'pill-now'), true);
+    assert.strictEqual(persisted.store.cardioLogs.some(l => l.id === 'cardio-now'), true);
+    assert.strictEqual(persisted.store.adaptiveTdeeHistory.some(l => l.id === 'tdee-now'), true);
+    assert.strictEqual(persisted.v, LB.LOCAL_CACHE_VERSION);
+  });
+
+  test('local cache pins old rows while an offline edit is pending', () => {
+    const oldSession = { id: 'pending-session', date: '2020-01-01', ended: '2020-01-01T10:00:00.000Z', entries: [{ exId: 'ex', sets: [{ kg: 80, reps: 8 }] }] };
+    const oldFood = { id: 'pending-food', date: '2020-01-01', quantityG: 100 };
+    const oldDaily = { id: 'pending-daily', date: '2020-01-01', weight: 80 };
+    const oldWater = { id: 'pending-water', date: '2020-01-01', amountMl: 500 };
+    const oldMedication = { id: 'pending-medication', date: '2020-01-01', doseQty: 1 };
+    const base = { settings: { unit: 'kg' }, sessions: [oldSession], foodLogs: [oldFood], dailyLogs: [oldDaily], waterLogs: [oldWater], medicationLogs: [oldMedication] };
+    const edited = {
+      settings: { unit: 'kg' },
+      sessions: [{ ...oldSession, entries: [{ ...oldSession.entries[0], sets: [{ kg: 82.5, reps: 8 }] }] }],
+      foodLogs: [{ ...oldFood, quantityG: 125 }],
+      dailyLogs: [{ ...oldDaily, weight: 81 }],
+      waterLogs: [{ ...oldWater, amountMl: 750 }],
+      medicationLogs: [{ ...oldMedication, doseQty: 2 }],
+    };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'pending-retention-user'), true);
+    const persisted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-retention-user'));
+    assert.ok(persisted.base, 'pending edits must keep a baseline');
+    assert.strictEqual(persisted.store.sessions[0].entries[0].sets[0].kg, 82.5);
+    assert.strictEqual(persisted.store.foodLogs[0].quantityG, 125);
+    assert.strictEqual(persisted.store.dailyLogs[0].weight, 81);
+    assert.strictEqual(persisted.store.waterLogs[0].amountMl, 750);
+    assert.strictEqual(persisted.store.medicationLogs[0].doseQty, 2);
+    assert.strictEqual(persisted.base.sessions[0].entries[0].sets[0].kg, 80);
+    assert.strictEqual(persisted.base.foodLogs[0].quantityG, 100);
+    assert.strictEqual(persisted.base.dailyLogs[0].weight, 80);
+    assert.strictEqual(persisted.base.waterLogs[0].amountMl, 500);
+    assert.strictEqual(persisted.base.medicationLogs[0].doseQty, 1);
+  });
+
+  test('local cache drops raw feedback from very old sessions but keeps the recap summary', () => {
+    const oldRaw = { answers: { soreness: { chest: 'none' } }, negOwner: {}, frozen: false };
+    const old = {
+      id: 'old-recap-session', date: '2020-01-01', ended: '2020-01-01T10:00:00.000Z', entries: [],
+      mesoRecap: { meso: true, week: 3, unit: 'kg', raw: oldRaw, gains: [{ key: 'chest', weightDelta: 2.5 }] },
+    };
+    const recent = {
+      id: 'recent-recap-session', date: LB.todayISO(), ended: `${LB.todayISO()}T10:00:00.000Z`, entries: [],
+      mesoRecap: { meso: true, raw: oldRaw, gains: [] },
+    };
+    assert.strictEqual(LB.saveSyncedState({ sessions: [old, recent] }, 'recap-retention-user'), true);
+    const persisted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-recap-retention-user'));
+    const oldSaved = persisted.store.sessions.find(s => s.id === old.id);
+    const recentSaved = persisted.store.sessions.find(s => s.id === recent.id);
+    assert.strictEqual(oldSaved.mesoRecap.raw, undefined);
+    assert.strictEqual(oldSaved._offlineEntriesDigest, undefined, 'an already-windowed server row must not get an empty digest');
+    assert.strictEqual(oldSaved.mesoRecap.gains[0].weightDelta, 2.5);
+    assert.ok(recentSaved.mesoRecap.raw, 'recent feedback remains available offline');
+  });
+
+  test('local cache prunes stale per-session meso answer keys but keeps the active one', () => {
+    for (let i = 0; i < 40; i++) storeWindow.__testLocalStorage.setItem(`logbook-meso-asked-stale-${i}`, '{}');
+    storeWindow.__testLocalStorage.setItem('logbook-meso-asked-active-session', '{}');
+    storeWindow.__testLocalStorage.setItem('logbook-pair-meso-prune-user', JSON.stringify({
+      v: LB.LOCAL_CACHE_VERSION, store: { inProgress: 'active-session', sessions: [] }, base: null,
+    }));
+    LB.loadLocalState('meso-prune-user');
+    const remaining = Object.keys(storeWindow.__testLocalStorage._d).filter(k => k.startsWith('logbook-meso-asked-'));
+    assert.ok(remaining.length <= 33, `bounded answer keys (${remaining.length})`);
+    assert.ok(remaining.includes('logbook-meso-asked-active-session'));
+  });
+
+  test('lazy server history is trimmed again, while an edit to that history is pinned', () => {
+    const entries = [{ exId: 'old-ex', sets: [{ kg: 80, reps: 8 }] }];
+    const oldSession = { id: 'lazy-old-session', date: '2020-01-01', ended: '2020-01-01T10:00:00.000Z', entries };
+    const synced = { sessions: [oldSession], foodLogs: [], medicationLogs: [] };
+    assert.strictEqual(LB.saveSyncedState(synced, 'lazy-history-user'), true);
+    const compacted = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-lazy-history-user'));
+    const compactSession = compacted.store.sessions[0];
+    assert.deepStrictEqual(compactSession.entries, []);
+    assert.ok(compactSession._offlineEntriesDigest);
+
+    const loaded = LB.loadLocalState('lazy-history-user');
+    const serverFetched = { ...loaded.store, sessions: [{ ...compactSession, entries }] };
+    assert.strictEqual(LB.saveLocalState(serverFetched, loaded.base, 'lazy-history-user'), true);
+    const trimmedAgain = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-lazy-history-user'));
+    assert.deepStrictEqual(trimmedAgain.store.sessions[0].entries, [], 'a server-fetched old session must not become a permanent local copy');
+
+    const oldFood = { id: 'lazy-old-food', date: '2020-01-01', createdAt: '2020-01-01T10:00:00.000Z', quantityG: 100 };
+    LB.markLocalRowsConfirmed('foodLogs', [oldFood]);
+    const foodBase = { sessions: [], foodLogs: [], medicationLogs: [] };
+    assert.strictEqual(LB.saveLocalState({ ...foodBase, foodLogs: [oldFood] }, foodBase, 'lazy-food-user'), true);
+    const foodTrimmed = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-lazy-food-user'));
+    assert.deepStrictEqual(foodTrimmed.store.foodLogs, []);
+    assert.strictEqual(LB.saveLocalState({ ...foodBase, foodLogs: [{ ...oldFood, quantityG: 125 }] }, foodBase, 'lazy-food-edit-user'), true);
+    const foodEdited = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-lazy-food-edit-user'));
+    assert.strictEqual(foodEdited.store.foodLogs[0].quantityG, 125, 'a changed lazy row must remain protected');
+  });
+
   test('saveLocalState folds a distinct base into the same atomic entry only while local edits are pending', () => {
     const base = { settings: { unit: 'kg' }, sessions: [] };
     const edited = { settings: { unit: 'lbs' }, sessions: [] };
@@ -216,6 +370,53 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.saveSyncedState(edited, 'pending-user'), true);
     const rawSynced = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-pending-user'));
     assert.strictEqual(rawSynced.base, null, 'base is omitted from the pair entry once local state is confirmed synced');
+  });
+
+  test('large pending baselines store changed rows plus id manifests and expand losslessly', () => {
+    const baseRecipes = Array.from({ length: 700 }, (_, i) => ({
+      id: `baseline-recipe-${i}`,
+      name: `Recipe ${i}`,
+      items: [{ foodName: 'repeated ingredient '.repeat(18), quantityG: 100 + i }],
+      portions: 1,
+    }));
+    const editedRecipes = baseRecipes.filter(recipe => recipe.id !== 'baseline-recipe-8').map(recipe => recipe.id === 'baseline-recipe-7'
+      ? { ...recipe, name: 'Edited locally' }
+      : recipe);
+    const base = { sessions: [], foodRecipes: baseRecipes };
+    const edited = { sessions: [], foodRecipes: editedRecipes };
+    assert.strictEqual(LB.saveLocalState(edited, base, 'sparse-baseline-user'), true);
+    const raw = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-sparse-baseline-user'));
+    assert.strictEqual(raw.base._localBaseline, 1);
+    assert.strictEqual(raw.base._localBaselineIds.foodRecipes.length, 700);
+    assert.strictEqual(raw.base.foodRecipes.length, 2, 'only the edited and deleted recipe rows stay complete');
+    const loaded = LB.loadLocalState('sparse-baseline-user');
+    assert.strictEqual(loaded.base.foodRecipes.length, 700);
+    assert.strictEqual(loaded.base.foodRecipes.find(r => r.id === 'baseline-recipe-7').name, 'Recipe 7');
+    assert.strictEqual(loaded.base.foodRecipes.find(r => r.id === 'baseline-recipe-8').name, 'Recipe 8');
+    assert.strictEqual(loaded.store.foodRecipes.find(r => r.id === 'baseline-recipe-7').name, 'Edited locally');
+  });
+
+  test('loading an old full pending baseline rewrites it to the sparse representation', () => {
+    const baseRecipes = Array.from({ length: 700 }, (_, i) => ({
+      id: `rewrite-recipe-${i}`,
+      name: `Recipe ${i}`,
+      items: [{ foodName: 'legacy ingredient '.repeat(18), quantityG: 100 + i }],
+      portions: 1,
+    }));
+    const editedRecipes = baseRecipes.map(recipe => recipe.id === 'rewrite-recipe-7'
+      ? { ...recipe, name: 'Edited locally' }
+      : recipe);
+    storeWindow.__testLocalStorage.setItem('logbook-pair-sparse-rewrite-user', JSON.stringify({
+      v: LB.LOCAL_CACHE_VERSION,
+      store: { sessions: [], foodRecipes: editedRecipes },
+      base: { sessions: [], foodRecipes: baseRecipes },
+    }));
+    const loaded = LB.loadLocalState('sparse-rewrite-user');
+    const rewritten = JSON.parse(storeWindow.__testLocalStorage.getItem('logbook-pair-sparse-rewrite-user'));
+    assert.strictEqual(rewritten.base._localBaseline, 1);
+    assert.strictEqual(rewritten.base._localBaselineIds.foodRecipes.length, 700);
+    assert.strictEqual(loaded.base.foodRecipes.length, 700);
+    assert.strictEqual(loaded.store.foodRecipes.find(r => r.id === 'rewrite-recipe-7').name, 'Edited locally');
   });
 
   test('local cache compacts equal separately-parsed snapshots and drops stale Friends data', () => {
@@ -3639,6 +3840,41 @@ async function testAsync(name, fn) {
   test('withCarriedWindowEntries: no base (first boot) leaves everything as-is', () => {
     const fresh = [{ id: 's1', entries: [] }];
     assert.deepStrictEqual(LB.withCarriedWindowEntries(fresh, null), fresh);
+  });
+
+  test('withCarriedWindowEntries: carries a compact old-entry digest without restoring the heavy sets', () => {
+    const fresh = [{ id: 's1', entries: [] }];
+    const base = [{ id: 's1', entries: [], _offlineEntriesDigest: '123:4' }];
+    const out = LB.withCarriedWindowEntries(fresh, base);
+    assert.strictEqual(out[0].id, 's1');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(out[0].entries)), []);
+    assert.strictEqual(out[0]._offlineEntriesDigest, '123:4');
+  });
+
+  test('withCarriedWindowCollections: carries old base rows into the private diff base only', () => {
+    const fresh = { foodLogs: [{ id: 'new', date: LB.todayISO() }], medicationLogs: [] };
+    const base = { foodLogs: [{ id: 'old', date: '2020-01-01' }] };
+    const out = LB.withCarriedWindowCollections(fresh, base);
+    assert.strictEqual(JSON.stringify(out.foodLogs.map(row => row.id)), JSON.stringify(['new', 'old']));
+    assert.strictEqual(JSON.stringify(fresh.foodLogs.map(row => row.id)), JSON.stringify(['new']), 'the live fresh object must not be mutated');
+  });
+
+  test('mergeWindowedCollectionById keeps an old carried row when the windowed query omits it', () => {
+    const old = { id: 'old-food', date: '2020-01-01', calories: 100 };
+    const out = LB.mergeWindowedCollectionById([], [old], [old], new Set(['old-food']), 'foodLogs');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(out)), [old]);
+  });
+
+  test('mergeWindowedCollectionById still honours a real local deletion', () => {
+    const old = { id: 'deleted-food', date: '2020-01-01', calories: 100 };
+    const out = LB.mergeWindowedCollectionById([], [], [old], new Set(['deleted-food']), 'foodLogs');
+    assert.deepStrictEqual(out, []);
+  });
+
+  test('mergeWindowedCollectionById does not resurrect a recent server deletion', () => {
+    const recent = { id: 'recent-food', date: LB.todayISO(), calories: 100 };
+    const out = LB.mergeWindowedCollectionById([], [recent], [recent], new Set(['recent-food']), 'foodLogs');
+    assert.deepStrictEqual(out, []);
   });
 
   // ── realignCycleForToday (return-from-break nudge) ──────────────────────────

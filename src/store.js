@@ -2695,6 +2695,21 @@ function diffCollectionById(prevList, nextList) {
   return { upsert, removed };
 }
 
+// A lazy history loader can add an old server row to `next` even though the
+// boot-windowed `prev` deliberately has no row with that id. Do not write that
+// untouched server row back as a brand-new insert; if the user changed it
+// afterwards, the fingerprint no longer matches and the edit is uploaded.
+function diffWindowedCollectionById(prevList, nextList, collection) {
+  const diff = diffCollectionById(prevList, nextList);
+  const confirmed = _localConfirmedRows.get(collection);
+  if (!confirmed || !diff.upsert.length) return diff;
+  diff.upsert = diff.upsert.filter(row => {
+    const serverRow = confirmed.get(row?.id);
+    return !serverRow || !syncValuesEqual(row, serverRow);
+  });
+  return diff;
+}
+
 // JSON with keys sorted at every level, so two structurally identical values
 // always produce the same string. Plain JSON.stringify does not: a value that
 // has been through Postgres jsonb comes back with jsonb's own key order (by
@@ -2846,7 +2861,8 @@ function sessionToRow(s, userId) {
   // column (migration 0251), since that one drives PR/regression baselines
   // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, ...rest } = s;
+  // Cache-only metadata must never be sent to Postgres as if it were a column.
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -3001,7 +3017,7 @@ async function syncStore(prev, next, userId) {
   }
 
   if (prev.foodLogs !== next.foodLogs) {
-    const { upsert, removed } = diffCollectionById(prev.foodLogs, next.foodLogs);
+    const { upsert, removed } = diffWindowedCollectionById(prev.foodLogs, next.foodLogs, 'foodLogs');
     if (upsert.length) {
       const rows = upsert.map(l => ({
         id: l.id, user_id: userId, date: l.date, time: l.time, food_id: l.foodId ?? null,
@@ -3161,7 +3177,7 @@ async function syncStore(prev, next, userId) {
     if (removed.length) ops.push(_supabase.from('zane_medication_schedule_slots').delete().in('id', removed.map(s => s.id)));
   }
   if (prev.medicationLogs !== next.medicationLogs) {
-    const { upsert, removed } = diffCollectionById(prev.medicationLogs, next.medicationLogs);
+    const { upsert, removed } = diffWindowedCollectionById(prev.medicationLogs, next.medicationLogs, 'medicationLogs');
     // prev-by-id for the snooze key decision below: a stale second device
     // that edits a row while another device's snooze is active must not
     // overwrite the server's current snoozed_until with its stale value.
@@ -4599,6 +4615,7 @@ async function fetchSessionEntries(sessionIds) {
   }
   const out = {};
   for (const id of Object.keys(bySession)) out[id] = mapEntryRows(bySession[id]);
+  markLocalRowsConfirmed('sessions', Object.entries(out).map(([id, entries]) => ({ id, entries })));
   return out;
 }
 
@@ -4705,6 +4722,7 @@ async function fetchFoodLogsForDates(userId, dates) {
     byDate[l.date].push(mapFoodLogRow(l));
   }
   for (const d of ds) if (!byDate[d]) byDate[d] = [];
+  markLocalRowsConfirmed('foodLogs', rows.map(mapFoodLogRow));
   return byDate;
 }
 
@@ -4720,7 +4738,9 @@ async function fetchFoodLogsSince(userId, sinceDateISO) {
     .select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
-  return (data || []).map(mapFoodLogRow);
+  const rows = (data || []).map(mapFoodLogRow);
+  markLocalRowsConfirmed('foodLogs', rows);
+  return rows;
 }
 // Same idea as fetchFoodLogsSince above, for the Medications Inventory tab.
 async function fetchMedicationLogsSince(userId, sinceDateISO) {
@@ -4728,7 +4748,7 @@ async function fetchMedicationLogsSince(userId, sinceDateISO) {
     .select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
     .eq('user_id', userId).gte('date', sinceDateISO);
   if (error) throw error;
-  return (data || []).map(l => ({
+  const rows = (data || []).map(l => ({
     id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
     date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
     // skipped has to be MAPPED, not merely selected. The column was added to
@@ -4743,6 +4763,8 @@ async function fetchMedicationLogsSince(userId, sinceDateISO) {
     reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
     snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
   }));
+  markLocalRowsConfirmed('medicationLogs', rows);
+  return rows;
 }
 
 function isWeekdayPlan(sch) {
@@ -5711,12 +5733,62 @@ function mergeEntrySets(serverEntries, cachedEntries) {
 // from the carried base entries and is pushed as normal. Sessions the base
 // doesn't know (first boot / new) keep entries:[] and re-sync once, then heal.
 function withCarriedWindowEntries(freshSessions, baseSessions) {
-  const baseEntries = new Map((baseSessions || []).filter(s => (s.entries || []).length).map(s => [s.id, s.entries]));
-  return (freshSessions || []).map(s =>
-    (s.entries || []).length === 0 && baseEntries.has(s.id)
-      ? { ...s, entries: baseEntries.get(s.id) }
-      : s
+  const baseById = new Map((baseSessions || []).map(s => [s.id, s]));
+  return (freshSessions || []).map(s => {
+    const base = baseById.get(s.id);
+    if ((s.entries || []).length > 0 || !base) return s;
+    if ((base.entries || []).length > 0) return { ...s, entries: base.entries };
+    if (base._offlineEntriesDigest) return { ...s, _offlineEntriesDigest: base._offlineEntriesDigest };
+    return s;
+  });
+}
+
+// The same carry-forward rule applies to boot-windowed log collections. The
+// live `fresh` store stays small, while the private sync base still knows the
+// older rows it last confirmed, so a lazy history fetch is not mistaken for a
+// new local insert and a genuine local deletion can still be uploaded.
+function withCarriedWindowCollections(fresh, base) {
+  if (!fresh || !base) return fresh;
+  const out = { ...fresh };
+  for (const key of LOCAL_CACHE_WINDOWED_COLLECTIONS) {
+    const freshRows = Array.isArray(fresh[key]) ? fresh[key] : [];
+    const baseRows = Array.isArray(base[key]) ? base[key] : [];
+    if (!baseRows.length) continue;
+    const freshIds = new Set(freshRows.map(row => row?.id).filter(id => id != null));
+    const carried = baseRows.filter(row => row?.id != null && !freshIds.has(row.id));
+    if (carried.length) out[key] = [...freshRows, ...carried];
+  }
+  return out;
+}
+
+// Merge a collection whose server query is windowed without turning the
+// omitted older rows into deletions. Rows that still exist in the current
+// local store and in the confirmed base are carried through for the in-memory
+// diff; a row removed locally is deliberately not carried and will sync as a
+// real deletion. This helper is also safe for staged/non-windowed collections.
+function mergeWindowedCollectionById(freshRows, curRows, baseRows, delIds, collection) {
+  const fresh = freshRows || [];
+  const merged = mergeCollectionById(fresh, curRows, baseRows, delIds);
+  const freshIds = new Set(fresh.map(row => row?.id).filter(id => id != null));
+  const baseIds = new Set((baseRows || []).map(row => row?.id).filter(id => id != null));
+  const days = collection ? LOCAL_CACHE_WINDOWS[collection] : null;
+  const cutoff = days ? historyWindowCutoffISO(new Date(), days) : null;
+  const dateKey = collection === 'adaptiveTdeeHistory' ? 'asOfDate' : 'date';
+  const omittedByWindow = row => {
+    if (!cutoff) return false;
+    const date = localCacheRowDate(row, dateKey);
+    // Unknown dates are retained conservatively. A complete/explicit history
+    // fetch can still remove a genuinely deleted row; a windowed boot query
+    // cannot prove that an old omitted row was deleted.
+    return !date || date < cutoff;
+  };
+  const carried = (curRows || []).filter(row =>
+    row?.id != null
+    && baseIds.has(row.id)
+    && !freshIds.has(row.id)
+    && (!delIds?.has(row.id) || omittedByWindow(row))
   );
+  return carried.length ? [...carried, ...merged] : merged;
 }
 
 // Boot merge helper for the in-progress-session pointer, extracted (like
@@ -6009,6 +6081,276 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
 // QuotaExceededError once the ~5 MB localStorage budget fills up). Callers
 // surface a warning instead of letting the local cache silently stop updating.
 const _localSnapshotState = new Map();
+// Lazy history screens can add an old, server-authoritative row to the live
+// store even though the boot/base snapshot intentionally contains only a
+// recent window. Remember those rows briefly so the next local-cache write
+// does not mistake a server fetch for a new offline edit. A changed row still
+// compares unequal to this fingerprint and is therefore protected normally.
+// Keep the registry bounded too: it is a process-local aid, never an archive.
+const _localConfirmedRows = new Map();
+const LOCAL_CONFIRMED_ROWS_MAX = 1000;
+
+function markLocalRowsConfirmed(collection, rows) {
+  if (!collection || !Array.isArray(rows)) return;
+  let map = _localConfirmedRows.get(collection);
+  if (!map) { map = new Map(); _localConfirmedRows.set(collection, map); }
+  for (const row of rows) {
+    if (!row || row.id == null) continue;
+    map.set(row.id, row);
+  }
+  while (map.size > LOCAL_CONFIRMED_ROWS_MAX) map.delete(map.keys().next().value);
+}
+
+function localConfirmedRow(collection, id) {
+  return _localConfirmedRows.get(collection)?.get(id) || null;
+}
+
+// localStorage is an offline working set, not the archive. Supabase remains
+// the authoritative source for the complete history (the export path fetches
+// that full history explicitly). Keep a bounded, useful offline horizon here so
+// a user who logs several years of water/health data does not eventually fill
+// Safari's small per-origin localStorage quota. The session metadata list stays
+// complete for streaks and the calendar; only the heavy relational set payload
+// is windowed, just like the boot query already is.
+const LOCAL_CACHE_VERSION = 3;
+// Session rows remain as lightweight calendar/stat summaries for the whole
+// account, but the verbose feedback answer tree is only useful while a detail
+// is reasonably recent. Older details can fetch the complete row online.
+const SESSION_RICH_METADATA_WINDOW_DAYS = 730;
+const LOCAL_MESO_ASKED_PREFIX = 'logbook-meso-asked-';
+const LOCAL_MESO_ASKED_MAX = 32;
+const LOCAL_CACHE_WINDOWS = Object.freeze({
+  foodLogs: FOOD_HISTORY_WINDOW_DAYS,
+  dailyLogs: 730,
+  skips: 730,
+  statusPeriods: 730,
+  cardioLogs: 365,
+  waterLogs: 90,
+  foodTemplateDays: FOOD_HISTORY_WINDOW_DAYS,
+  medicationLogs: FOOD_HISTORY_WINDOW_DAYS,
+  medicationPillboxChecks: FOOD_HISTORY_WINDOW_DAYS,
+  glucoseLogs: 365,
+  bloodPressureLogs: 365,
+  bodyTempLogs: 365,
+  adaptiveTdeeHistory: 730,
+});
+const LOCAL_CACHE_WINDOWED_COLLECTIONS = Object.freeze(Object.keys(LOCAL_CACHE_WINDOWS));
+
+function localCacheDate(value) {
+  const match = String(value ?? '').match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
+function localCacheRowDate(row, dateKey) {
+  if (!row || typeof row !== 'object') return null;
+  return localCacheDate(row[dateKey] ?? row.date ?? row.asOfDate ?? row.startedAt ?? row.endedAt ?? row.createdAt ?? row.updatedAt);
+}
+
+// When a pair contains a real unsynced baseline, old rows must stay pinned
+// until the sync either succeeds or the user explicitly discards the change.
+// Otherwise an offline edit to an old health day could be trimmed out of the
+// only durable copy before the retry loop gets a chance to upload it.
+function localCachePendingIds(store, base, now = new Date()) {
+  const result = {};
+  for (const key of ['sessions', ...LOCAL_CACHE_WINDOWED_COLLECTIONS]) {
+    const current = Array.isArray(store?.[key]) ? store[key] : [];
+    const previous = Array.isArray(base?.[key]) ? base[key] : null;
+    const ids = new Set();
+    const dateKey = key === 'adaptiveTdeeHistory' ? 'asOfDate' : 'date';
+    const cutoff = historyWindowCutoffISO(now, key === 'sessions' ? HISTORY_WINDOW_DAYS : LOCAL_CACHE_WINDOWS[key]);
+    if (!previous && current.length) {
+      // An older cache can predate a collection entirely. Preserve what it has
+      // rather than guessing that those rows are safe to discard, except for
+      // a row this process explicitly received from the server's lazy loader.
+      current.forEach(row => {
+        if (!row || row.id == null) return;
+        const confirmed = localConfirmedRow(key, row.id);
+        if (confirmed) {
+          const sameAsServer = key === 'sessions'
+            ? (!Array.isArray(row.entries) || !row.entries.length || syncValuesEqual(row.entries, confirmed.entries || []))
+            : syncValuesEqual(row, confirmed);
+          if (!sameAsServer) ids.add(row.id);
+          return;
+        }
+        const date = localCacheRowDate(row, dateKey);
+        const created = localCacheDate(row.createdAt ?? row.updatedAt);
+        if (!(date && date < cutoff && created && created < cutoff)) ids.add(row.id);
+      });
+      result[key] = ids;
+      continue;
+    }
+    const byId = new Map((previous || []).filter(row => row?.id != null).map(row => [row.id, row]));
+    current.forEach(row => {
+      if (!row || row.id == null) return;
+      const prior = byId.get(row.id);
+      const confirmed = localConfirmedRow(key, row.id);
+      if (!prior) {
+        if (confirmed) {
+          // Session fetches register their entries as the confirmed payload;
+          // the other lazy loaders register the complete row.
+          const sameAsServer = key === 'sessions'
+            ? (!Array.isArray(row.entries) || !row.entries.length || syncValuesEqual(row.entries, confirmed.entries || []))
+            : syncValuesEqual(row, confirmed);
+          if (!sameAsServer) ids.add(row.id);
+          return;
+        }
+        // A lazy server fetch may be outside both the boot window and the
+        // persisted base. A real offline row created for an old date carries a
+        // fresh createdAt/updatedAt and stays protected; a historical server
+        // row with an old creation timestamp is safe to trim. Legacy in-memory
+        // shapes without a creation timestamp remain conservative.
+        const date = localCacheRowDate(row, dateKey);
+        const created = localCacheDate(row.createdAt ?? row.updatedAt);
+        if (date && date < cutoff && created && created < cutoff) return;
+        ids.add(row.id);
+        return;
+      }
+      if (key === 'sessions' && prior._offlineEntriesDigest) {
+        const { entries: _currentEntries, _offlineEntriesDigest: _currentDigest, currentExIdx: _currentExIdx,
+          restStart: _restStart, restDuration: _restDuration, progressionBumps: _progressionBumps,
+          cleanupOptOuts: _cleanupOptOuts, ...currentMetadata } = row;
+        const { entries: _priorEntries, _offlineEntriesDigest: _priorDigest, currentExIdx: _priorExIdx,
+          restStart: _priorRestStart, restDuration: _priorRestDuration, progressionBumps: _priorProgressionBumps,
+          cleanupOptOuts: _priorCleanupOptOuts, ...priorMetadata } = prior;
+        const metadataChanged = !syncValuesEqual(currentMetadata, priorMetadata);
+        const entriesChanged = row._offlineEntriesDigest
+          ? row._offlineEntriesDigest !== prior._offlineEntriesDigest
+          : (Array.isArray(row.entries) && row.entries.length
+            ? localCacheDigest(row.entries) !== prior._offlineEntriesDigest
+            : false);
+        if (metadataChanged || entriesChanged) ids.add(row.id);
+        return;
+      }
+      if (!syncValuesEqual(row, prior)) ids.add(row.id);
+    });
+    result[key] = ids;
+  }
+  return result;
+}
+
+function localCacheDigest(value) {
+  const text = stableJson(value);
+  // FNV-1a keeps the persisted marker tiny while remaining deterministic
+  // across the browser and Node test realm. A length suffix makes the common
+  // same-prefix collision case even less likely.
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i++) hash = Math.imul(hash ^ text.charCodeAt(i), 16777619);
+  return `${hash >>> 0}:${text.length}`;
+}
+
+function compactLocalRows(rows, days, protectedIds, dateKey, now) {
+  if (!Array.isArray(rows) || !rows.length) return rows;
+  const cutoff = historyWindowCutoffISO(now, days);
+  const keep = (rows || []).filter(row => {
+    if (!row || typeof row !== 'object') return true;
+    if (row.id != null && protectedIds?.has(row.id)) return true;
+    const date = localCacheRowDate(row, dateKey);
+    // Unknown dates are retained: dropping an unrecognised legacy shape is not
+    // a safe optimization, and such rows are normally tiny one-off metadata.
+    return !date || date >= cutoff;
+  });
+  return keep.length === rows.length ? rows : keep;
+}
+
+function compactLocalSessions(sessions, protectedIds, inProgressId, now) {
+  if (!Array.isArray(sessions) || !sessions.length) return sessions;
+  const cutoff = historyWindowCutoffISO(now, HISTORY_WINDOW_DAYS);
+  const richCutoff = historyWindowCutoffISO(now, SESSION_RICH_METADATA_WINDOW_DAYS);
+  let changed = false;
+  const compacted = sessions.map(session => {
+    if (!session || typeof session !== 'object') return session;
+    const date = localCacheDate(session.date ?? session.startedAt ?? session.ended);
+    const protectedRow = session.id != null && protectedIds?.has(session.id);
+    const keepEntries = session.id === inProgressId
+      || protectedRow
+      || !session.ended
+      || !date
+      || date >= cutoff;
+    const compactRichRecap = !protectedRow && date && date < richCutoff && session.mesoRecap?.raw;
+    if (keepEntries && !compactRichRecap) return session;
+
+    let next = session;
+    const hasEntryPayload = (Array.isArray(session.entries) && session.entries.length > 0) || !!session._offlineEntriesDigest;
+    if (!keepEntries && hasEntryPayload) {
+      changed = true;
+      // These fields only describe an active/local editing surface. Once an
+      // old session's relational entries leave the offline window they cannot
+      // add useful offline behaviour either, so drop them with the payload.
+      const { currentExIdx, restStart, restDuration, progressionBumps, cleanupOptOuts, ...metadata } = session;
+      next = {
+        ...metadata,
+        entries: [],
+        // Keep the digest of the relational entries that were compacted on a
+        // previous write; hashing the already-empty placeholder here would
+        // make every lazy old-session fetch look like a local edit.
+        _offlineEntriesDigest: session._offlineEntriesDigest || localCacheDigest(session.entries || []),
+      };
+    }
+    if (compactRichRecap) {
+      changed = true;
+      // Keep the rendered recap summary and gains, but drop the raw answer
+      // tree (the largest part and only needed for editing old feedback).
+      const { raw: _raw, ...recapSummary } = next.mesoRecap || {};
+      const { mesoRecap: _oldRecap, ...withoutRecap } = next;
+      next = Object.keys(recapSummary).length
+        ? { ...withoutRecap, mesoRecap: recapSummary }
+        : withoutRecap;
+    }
+    return next;
+  });
+  return changed ? compacted : sessions;
+}
+
+// Feedback answers are written under one key per in-progress session so a
+// crash can resume safely. Finished/crashed sessions used to leave those keys
+// forever. Keep a small tail plus the currently active session; the answers
+// are not an archive and the finished recap is already synced in the store.
+function pruneLocalMesoAskedKeys(activeSessionId) {
+  try {
+    if (typeof localStorage?.key !== 'function') return;
+    const keys = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && key.startsWith(LOCAL_MESO_ASKED_PREFIX)) keys.push(key);
+    }
+    if (keys.length <= LOCAL_MESO_ASKED_MAX) return;
+    const keep = new Set(keys.slice(-LOCAL_MESO_ASKED_MAX));
+    if (activeSessionId) keep.add(LOCAL_MESO_ASKED_PREFIX + activeSessionId);
+    for (const key of keys) if (!keep.has(key)) localStorage.removeItem(key);
+  } catch (_) {}
+}
+
+// Build the bounded representation written to localStorage. This never mutates
+// the live store: the full online result can remain in memory and be browsed,
+// while the next cold/offline boot restores only the intentionally bounded
+// working set. `protectedIds` is derived from the store/base pair above.
+function compactLocalSnapshot(snapshot, protectedIds = {}, now = new Date()) {
+  if (!snapshot || typeof snapshot !== 'object') return snapshot;
+  const durable = stripFriendsSnapshot(snapshot);
+  let compacted = durable;
+  const replace = (key, next) => {
+    if (next === compacted[key]) return;
+    if (compacted === durable) compacted = { ...durable };
+    compacted[key] = next;
+  };
+
+  replace('sessions', compactLocalSessions(
+    durable.sessions,
+    protectedIds.sessions,
+    durable.inProgress,
+    now,
+  ));
+  for (const key of LOCAL_CACHE_WINDOWED_COLLECTIONS) {
+    replace(key, compactLocalRows(
+      durable[key],
+      LOCAL_CACHE_WINDOWS[key],
+      protectedIds[key],
+      key === 'adaptiveTdeeHistory' ? 'asOfDate' : 'date',
+      now,
+    ));
+  }
+  return compacted;
+}
 
 function stripFriendsSnapshot(snapshot) {
   if (!snapshot || typeof snapshot !== 'object' || !Object.prototype.hasOwnProperty.call(snapshot, 'friends')) return snapshot;
@@ -6016,23 +6358,99 @@ function stripFriendsSnapshot(snapshot) {
   return durable;
 }
 
+// A pending sync used to duplicate every unchanged recipe, plan, exercise and
+// session row in `base`. Keep the old object shape for small payloads, but for
+// a large baseline store only the complete rows that differ from the current
+// snapshot (or were deleted) plus an id manifest for every confirmed row. The
+// manifest lets the new code reconstruct the exact old base on load. Older
+// bundles still see an array of changed rows, which is conservative (they may
+// keep a server-deleted unchanged row) but never throws away a local edit.
+const LOCAL_BASELINE_SPARSE_THRESHOLD = 128 * 1024;
+const LOCAL_BASELINE_MARKER = 1;
+
+function isIdRowArray(value) {
+  return Array.isArray(value) && value.length > 0
+    && value.every(row => row && typeof row === 'object' && row.id != null);
+}
+
+function encodeLocalBaseline(current, base) {
+  if (!base || typeof base !== 'object') return base;
+  let fullSize = 0;
+  try { fullSize = JSON.stringify(base).length; } catch (_) { return base; }
+  if (fullSize <= LOCAL_BASELINE_SPARSE_THRESHOLD) return base;
+
+  const sparse = { ...base, _localBaseline: LOCAL_BASELINE_MARKER, _localBaselineIds: {} };
+  for (const [key, baseRows] of Object.entries(base)) {
+    if (!isIdRowArray(baseRows)) continue;
+    const currentRows = Array.isArray(current?.[key]) ? current[key] : [];
+    const currentById = new Map(currentRows.filter(row => row?.id != null).map(row => [row.id, row]));
+    // Rows omitted from this list are byte-for-byte the same in current and
+    // base, so the current row is a valid baseline during reconstruction.
+    const changedRows = baseRows.filter(row => {
+      const currentRow = currentById.get(row.id);
+      return !currentRow || !syncValuesEqual(currentRow, row);
+    });
+    sparse[key] = changedRows;
+    sparse._localBaselineIds[key] = baseRows.map(row => row.id);
+  }
+  return sparse;
+}
+
+function isSparseLocalBaseline(value) {
+  return !!value && typeof value === 'object' && value._localBaseline === LOCAL_BASELINE_MARKER;
+}
+
+function expandLocalBaseline(current, sparse) {
+  if (!isSparseLocalBaseline(sparse)) return sparse;
+  const expanded = { ...sparse };
+  delete expanded._localBaseline;
+  const manifests = sparse._localBaselineIds && typeof sparse._localBaselineIds === 'object'
+    ? sparse._localBaselineIds : {};
+  delete expanded._localBaselineIds;
+  for (const [key, ids] of Object.entries(manifests)) {
+    if (!Array.isArray(ids)) continue;
+    const changedRows = Array.isArray(sparse[key]) ? sparse[key] : [];
+    const changedById = new Map(changedRows.filter(row => row?.id != null).map(row => [row.id, row]));
+    const currentRows = Array.isArray(current?.[key]) ? current[key] : [];
+    const currentById = new Map(currentRows.filter(row => row?.id != null).map(row => [row.id, row]));
+    // A deleted row is present in changedById; an unchanged row falls back to
+    // currentById. The filter is defensive for a corrupt/partially-written
+    // manifest and never invents a row that was not in either source.
+    expanded[key] = ids.map(id => changedById.get(id) || currentById.get(id)).filter(Boolean);
+  }
+  return expanded;
+}
+
 function loadLocalState(userId) {
   try {
+    // A user switch must never let lazy rows from the previous account
+    // influence the next account's pending-diff decision.
+    _localConfirmedRows.clear();
     const pairKey = `logbook-pair-${userId}`;
     let pairRaw = localStorage.getItem(pairKey);
     if (pairRaw) {
       const parsed = JSON.parse(pairRaw);
       const originalStore = parsed.store;
       if (!originalStore) return { store: null, base: null };
+      pruneLocalMesoAskedKeys(originalStore.inProgress);
 
       // Friends is server-authoritative and deliberately not part of the
       // offline cache. Strip it on read as well as on write so a cache created
       // by an older bundle cannot keep those snapshots around indefinitely.
-      const store = stripFriendsSnapshot(originalStore);
+      const durableStore = stripFriendsSnapshot(originalStore);
       const originalBase = parsed.base;
+      const hasPersistedBase = originalBase != null && originalBase !== originalStore;
+      const rawDurableBase = hasPersistedBase ? stripFriendsSnapshot(originalBase) : durableStore;
+      const durableBase = hasPersistedBase
+        ? expandLocalBaseline(durableStore, rawDurableBase)
+        : durableStore;
+      const protectedIds = originalBase == null || originalBase === originalStore
+        ? {}
+        : localCachePendingIds(durableStore, durableBase);
+      const store = compactLocalSnapshot(durableStore, protectedIds);
       let base = originalBase == null || originalBase === originalStore
         ? store
-        : stripFriendsSnapshot(originalBase);
+        : compactLocalSnapshot(durableBase, protectedIds);
 
       // A separately parsed base may contain the exact same durable state as
       // store. Treat it as the same snapshot so it does not consume a second
@@ -6041,11 +6459,23 @@ function loadLocalState(userId) {
       const equivalentBase = base !== store && syncValuesEqual(store, base);
       if (equivalentBase) base = store;
 
+      // Migrate an already-written full pending baseline on the next cold
+      // boot. Otherwise the sparse representation would only be used after a
+      // later state write, leaving an old duplicate snapshot in localStorage
+      // indefinitely for users who only reload the app.
+      const encodedBase = base === store ? null : encodeLocalBaseline(store, base);
+      const baselineEncodingChanged = hasPersistedBase
+        && base !== store
+        && isSparseLocalBaseline(encodedBase)
+        && !isSparseLocalBaseline(rawDurableBase);
+
       const needsRewrite = store !== originalStore
-        || (originalBase != null && base !== originalBase)
-        || equivalentBase;
+        || (hasPersistedBase && base !== durableBase)
+        || equivalentBase
+        || baselineEncodingChanged
+        || parsed.v !== LOCAL_CACHE_VERSION;
       if (needsRewrite) {
-        const compactRaw = JSON.stringify({ v: 2, store, base: base === store ? null : base });
+        const compactRaw = JSON.stringify({ v: LOCAL_CACHE_VERSION, store, base: encodedBase });
         try {
           // Best effort only. localStorage.setItem is atomic; if quota/private
           // mode rejects this write, the original pair remains intact and the
@@ -6070,10 +6500,14 @@ function loadLocalState(userId) {
     const baseKey = `logbook-base-${userId}`;
     const storeRaw = localStorage.getItem(storeKey);
     if (!storeRaw) return { store: null, base: null };
-    const store = JSON.parse(storeRaw);
+    const legacyStore = JSON.parse(storeRaw);
+    pruneLocalMesoAskedKeys(legacyStore?.inProgress);
     const storedBaseRaw = localStorage.getItem(baseKey);
     const baseMatchesStore = !storedBaseRaw || storedBaseRaw === storeRaw;
-    const base = baseMatchesStore ? store : JSON.parse(storedBaseRaw);
+    const legacyBase = baseMatchesStore ? legacyStore : JSON.parse(storedBaseRaw);
+    const protectedIds = baseMatchesStore ? {} : localCachePendingIds(legacyStore, legacyBase);
+    const store = compactLocalSnapshot(legacyStore, protectedIds);
+    const base = baseMatchesStore ? store : compactLocalSnapshot(legacyBase, protectedIds);
     return { store, base };
   } catch (_) {
     return { store: null, base: null };
@@ -6099,8 +6533,9 @@ function saveLocalState(store, base, userId) {
     // message/feed/group snapshot doubles the cache during pending writes and
     // can exceed iOS localStorage quota, which then falsely turns the global
     // sync indicator red. Training data remains fully cached offline.
-    const persistedStore = stripFriendsSnapshot(store);
-    const candidateBase = baseIsStore ? null : stripFriendsSnapshot(base);
+    const protectedIds = baseIsStore ? {} : localCachePendingIds(store, base);
+    const persistedStore = compactLocalSnapshot(store, protectedIds);
+    const candidateBase = baseIsStore ? null : compactLocalSnapshot(base, protectedIds);
     // A separately-created object can still represent the exact same durable
     // state (for example after a reload or a JSON round-trip). Only omit the
     // base when that is proven; any real difference keeps the full baseline for
@@ -6108,9 +6543,10 @@ function saveLocalState(store, base, userId) {
     const baseEquivalent = !baseIsStore && syncValuesEqual(persistedStore, candidateBase);
     const effectiveBase = baseIsStore || baseEquivalent ? store : base;
     const persistedBase = baseIsStore || baseEquivalent ? null : candidateBase;
+    const encodedBase = persistedBase ? encodeLocalBaseline(persistedStore, persistedBase) : null;
     const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
       ? prev.raw
-      : JSON.stringify({ v: 2, store: persistedStore, base: persistedBase });
+      : JSON.stringify({ v: LOCAL_CACHE_VERSION, store: persistedStore, base: encodedBase });
     if (prev.raw !== raw) localStorage.setItem(pairKey, raw);
     // Best-effort cleanup of the pre-migration two-key format: a failure
     // here does not affect the atomic pair write above, which already
@@ -12284,8 +12720,9 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
-  loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
+  loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
+  compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,

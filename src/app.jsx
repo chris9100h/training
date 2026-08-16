@@ -503,7 +503,7 @@ function mergeStagedCollection(key, freshRows, curRows, baseRows) {
   const localOnly = (curRows || []).filter(row =>
     !serverIds.has(row.id) && !baseIds.has(row.id) && (!serverDates || !serverDates.has(row.date))
   );
-  return [...localOnly, ...LB.mergeCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds)];
+  return [...localOnly, ...LB.mergeWindowedCollectionById(freshRows || [], curRows || [], baseRows || [], deletedIds, key)];
 }
 
 // Profile identity edits can happen while the staged boot payload is still
@@ -1012,19 +1012,19 @@ function App() {
           const delMedLogs = delDel(base?.medicationLogs, s.medicationLogs);
           const delMedPlanItems = delDel(base?.medicationPlanItems, s.medicationPlanItems);
           const delMedPillboxChecks = delDel(base?.medicationPillboxChecks, s.medicationPillboxChecks);
-          const nextDaily   = [...localOnlyDaily,   ...LB.mergeCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily)];
-          const nextCardio  = [...localOnlyCardio,  ...LB.mergeCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio)];
-          const nextGlucose = [...localOnlyGlucose, ...LB.mergeCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose)];
-          const nextBp      = [...localOnlyBp,      ...LB.mergeCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp)];
-          const nextTemp    = [...localOnlyTemp,    ...LB.mergeCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp)];
-          const nextWater   = [...localOnlyWater,   ...LB.mergeCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater)];
-          const nextFood    = [...localOnlyFood,    ...LB.mergeCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood)];
+          const nextDaily   = [...localOnlyDaily,   ...LB.mergeWindowedCollectionById(fresh.dailyLogs, s.dailyLogs, base?.dailyLogs, delDaily, 'dailyLogs')];
+          const nextCardio  = [...localOnlyCardio,  ...LB.mergeWindowedCollectionById(fresh.cardioLogs, s.cardioLogs, base?.cardioLogs, delCardio, 'cardioLogs')];
+          const nextGlucose = [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], s.glucoseLogs, base?.glucoseLogs, delGlucose, 'glucoseLogs')];
+          const nextBp      = [...localOnlyBp,      ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], s.bloodPressureLogs, base?.bloodPressureLogs, delBp, 'bloodPressureLogs')];
+          const nextTemp    = [...localOnlyTemp,    ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], s.bodyTempLogs, base?.bodyTempLogs, delTemp, 'bodyTempLogs')];
+          const nextWater   = [...localOnlyWater,   ...LB.mergeWindowedCollectionById(fresh.waterLogs || [], s.waterLogs, base?.waterLogs, delWater, 'waterLogs')];
+          const nextFood    = [...localOnlyFood,    ...LB.mergeWindowedCollectionById(fresh.foodLogs || [], s.foodLogs, base?.foodLogs, delFood, 'foodLogs')];
           const nextMedPlans = fresh.medicationsLoaded ? [...localOnlyMedPlans, ...LB.mergeCollectionById(fresh.medicationPlans || [], s.medicationPlans, base?.medicationPlans, delMedPlans)] : (s.medicationPlans || []);
           const nextMeds = fresh.medicationsLoaded ? [...localOnlyMeds, ...LB.mergeCollectionById(fresh.medications || [], s.medications, base?.medications, delMeds)] : (s.medications || []);
           const nextMedSlots = fresh.medicationsLoaded ? [...localOnlyMedSlots, ...LB.mergeCollectionById(fresh.medicationScheduleSlots || [], s.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlots)] : (s.medicationScheduleSlots || []);
-          const nextMedLogs = fresh.medicationsLoaded ? [...localOnlyMedLogs, ...LB.mergeCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs)] : (s.medicationLogs || []);
+          const nextMedLogs = fresh.medicationsLoaded ? [...localOnlyMedLogs, ...LB.mergeWindowedCollectionById(fresh.medicationLogs || [], s.medicationLogs, base?.medicationLogs, delMedLogs, 'medicationLogs')] : (s.medicationLogs || []);
           const nextMedPlanItems = fresh.medicationsLoaded ? [...localOnlyMedPlanItems, ...LB.mergeCollectionById(fresh.medicationPlanItems || [], s.medicationPlanItems, base?.medicationPlanItems, delMedPlanItems)] : (s.medicationPlanItems || []);
-          const nextMedPillboxChecks = fresh.medicationsLoaded ? [...localOnlyMedPillboxChecks, ...LB.mergeCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks)] : (s.medicationPillboxChecks || []);
+          const nextMedPillboxChecks = fresh.medicationsLoaded ? [...localOnlyMedPillboxChecks, ...LB.mergeWindowedCollectionById(fresh.medicationPillboxChecks || [], s.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxChecks, 'medicationPillboxChecks')] : (s.medicationPillboxChecks || []);
           // refreshHealthLogs re-maps every row into a fresh object, so these
           // merged arrays are new references even when nothing actually changed,
           // which forced a full re-render of the active screen on EVERY
@@ -1735,7 +1735,10 @@ function App() {
           // unchanged and skips them; a genuine offline edit still differs and
           // is pushed. First boot / no base → entries:[] fallback (one re-sync,
           // then self-heals once the post-boot flush saves the merged base).
-          const diffBase = { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) };
+          const diffBase = LB.withCarriedWindowCollections(
+            { ...fresh, sessions: LB.withCarriedWindowEntries(fresh.sessions, base?.sessions) },
+            base,
+          );
           syncBase.current = diffBase;
           let merged = fresh;
           // fresh.coaching is deliberately undefined when loadFromSupabase's
@@ -2013,14 +2016,14 @@ function App() {
               exercises: [...localOnlyExercises, ...mergeById(fresh.exercises, cur.exercises, base?.exercises, delExIds)],
               schedules: [...localOnlySchedules, ...mergeById(fresh.schedules, cur.schedules, base?.schedules, delSchIds)],
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
-              dailyLogs: [...localOnlyDailyLogs, ...mergeById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds)],
-              cardioLogs: [...localOnlyCardioLogs, ...mergeById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds)],
-              waterLogs: [...localOnlyWaterLogs, ...mergeById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds)],
-              foodLogs: [...localOnlyFoodLogs, ...mergeById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds)],
+              dailyLogs: [...localOnlyDailyLogs, ...LB.mergeWindowedCollectionById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds, 'dailyLogs')],
+              cardioLogs: [...localOnlyCardioLogs, ...LB.mergeWindowedCollectionById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds, 'cardioLogs')],
+              waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
+              foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
               foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
-              foodTemplateDays: [...localOnlyTemplateDays, ...mergeById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds)],
+              foodTemplateDays: [...localOnlyTemplateDays, ...LB.mergeWindowedCollectionById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds, 'foodTemplateDays')],
               foodMealPlans: [...localOnlyMealPlans, ...mergeById(fresh.foodMealPlans, cur.foodMealPlans, base?.foodMealPlans, delMealPlanIds)],
               // mergeById, not a bare server-wins filter: for an id present on
               // both sides these three used to take the server row outright,
@@ -2036,9 +2039,9 @@ function App() {
               medicationPlans: [...localOnlyMedPlans, ...mergeById(fresh.medicationPlans || [], cur.medicationPlans, base?.medicationPlans, delMedPlanIds)],
               medications: [...localOnlyMeds, ...mergeById(fresh.medications || [], cur.medications, base?.medications, delMedIds)],
               medicationScheduleSlots: [...localOnlyMedSlots, ...mergeById(fresh.medicationScheduleSlots || [], cur.medicationScheduleSlots, base?.medicationScheduleSlots, delMedSlotIds)],
-              medicationLogs: [...localOnlyMedLogs, ...mergeById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds)],
+              medicationLogs: [...localOnlyMedLogs, ...LB.mergeWindowedCollectionById(fresh.medicationLogs || [], cur.medicationLogs, base?.medicationLogs, delMedLogIds, 'medicationLogs')],
               medicationPlanItems: [...localOnlyMedPlanItems, ...mergeById(fresh.medicationPlanItems || [], cur.medicationPlanItems, base?.medicationPlanItems, delMedPlanItemIds)],
-              medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...mergeById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds)],
+              medicationPillboxChecks: [...localOnlyMedPillboxChecks, ...LB.mergeWindowedCollectionById(fresh.medicationPillboxChecks || [], cur.medicationPillboxChecks, base?.medicationPillboxChecks, delMedPillboxCheckIds, 'medicationPillboxChecks')],
               mesoStates,
               planDrafts,
               // TDEE history is loaded by HealthScreen separately because it

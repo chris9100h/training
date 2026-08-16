@@ -1074,7 +1074,15 @@ function fdIsWellStocked(item) {
 function fdReadLowStockAcks() {
   try {
     const v = JSON.parse(localStorage.getItem('logbook-low-stock-acked'));
-    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    // Acknowledgements are a UI convenience, not food history. If foods are
+    // deleted/recreated over many years, old ids must not grow this map
+    // forever. The newest 500 are far beyond any useful active inventory.
+    const entries = Object.entries(v);
+    if (entries.length <= 500) return v;
+    const capped = Object.fromEntries(entries.slice(-500));
+    try { localStorage.setItem('logbook-low-stock-acked', JSON.stringify(capped)); } catch (_) {}
+    return capped;
   } catch (_) { return {}; }
 }
 function fdWriteLowStockAcks(v) {
@@ -1373,6 +1381,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     let repaired;
     try { repaired = new Set(JSON.parse(localStorage.getItem('logbook-food-fav-cache-repaired') || '[]')); }
     catch (_) { repaired = new Set(); }
+    // The marker only exists to prevent repeating a one-time repair for a
+    // current favorite. Drop ids for favorites that no longer exist so this
+    // auxiliary key follows the user's actual favorite list instead of
+    // becoming a second historical food catalog.
+    const currentFavoriteIds = new Set((store.foodFavorites || []).map(f => f.foodId).filter(Boolean));
+    let repairedChanged = false;
+    repaired.forEach(id => { if (!currentFavoriteIds.has(id)) { repaired.delete(id); repairedChanged = true; } });
+    if (repairedChanged) {
+      try { localStorage.setItem('logbook-food-fav-cache-repaired', JSON.stringify([...repaired])); } catch (_) {}
+    }
     const requested = new Set();
     const toRequest = [];
     (store.foodFavorites || []).forEach(f => {

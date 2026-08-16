@@ -6339,8 +6339,17 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
   if (session && sessionId) {
     const dismiss = () => {
       let list = [];
-      try { list = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]'); } catch (_) { list = []; }
-      if (!list.includes(sessionId)) { list.push(sessionId); try { localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); } catch (_) {} }
+      try {
+        const parsed = JSON.parse(localStorage.getItem('logbook-dismissed-sessions') || '[]');
+        list = Array.isArray(parsed) ? parsed.filter(Boolean) : [];
+      } catch (_) { list = []; }
+      if (!list.includes(sessionId)) {
+        // This is only a per-device UI dismissal list, not workout history.
+        // Keep the newest few hundred so an account used for years cannot
+        // turn this tiny convenience key into another unbounded journal.
+        list = [...list, sessionId].slice(-200);
+        try { localStorage.setItem('logbook-dismissed-sessions', JSON.stringify(list)); } catch (_) {}
+      }
       go(back || { name: 'settings' });
     };
     return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;

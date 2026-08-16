@@ -430,7 +430,15 @@ function mdReconcilePlannedLogs(setStore, todayISO, invalidSlotIds) {
 function mdReadLowStockAcks() {
   try {
     const v = JSON.parse(localStorage.getItem('logbook-med-low-stock-acked'));
-    return (v && typeof v === 'object' && !Array.isArray(v)) ? v : {};
+    if (!v || typeof v !== 'object' || Array.isArray(v)) return {};
+    // This is only a per-device banner acknowledgement map. Keep it bounded
+    // independently of the medication history so removed medicines cannot
+    // accumulate forever.
+    const entries = Object.entries(v);
+    if (entries.length <= 500) return v;
+    const capped = Object.fromEntries(entries.slice(-500));
+    try { localStorage.setItem('logbook-med-low-stock-acked', JSON.stringify(capped)); } catch (_) {}
+    return capped;
   } catch (_) { return {}; }
 }
 function mdWriteLowStockAcks(v) {
