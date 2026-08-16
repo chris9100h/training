@@ -1406,7 +1406,13 @@ function App() {
     if (authStatusRef.current !== 'online') return;
     if (syncing.current) return;
     const target = pendingStore.current;
-    if (!target || target === syncBase.current || !uid) return;
+    if (!target || target === syncBase.current || !uid) {
+      // A transient offline/auth event can turn the indicator red even though
+      // there is no diff left to write. The retry button must be able to clear
+      // that stale local status once the session and network are healthy again.
+      if (uid && navigator.onLine && authStatusRef.current === 'online') setSyncStatus('synced');
+      return;
+    }
     syncing.current = true;
     let ok = false;
     LB.syncStore(syncBase.current, target, uid)
