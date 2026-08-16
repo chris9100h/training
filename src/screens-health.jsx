@@ -6650,10 +6650,10 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       {children}
     </Card>
   );
-  const modeLabel = mode => mode === 'sick' ? 'SICK' : mode === 'vacation' ? 'AWAY' : mode === 'deload' ? 'DELOAD' : mode === 'cleanup' ? 'CLEANUP' : null;
+  const modeLabel = mode => mode === 'sick' ? 'SICK' : mode === 'vacation' ? 'AWAY' : mode === 'deload' ? 'DELOAD' : null;
   const dayState = day => {
     const mode = modeLabel(day.mode);
-    if (mode) return { label: mode, color: UI.warn, icon: day.mode === 'sick' ? 'fa-bed-pulse' : day.mode === 'vacation' ? 'fa-umbrella-beach' : day.mode === 'cleanup' ? 'fa-broom' : 'fa-battery-quarter' };
+    if (mode) return { label: mode, color: UI.warn, icon: day.mode === 'sick' ? 'fa-bed-pulse' : day.mode === 'vacation' ? 'fa-umbrella-beach' : 'fa-battery-quarter' };
     if (day.trained) return { label: 'TRAINED', color: 'var(--accent)', icon: 'fa-dumbbell' };
     if (day.cardio) return { label: 'CARDIO', color: UI.ok, icon: 'fa-person-running' };
     if (day.foodClosed) return { label: 'CLOSED', color: UI.inkSoft, icon: 'fa-check' };
@@ -6747,23 +6747,35 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
         <div ref={recapRef} style={{
           display: capturing ? 'grid' : 'flex',
           flexDirection: capturing ? undefined : 'column',
-          gridTemplateColumns: capturing ? 'repeat(2, minmax(0, 1fr))' : undefined,
+          gridTemplateColumns: capturing ? 'repeat(3, minmax(0, 1fr))' : undefined,
           gap: capturing ? 20 : 14,
           padding: capturing ? '28px 30px 32px' : 2,
-          width: capturing ? 1020 : 'auto',
+          width: capturing ? 1200 : 'auto',
           maxWidth: capturing ? 'none' : '100%',
           boxSizing: 'border-box',
           position: 'relative',
           background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
         }}>
-          {capturing && <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}><img src={shotLogo} data-shot-avatar="1" style={shotLogoStyle} /></div>}
-          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { gridColumn: '1 / -1', position: 'relative', zIndex: 1 } : {}) }}>
-            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
-              <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
-              <span style={{ flex: 1 }} />
-              <i className="fa-solid fa-chart-line" style={{ color: UI.gold, fontSize: 15 }} />
+          {capturing && <div style={{ gridColumn: '1 / -1', position: 'relative', zIndex: 1 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1 }}>WEEKLY RECAP</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>{dateRange.toUpperCase()}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
-            <div className="num" style={{ color: UI.inkSoft, fontSize: 12, marginTop: 8 }}>{dateRange}</div>
+          </div>}
+          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { position: 'relative', zIndex: 1 } : {}) }}>
+            {!capturing && <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
+                <span style={{ flex: 1 }} />
+                <i className="fa-solid fa-chart-line" style={{ color: UI.gold, fontSize: 15 }} />
+              </div>
+              <div className="num" style={{ color: UI.inkSoft, fontSize: 12, marginTop: 8 }}>{dateRange}</div>
+            </>}
+            {capturing && <div style={{ ...HEALTH_CARD_HEADER_STYLE, marginBottom: 12 }}>OVERVIEW</div>}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 18 }}>
               {adherence != null ? (
                 <>
@@ -6779,7 +6791,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           </Card>
 
           {section('TRAINING', (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
               {metric('Sessions', snapshot.sessions)}
               {metric('Time', snapshot.durationMinutes ? Math.round(snapshot.durationMinutes) : null, snapshot.durationMinutes ? 'min' : '')}
               {metric('Sets', snapshot.sets)}
@@ -6789,7 +6801,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
 
           {section('NUTRITION', (
             <>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
                 {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
                 {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
                 {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
@@ -6809,7 +6821,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           ), target.calories != null ? `${target.calories} kcal target` : 'averages')}
 
           {section('MOVEMENT & HEALTH', (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
               {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
               {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
               {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
