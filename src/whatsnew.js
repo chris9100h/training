@@ -22,6 +22,22 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.828',
+    date: '2026-08-16',
+    title: 'More control, clearer numbers, fewer surprises ✨',
+    items: [
+      '🤝 Friends now keeps you in the loop: friend requests appear even before you open Friends, the live-workout banner shows up directly on Home, and you can choose which friend activity may send a push notification.',
+      '🎉 Cheer them on with a proper picker. Choose an emoji and message in a quick sheet, then send it with one tap. Cheers now arrive cleanly without a duplicated emoji.',
+      '🍽️ Food previews now show the full picture: “Day if logged” includes planned and staged items, updates while you change an amount, and works inside recipe and nested-recipe editors too.',
+      '🧮 Describe a meal is more forgiving now. Longer-running meal estimates no longer turn into a misleading Network Error while the model is still working.',
+      '🎯 Weekly TDEE check-ins now offer three clear choices: Skip, Leave as is, or Apply. If you applied new targets by mistake, Undo last Apply can restore the previous ones — including older applies from before this update.',
+      '🧹 Cleanup weeks no longer create fake regressions. Cleanup is ignored when judging that session, while a normal session can still compare against the cleanup baseline.',
+      '🔄 Temporary connection problems are quieter and more recoverable: the database indicator avoids brief red flashes and reconnects automatically when the connection returns.',
+      '📦 Offline storage is considerably smaller now. Training data remains available offline, while volatile Friends data and unnecessary background images are no longer kept on the device.',
+      '⌨️ Smaller quality-of-life fixes: decimal commas work in the session editor, iOS Chrome tap targets stay aligned after opening the keyboard, and weekly macro targets now line up with Today.'
+    ],
+  },
+  {
     id: 'v2.793',
     date: '2026-08-15',
     title: 'Smoother workouts, calmer Friends 💪',

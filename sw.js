@@ -1,4 +1,4 @@
-const CACHE = 'zane-v2.827';
+const CACHE = 'zane-v2.828';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. They are runtime-only: the worker never downloads the
 // whole VIP catalogue during install. The page tells the worker which one
