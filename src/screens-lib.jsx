@@ -5055,16 +5055,56 @@ function PartialsStepper({ value, onChange }) {
   );
 }
 
+// Session-history editing uses native text inputs rather than the live
+// workout keypad. Keep the raw text while the field is focused so a German
+// decimal comma ("27,5") survives the intermediate "27," render instead of
+// being coerced to NaN or losing the decimal separator.
+function SessionEditNumberInput({ value, onChange, style, inputMode = 'decimal', placeholder = '—', ...rest }) {
+  const fmt = v => v != null && Number.isFinite(Number(v)) ? String(v).replace('.', ',') : '';
+  const [raw, setRaw] = useStateL(() => fmt(value));
+  const focused = useRefL(false);
+  useEffectL(() => {
+    if (!focused.current) setRaw(fmt(value));
+  }, [value]);
+  return (
+    <input
+      {...rest}
+      type="text"
+      inputMode={inputMode}
+      value={raw}
+      placeholder={placeholder}
+      onFocus={e => { focused.current = true; e.target.select(); }}
+      onBlur={() => {
+        focused.current = false;
+        const num = raw === '' ? null : parseFloat(raw.replace(',', '.'));
+        if (raw === '' || !isNaN(num)) {
+          onChange(num ?? null);
+          setRaw(num == null ? '' : fmt(num));
+        } else {
+          setRaw('');
+        }
+      }}
+      onChange={e => {
+        const str = e.target.value;
+        setRaw(str);
+        const num = str === '' ? null : parseFloat(str.replace(',', '.'));
+        if (str === '' || !isNaN(num)) onChange(num ?? null);
+      }}
+      style={style}
+    />
+  );
+}
+
 // A weighted-stretch kg/timeSec pair, shared by chain-round finishers and the
 // two standalone techniques.
 function StretchFields({ stretch, onChange }) {
   const numStyle = { width: 52, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 6px', textAlign: 'center', fontFamily: UI.fontNum, fontSize: 13, outline: 'none' };
   return (<>
-    <input type="text" inputMode="decimal" value={stretch?.kg ?? ''} placeholder={UI.unit()} onFocus={e => e.target.select()}
-      onChange={ev => onChange({ kg: ev.target.value === '' ? null : +ev.target.value, timeSec: stretch?.timeSec ?? 30 })}
+    <SessionEditNumberInput inputMode="decimal" value={stretch?.kg} placeholder={UI.unit()}
+      onChange={kg => onChange({ kg, timeSec: stretch?.timeSec ?? 30 })}
       style={numStyle} />
-    <input type="text" inputMode="numeric" value={stretch?.timeSec ?? ''} placeholder="sec" onFocus={e => e.target.select()}
-      onChange={ev => onChange({ kg: stretch?.kg ?? null, timeSec: ev.target.value === '' ? null : +ev.target.value })}
+    <SessionEditNumberInput inputMode="numeric" value={stretch?.timeSec} placeholder="sec"
+      onChange={timeSec => onChange({ kg: stretch?.kg ?? null, timeSec })}
       style={numStyle} />
   </>);
 }
@@ -5089,13 +5129,13 @@ function RoundEditRow({ round, di, kind, onChange, onRemove, canRemove }) {
             style={{ flex: 1, minWidth: 70, background: UI.bgRaised, border: `1px solid ${UI.hairStrong}`, borderRadius: 4, color: UI.ink, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, outline: 'none' }} />
         )}
         {showKg && (
-          <input type="text" inputMode="decimal" value={round.kg ?? ''} placeholder="—" onFocus={e => e.target.select()}
-            onChange={ev => onChange({ kg: ev.target.value === '' ? null : +ev.target.value })} style={numStyle} />
+          <SessionEditNumberInput inputMode="decimal" value={round.kg} placeholder="—"
+            onChange={kg => onChange({ kg })} style={numStyle} />
         )}
         {showKg && <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>{UI.unit()}</span>}
         <span style={{ color: UI.hair, fontSize: 13, fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
-        <input type="text" inputMode="numeric" value={round.reps ?? ''} placeholder="—" onFocus={e => e.target.select()}
-          onChange={ev => onChange({ reps: ev.target.value === '' ? null : +ev.target.value })} style={numStyle} />
+        <SessionEditNumberInput inputMode="numeric" value={round.reps} placeholder="—"
+          onChange={reps => onChange({ reps })} style={numStyle} />
         <span className="num" style={{ color: UI.inkFaint, fontSize: 10 }}>reps</span>
         <button onClick={() => setFinisherOpen(o => !o)} title="Partials / stretch finisher" style={{
           marginLeft: 'auto', flexShrink: 0, background: 'transparent', border: 'none', cursor: 'pointer',
@@ -5476,9 +5516,8 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                       // at all: the sheet offered kg and reps fields for a
                       // plank, and the logged duration was unreachable.
                       <>
-                        <input type="text" inputMode="numeric" value={st.timeSec ?? ''}
-                          placeholder="—" onFocus={e => e.target.select()}
-                          onChange={ev => updateSet(eIdx, sIdx, { timeSec: ev.target.value === '' ? null : +ev.target.value })}
+                        <SessionEditNumberInput inputMode="numeric" value={st.timeSec}
+                          placeholder="—" onChange={timeSec => updateSet(eIdx, sIdx, { timeSec })}
                           style={numInputStyle} />
                         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>sec</span>
                         {st.timeSec == null && (
@@ -5501,30 +5540,26 @@ function SessionEditSheet({ session, duration, exercises, store, setStore, onClo
                       </>
                     ) : (
                       <>
-                        <input type="text" inputMode="decimal" step="0.5" value={st.kg ?? ''}
-                          placeholder="—" onFocus={e => e.target.select()}
-                          onChange={ev => updateSet(eIdx, sIdx, { kg: ev.target.value === '' ? null : +ev.target.value })}
+                        <SessionEditNumberInput inputMode="decimal" step="0.5" value={st.kg}
+                          placeholder="—" onChange={kg => updateSet(eIdx, sIdx, { kg })}
                           style={numInputStyle} />
                         <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>{UI.unit()}</span>
                         <span style={{ color: UI.hair, fontSize: 14, margin: '0 2px', fontFamily: UI.fontDisplay, fontStyle: 'italic' }}>×</span>
                         {isUnilateral ? (
                           <>
-                            <input type="text" inputMode="numeric" value={st.repsL ?? ''}
-                              placeholder="—" onFocus={e => e.target.select()}
-                              onChange={ev => updateSet(eIdx, sIdx, { repsL: ev.target.value === '' ? null : +ev.target.value })}
+                            <SessionEditNumberInput inputMode="numeric" value={st.repsL}
+                              placeholder="—" onChange={repsL => updateSet(eIdx, sIdx, { repsL })}
                               style={numInputStyle} />
                             <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>L</span>
-                            <input type="text" inputMode="numeric" value={st.repsR ?? ''}
-                              placeholder="—" onFocus={e => e.target.select()}
-                              onChange={ev => updateSet(eIdx, sIdx, { repsR: ev.target.value === '' ? null : +ev.target.value })}
+                            <SessionEditNumberInput inputMode="numeric" value={st.repsR}
+                              placeholder="—" onChange={repsR => updateSet(eIdx, sIdx, { repsR })}
                               style={numInputStyle} />
                             <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>R</span>
                           </>
                         ) : (
                           <>
-                            <input type="text" inputMode="numeric" value={st.reps ?? ''}
-                              placeholder="—" onFocus={e => e.target.select()}
-                              onChange={ev => updateSet(eIdx, sIdx, { reps: ev.target.value === '' ? null : +ev.target.value })}
+                            <SessionEditNumberInput inputMode="numeric" value={st.reps}
+                              placeholder="—" onChange={reps => updateSet(eIdx, sIdx, { reps })}
                               style={numInputStyle} />
                             <span className="num" style={{ color: UI.inkFaint, fontSize: 11 }}>reps</span>
                           </>
