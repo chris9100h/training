@@ -177,6 +177,20 @@ function askControllerSwVersion(timeoutMs = 1500) {
   });
 }
 
+// Keep the decorative background cache scoped to the account currently shown
+// by the app. The worker receives only a same-origin path (or null on logout /
+// for a normal user); it never gets involved in auth or app-shell caching.
+function tellServiceWorkerBackground(value) {
+  if (!('serviceWorker' in navigator)) return;
+  let url = null;
+  if (value) {
+    try { url = new URL(value, window.location.href).href; } catch (_) { url = null; }
+  }
+  navigator.serviceWorker.ready
+    .then(reg => (reg.active || navigator.serviceWorker.controller)?.postMessage({ type: 'SET_BACKGROUND', url }))
+    .catch(() => {});
+}
+
 // App-shell versions are intentionally monotonic. A late response from an old
 // worker, or a briefly stale network read, must never move the durable marker
 // backwards and turn that old version into a fresh update forever.
@@ -647,6 +661,17 @@ function App() {
     adminSupportUnreadRequest.current += 1;
     adminSupportUnreadRef.current = null;
   }, [userId]);
+  useEffectA(() => {
+    const selected = phase === 'ready' && userId ? store?.settings?.vipBackground : null;
+    const syncBackgroundCache = () => tellServiceWorkerBackground(selected);
+    syncBackgroundCache();
+    if (!('serviceWorker' in navigator)) return undefined;
+    // A deploy can replace an older controller after this effect already ran.
+    // Re-send the account selection to the new worker so an old catalogue is
+    // pruned even when no app state changed during the handoff.
+    navigator.serviceWorker.addEventListener('controllerchange', syncBackgroundCache);
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', syncBackgroundCache);
+  }, [phase, userId, store?.settings?.vipBackground]);
   useEffectA(() => { phaseRef.current = phase; }, [phase]);
   useEffectA(() => { authStatusRef.current = authStatus; }, [authStatus]);
   // React state updates are batched. Recovery code often needs to start a

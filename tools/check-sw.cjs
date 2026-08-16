@@ -16,7 +16,9 @@
      - background cache.put work is registered via
        event.waitUntil, so a worker torn down after respondWith cannot lose it
      - redirected responses are rebuilt before being served or stored
-     - install is atomic over ASSETS; activate sweeps old generations but
+     - install is atomic over ASSETS and does not precache the VIP photo
+       catalogue; background requests are runtime-only and the account message
+       keeps at most the selected image; activate sweeps old generations but
        never PHOTOS_CACHE
 
    Usage: node tools/check-sw.cjs [path-to-sw.js]   (default: repo sw.js) */
@@ -111,6 +113,8 @@ function makeWorld(scope) {
   const cacheFor = (name) => ({
     put: async (req, res) => { stores.get(name).set(keyOf(req), res); },
     match: async (req) => { const hit = stores.get(name).get(keyOf(req)); return hit ? hit.clone() : undefined; },
+    keys: async () => [...(stores.get(name) || new Map()).keys()].map(url => new FakeRequest(url)),
+    delete: async (req) => stores.get(name)?.delete(keyOf(req)) || false,
   });
   const caches = {
     open: async (name) => { if (!stores.has(name)) stores.set(name, new Map()); return cacheFor(name); },
@@ -296,6 +300,15 @@ const scenarios = [
     check('cdn-offline', (await w.hit(u)).res.body === 'net:' + u, 'the cached CDN copy did not answer offline');
   }],
 
+  ['install: VIP background catalogue is not downloaded', async () => {
+    const w = makeWorld(S);
+    const ev = { waitUntil: (p) => { ev.p = p; } };
+    w.handlers.install(ev);
+    await ev.p;
+    check('install-no-photo-network', !w.net.calls.some(u => u.includes('/Background/')), 'install still fetched a background photo or index');
+    check('install-no-photo-cache', !w.stores.has(PHOTOS_NAME), 'install created a photo cache before a user selected an image');
+  }],
+
   ['background photos land in PHOTOS_CACHE, not the versioned cache', async () => {
     const w = makeWorld(S);
     const u = S + 'Background/marine.png';
@@ -303,6 +316,29 @@ const scenarios = [
     await w.settle(ev);
     check('photo-target', w.cacheBody(PHOTOS_NAME, u) != null, 'the photo was not stored in PHOTOS_CACHE');
     check('photo-not-versioned', w.cacheBody(CACHE_NAME, u) == null, 'the photo landed in the versioned cache and dies on the next bump');
+  }],
+
+  ['background selection keeps only the current image and logout clears it', async () => {
+    const w = makeWorld(S);
+    const oldA = S + 'Background/old-a.png';
+    const oldB = S + 'Background/old-b.png';
+    const current = S + 'Background/marine.png';
+    w.seed(PHOTOS_NAME, oldA, 'old-a');
+    w.seed(PHOTOS_NAME, oldB, 'old-b');
+
+    let keepDone;
+    w.handlers.message({ data: { type: 'SET_BACKGROUND', url: current }, waitUntil: p => { keepDone = p; } });
+    await keepDone;
+    check('background-keep-pruned-old', w.cacheBody(PHOTOS_NAME, oldA) == null && w.cacheBody(PHOTOS_NAME, oldB) == null, 'selecting a background left another photo cached');
+
+    const fetched = await w.hit(current);
+    await w.settle(fetched.ev);
+    check('background-current-cached', w.cacheBody(PHOTOS_NAME, current) != null, 'the selected background was not cached after the first online request');
+
+    let clearDone;
+    w.handlers.message({ data: { type: 'SET_BACKGROUND', url: null }, waitUntil: p => { clearDone = p; } });
+    await clearDone;
+    check('background-logout-clears', w.cacheBody(PHOTOS_NAME, current) == null, 'logout did not clear the selected background');
   }],
 
   ['redirected responses are rebuilt before being served', async () => {
