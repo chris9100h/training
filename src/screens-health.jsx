@@ -182,6 +182,110 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   };
 }
 
+// Build the data behind the shareable Weekly Recap.  This deliberately uses
+// the same 1W calculator as the This Week card instead of introducing a second
+// set of nutrition/adherence rules.  Everything is derived from the local
+// store, so opening or sharing a recap never writes to the database.
+function buildWeeklyRecapSnapshot({ store, targets, anchor, today }) {
+  const state = store || {};
+  const logs = state.dailyLogs || [];
+  const sessions = (state.sessions || []).filter(s => !!s.ended);
+  const cardioLogs = state.cardioLogs || [];
+  const weekAnchor = anchor || today || LB.todayISO();
+  const { start: from, end: to } = healthMondayWeekBounds(weekAnchor);
+  const days = Array.from({ length: 7 }, (_, i) => LB.shiftDate(from, i));
+  const inRange = (date) => date >= from && date <= to;
+  const dateOfSession = s => {
+    if (!s) return null;
+    if (typeof s.date === 'string' && s.date) return s.date.slice(0, 10);
+    if (s.date) return new Date(s.date).toISOString().slice(0, 10);
+    return s.ended ? new Date(s.ended).toISOString().slice(0, 10) : null;
+  };
+  const sessionsInWeek = sessions.filter(s => inRange(dateOfSession(s)));
+  const cardioInWeek = cardioLogs.filter(l => inRange(l.date));
+  const logsInWeek = logs.filter(l => inRange(l.date));
+  const stats = computeHealthWeekStats({
+    logs, sessions, cardioLogs, planningState: state, tf: '1W', today: today || LB.todayISO(), selectedDate: weekAnchor,
+  });
+  const durationOf = s => {
+    if (s?.durationMinutes != null && Number.isFinite(Number(s.durationMinutes))) return Number(s.durationMinutes);
+    if (s?.duration_minutes != null && Number.isFinite(Number(s.duration_minutes))) return Number(s.duration_minutes);
+    if (s?.startedAt && s?.ended) {
+      const mins = (new Date(s.ended).getTime() - new Date(s.startedAt).getTime()) / 60000;
+      return Number.isFinite(mins) && mins > 0 ? Math.round(mins) : null;
+    }
+    return null;
+  };
+  const durationMinutes = sessionsInWeek.reduce((sum, s) => sum + (durationOf(s) || 0), 0);
+  const sets = sessionsInWeek.reduce((sum, s) => sum + (LB.doneSetCount(s) || 0), 0);
+  const volume = sessionsInWeek.reduce((sum, s) => sum + (LB.totalVolume(s, state.exercises, logs) || 0), 0);
+  const exerciseIds = new Set();
+  sessionsInWeek.forEach(s => (s.entries || []).forEach(e => { if (e.exId) exerciseIds.add(e.exId); }));
+  const progressionWins = sessionsInWeek.reduce((sum, s) => {
+    if (s.isDeload || s.isCleanup) return sum;
+    const bumps = Object.values(s.progressionBumps || {}).filter(b => b && !b.declined && Number(b.nextKg) > Number(b.currentKg));
+    const gains = (s.mesoRecap?.gains || []).filter(g => g && Number(g.weightDelta) > 0 && !g.declined);
+    return sum + bumps.length + gains.length;
+  }, 0);
+  const cardioPrLogs = cardioInWeek.filter(log => {
+    const pr = LB.detectCardioPRs(log, cardioLogs);
+    return !!(pr && pr.items && pr.items.length);
+  });
+  const weightPoints = logsInWeek.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
+  const weightStart = weightPoints.length ? weightPoints[0].weight : null;
+  const weightEnd = weightPoints.length ? weightPoints[weightPoints.length - 1].weight : null;
+  const weightChange = weightStart != null && weightEnd != null ? Math.round((weightEnd - weightStart) * 10) / 10 : null;
+  const dayRows = days.map(date => {
+    const log = logs.find(l => l.date === date) || null;
+    const mode = LB.statusModeForDate(state, date);
+    const foodClosed = LB.foodDayIsClosed(logs, date);
+    const daySessions = sessionsInWeek.filter(s => dateOfSession(s) === date);
+    const dayCardio = cardioInWeek.filter(l => l.date === date);
+    const planned = !!LB.plannedTrainingDay(state, date);
+    const provisional = date === (today || LB.todayISO()) && !foodClosed;
+    const adherence = provisional || LB.isNutritionUnscoredMode(mode) ? null : (log?.adherence ?? null);
+    return {
+      date,
+      label: LB.fmtDayLabel(date, { weekday: 'short', day: 'numeric' }),
+      mode,
+      planned,
+      trained: daySessions.length > 0,
+      cardio: dayCardio.length > 0,
+      foodClosed,
+      provisional,
+      adherence,
+      mealOfChoice: !!log?.mealOfChoice,
+    };
+  });
+  const longestSession = sessionsInWeek.reduce((best, s) => !best || (durationOf(s) || 0) > (durationOf(best) || 0) ? s : best, null);
+  const longestDuration = longestSession ? durationOf(longestSession) : null;
+  const highestVolumeSession = sessionsInWeek.reduce((best, s) => {
+    if (!best) return s;
+    return LB.totalVolume(s, state.exercises, logs) > LB.totalVolume(best, state.exercises, logs) ? s : best;
+  }, null);
+  const tDays = stats.trainingDaysInPeriod || 0;
+  const rDays = Math.max(0, stats.periodDays - tDays);
+  const planTarget = (trainingKey, restKey) => targets
+    ? Math.round(((targets[trainingKey] || 0) * tDays + (targets[restKey] || 0) * rDays) / (stats.periodDays || 7))
+    : null;
+  const target = {
+    calories: planTarget('caloriesTraining', 'caloriesRest'),
+    protein: planTarget('proteinTraining', 'proteinRest'),
+    carbs: planTarget('carbsTraining', 'carbsRest'),
+    fat: planTarget('fatTraining', 'fatRest'),
+  };
+  const hasData = !!(logsInWeek.some(hlHasLogContent) || sessionsInWeek.length || cardioInWeek.length);
+  return {
+    from, to, days: dayRows, stats, target, hasData,
+    loggedDays: logsInWeek.filter(hlHasLogContent).length,
+    closedFoodDays: dayRows.filter(d => d.foodClosed).length,
+    sessions: sessionsInWeek.length, durationMinutes, sets,
+    volume, exerciseCount: exerciseIds.size, progressionWins,
+    cardioPrs: cardioPrLogs.length, cardioMinutes: stats.cardioMinutes || 0, cardioSessions: stats.cardioSessions || 0,
+    weightStart, weightEnd, weightChange, longestSession, longestDuration, highestVolumeSession,
+  };
+}
+
 // Adherence → traffic-light colour (green ≥90, amber 75–89, red <75).
 function adherenceColor(a) {
   if (a == null) return UI.inkFaint;
@@ -4186,7 +4290,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
-function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
+function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit, onOpenRecap }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const { from, to, periodDays, daysLogged, mealOfChoice: mealOfChoiceDays, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
@@ -4253,6 +4357,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
           <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
+          {onOpenRecap && <button data-reorder-ignore="true" onClick={onOpenRecap} aria-label="Share weekly recap" title="Share weekly recap" style={{ background: 'transparent', border: 'none', padding: 3, color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-share-nodes" style={{ fontSize: 11 }} /></button>}
           {tfToggle}  {/* toggle on right even in empty state */}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
@@ -4266,6 +4371,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         {dragHandle}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+        {onOpenRecap && <button data-reorder-ignore="true" onClick={onOpenRecap} aria-label="Share weekly recap" title="Share weekly recap" style={{ background: 'transparent', border: 'none', padding: 3, color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-share-nodes" style={{ fontSize: 11 }} /></button>}
         {tfToggle}
       </div>
 
@@ -5003,6 +5109,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
+  const [weeklyRecapOpen, setWeeklyRecapOpen] = useStateH(false);
   // Which card is blown up in the expand sheet (id into expandableCards below),
   // null when closed. Only charts squeezed by the 2-col grid offer this.
   const [expandedCardId, setExpandedCardId] = useStateH(null);
@@ -5618,7 +5725,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   );
 
   const cardEls = {
-    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} onOpenRecap={() => setWeeklyRecapOpen(true)} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
       foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
@@ -5807,7 +5914,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         <MacroEstimatorSheet open={true} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
           onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
       )}
-      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} onOpenWeeklyRecap={() => setWeeklyRecapOpen(true)} />
+      <WeeklyRecapSheet open={weeklyRecapOpen} onClose={() => setWeeklyRecapOpen(false)} store={store} userId={userId} targets={effectiveTargets} initialDate={selectedDate} />
     </Screen>
   );
 }
@@ -6090,7 +6198,7 @@ function HealthClientLogs({ clientStore }) {
 
 // ─── Export sheet ─────────────────────────────────────────────────────────────
 
-function ExportSheet({ open, onClose, store, userId }) {
+function ExportSheet({ open, onClose, store, userId, onOpenWeeklyRecap }) {
   const today = LB.todayISO();
   const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
@@ -6429,6 +6537,20 @@ function ExportSheet({ open, onClose, store, userId }) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {onOpenWeeklyRecap && (
+            <button onClick={() => { onClose(); onOpenWeeklyRecap(); }} disabled={!!exporting} style={{
+              width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
+              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+              boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
+              color: 'var(--accent-ink)', textShadow: 'none',
+              fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent', opacity: exporting ? 0.6 : 1,
+            }}>
+              <i className="fa-solid fa-share-nodes" style={{ fontSize: 13 }} />
+              Share weekly recap
+            </button>
+          )}
           <button onClick={doExportCSV} disabled={!!exporting} style={{
             width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
             background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
@@ -6471,6 +6593,235 @@ function ExportSheet({ open, onClose, store, userId }) {
           </button>
         </div>
 
+      </div>
+    </Sheet>
+  );
+}
+
+// ─── Weekly recap share sheet ──────────────────────────────────────────────
+
+function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }) {
+  const today = LB.todayISO();
+  const [weekDate, setWeekDate] = useStateH(initialDate || today);
+  const [capturing, setCapturing] = useStateH(false);
+  const recapRef = useRefH(null);
+
+  useEffectH(() => {
+    if (open) setWeekDate(initialDate || today);
+  }, [open, initialDate]);
+
+  const snapshot = useMemoH(() => buildWeeklyRecapSnapshot({
+    store, targets, anchor: weekDate, today,
+  }), [store, targets, weekDate, today]);
+
+  const dateRange = `${LB.fmtDayLabel(snapshot.from, { day: 'numeric', month: 'short' })} - ${LB.fmtDayLabel(snapshot.to, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  const adherence = snapshot.stats.adherence != null ? Math.round(snapshot.stats.adherence) : null;
+  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const weightUnit = UI.unit();
+  const fmt = (value, digits = 0) => {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    return Number(value).toLocaleString('en-US', { maximumFractionDigits: digits });
+  };
+  const fmtDuration = minutes => minutes == null || !minutes ? '—' : `${Math.round(minutes)} min`;
+  const fmtVolume = value => value == null || !value ? '—' : `${Math.round(value).toLocaleString('en-US')} ${weightUnit}`;
+  const metric = (label, value, unit = '') => (
+    <div style={{ minWidth: 0, textAlign: 'center' }}>
+      <div className="num" style={{ fontSize: 20, color: value == null ? UI.inkGhost : UI.ink, fontWeight: 300, whiteSpace: 'nowrap' }}>
+        {value == null ? '—' : value}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
+      </div>
+      <div style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 3 }}>{label}</div>
+    </div>
+  );
+  const section = (title, children, note = null) => (
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}` }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
+        {note && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{note}</span>}
+      </div>
+      {children}
+    </Card>
+  );
+  const modeLabel = mode => mode === 'sick' ? 'SICK' : mode === 'vacation' ? 'AWAY' : mode === 'deload' ? 'DELOAD' : mode === 'cleanup' ? 'CLEANUP' : null;
+  const dayState = day => {
+    const mode = modeLabel(day.mode);
+    if (mode) return { label: mode, color: UI.warn, icon: day.mode === 'sick' ? 'fa-bed-pulse' : day.mode === 'vacation' ? 'fa-umbrella-beach' : day.mode === 'cleanup' ? 'fa-broom' : 'fa-battery-quarter' };
+    if (day.trained) return { label: 'TRAINED', color: 'var(--accent)', icon: 'fa-dumbbell' };
+    if (day.cardio) return { label: 'CARDIO', color: UI.ok, icon: 'fa-person-running' };
+    if (day.foodClosed) return { label: 'CLOSED', color: UI.inkSoft, icon: 'fa-check' };
+    if (day.planned) return { label: 'PLANNED', color: UI.inkFaint, icon: 'fa-calendar-day' };
+    return { label: 'REST', color: UI.inkFaint, icon: 'fa-minus' };
+  };
+
+  const shareRecap = async () => {
+    if (!recapRef.current || capturing) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) {
+      UI.alert('Could not prepare the recap image. Please try again.');
+      return;
+    }
+    setCapturing(true);
+    const parent = recapRef.current.parentElement;
+    const saved = parent ? { overflow: parent.style.overflow, height: parent.style.height, minHeight: parent.style.minHeight } : null;
+    if (parent) {
+      parent.style.overflow = 'visible';
+      parent.style.height = 'auto';
+      parent.style.minHeight = 'auto';
+    }
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    try {
+      const element = recapRef.current;
+      const canvas = await html2canvas(element, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        height: element.scrollHeight, windowHeight: element.scrollHeight,
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) return;
+      const filename = `weekly-recap-${snapshot.from}-${snapshot.to}.png`;
+      const file = new File([blob], filename, { type: 'image/png' });
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: `Weekly recap ${dateRange}` }); } catch (_) {}
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } finally {
+      if (parent && saved) {
+        parent.style.overflow = saved.overflow;
+        parent.style.height = saved.height;
+        parent.style.minHeight = saved.minHeight;
+      }
+      setCapturing(false);
+    }
+  };
+
+  const previousWeek = () => setWeekDate(LB.shiftDate(snapshot.from, -7));
+  const nextWeek = () => {
+    const next = LB.shiftDate(snapshot.from, 7);
+    if (next <= today) setWeekDate(next);
+  };
+  const target = snapshot.target;
+  const stats = snapshot.stats;
+  const highlights = [];
+  if (snapshot.longestSession && snapshot.longestDuration) highlights.push(`Longest session: ${fmtDuration(snapshot.longestDuration)}`);
+  if (snapshot.highestVolumeSession && snapshot.volume > 0) highlights.push(`Top weekly volume: ${fmtVolume(snapshot.volume)}`);
+  if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} progression win${snapshot.progressionWins === 1 ? '' : 's'}`);
+  if (snapshot.cardioPrs) highlights.push(`${snapshot.cardioPrs} cardio personal best${snapshot.cardioPrs === 1 ? '' : 's'}`);
+
+  if (!open) return null;
+  return (
+    <Sheet open={open} onClose={onClose} title="Weekly recap" accent>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!capturing && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={previousWeek} aria-label="Previous week" style={{ width: 38, height: 36, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-chevron-left" style={{ fontSize: 11 }} /></button>
+            <input type="date" value={snapshot.from} max={today} aria-label="Choose a date in the week" onChange={e => e.target.value && setWeekDate(e.target.value)} style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark', padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            <button onClick={nextWeek} disabled={LB.shiftDate(snapshot.from, 7) > today} aria-label="Next week" style={{ width: 38, height: 36, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: LB.shiftDate(snapshot.from, 7) > today ? UI.inkGhost : UI.inkSoft, cursor: LB.shiftDate(snapshot.from, 7) > today ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} /></button>
+          </div>
+        )}
+
+        <div ref={recapRef} style={{ display: 'flex', flexDirection: 'column', gap: 12, padding: 2, background: 'var(--bg)', backgroundImage: 'var(--bg-texture)' }}>
+          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}` }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+              <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
+              <span style={{ flex: 1 }} />
+              <i className="fa-solid fa-chart-line" style={{ color: UI.gold, fontSize: 15 }} />
+            </div>
+            <div className="num" style={{ color: UI.inkSoft, fontSize: 12, marginTop: 8 }}>{dateRange}</div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 18 }}>
+              {adherence != null ? (
+                <>
+                  <span className="num" style={{ fontSize: 34, fontWeight: 300, color: adherenceColor(adherence), lineHeight: 1 }}>{adherence}%</span>
+                  <span style={{ fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em', color: adherenceColor(adherence), fontSize: 12 }}>{verdict}</span>
+                </>
+              ) : <span style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>No nutrition score for this week yet</span>}
+              <span style={{ flex: 1 }} />
+              <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300 }}>{snapshot.stats.trainingsDone}<span style={{ fontSize: 11, color: UI.inkFaint }}> / {snapshot.stats.trainingsPlanned || snapshot.stats.trainingsDone}</span></span>
+              <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>workouts</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 10 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
+          </Card>
+
+          {section('TRAINING', (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+              {metric('Sessions', snapshot.sessions)}
+              {metric('Time', snapshot.durationMinutes ? Math.round(snapshot.durationMinutes) : null, snapshot.durationMinutes ? 'min' : '')}
+              {metric('Sets', snapshot.sets)}
+              {metric('Volume', snapshot.volume ? Math.round(snapshot.volume).toLocaleString('en-US') : null, snapshot.volume ? weightUnit : '')}
+            </div>
+          ), snapshot.exerciseCount ? `${snapshot.exerciseCount} exercises` : null)}
+
+          {section('NUTRITION', (
+            <>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+                {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
+                {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
+                {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
+                {metric('Fat / day', stats.fat != null ? fmt(stats.fat) : null, stats.fat != null ? 'g' : '')}
+              </div>
+              {(target.protein != null || target.carbs != null || target.fat != null) && (
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14, paddingTop: 10, borderTop: `1px solid ${UI.hair}` }}>
+                  {[['P', target.protein], ['C', target.carbs], ['F', target.fat]].map(([label, value]) => <div key={label} style={{ textAlign: 'center', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint }}><span style={{ color: UI.inkGhost }}>{label}</span> {value != null ? `${value}g` : '—'}</div>)}
+                </div>
+              )}
+              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+                <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.loggedDays}</span> logged days</span>
+                <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.closedFoodDays}</span> food days closed</span>
+                {stats.mealOfChoice > 0 && <span><span className="num" style={{ color: 'var(--accent)' }}>{stats.mealOfChoice}</span> meal-of-choice</span>}
+              </div>
+            </>
+          ), target.calories != null ? `${target.calories} kcal target` : 'averages')}
+
+          {section('MOVEMENT & HEALTH', (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '14px 6px' }}>
+              {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
+              {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
+              {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
+              {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
+              {metric('Cardio', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
+              {metric('Cardio sessions', snapshot.cardioSessions || null)}
+              {metric('Weight change', snapshot.weightChange != null ? `${snapshot.weightChange > 0 ? '+' : ''}${fmt(snapshot.weightChange, 1)}` : null, snapshot.weightChange != null ? weightUnit : '')}
+              {metric('Training days', snapshot.stats.trainingsDone || null)}
+            </div>
+          ))}
+
+          {section('WEEK AT A GLANCE', (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+              {snapshot.days.map(day => {
+                const state = dayState(day);
+                return <div key={day.date} title={`${day.label}: ${state.label}`} style={{ minWidth: 0, textAlign: 'center', padding: '7px 2px 6px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hair}` }}>
+                  <div style={{ color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi }}>{day.label.split(' ')[0]}</div>
+                  <i className={`fa-solid ${state.icon}`} style={{ display: 'block', color: state.color, fontSize: 12, margin: '8px auto 6px' }} />
+                  <div className="num" style={{ color: day.adherence != null ? adherenceColor(day.adherence) : UI.inkFaint, fontSize: 9 }}>{day.adherence != null ? `${Math.round(day.adherence)}%` : state.label === 'CLOSED' ? 'DONE' : state.label === 'REST' ? 'REST' : '—'}</div>
+                </div>;
+              })}
+            </div>
+          ))}
+
+          {highlights.length > 0 && section('HIGHLIGHTS', (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {highlights.map((highlight, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}><i className="fa-solid fa-star" style={{ color: 'var(--accent)', fontSize: 10 }} />{highlight}</div>)}
+            </div>
+          ))}
+
+          {!snapshot.hasData && (
+            <Card style={{ padding: 16, textAlign: 'center', borderLeft: `3px solid ${UI.inkFaint}` }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>Nothing is logged for this week on this device.</div>
+            </Card>
+          )}
+          <div style={{ textAlign: 'center', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 9, lineHeight: '14px', padding: '2px 12px 4px' }}>Based on the data currently loaded on this device. Today's nutrition score is provisional until the food day is closed.</div>
+        </div>
+
+        {!capturing && (
+          <button onClick={shareRecap} disabled={capturing} style={{ width: '100%', padding: '13px 0', borderRadius: 6, border: 'none', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-share-nodes" style={{ fontSize: 13 }} />
+            Share recap image
+          </button>
+        )}
       </div>
     </Sheet>
   );
