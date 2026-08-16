@@ -4801,6 +4801,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     carbs: fdRound1(staged.reduce((a, e) => a + (e.carbs || 0), 0)),
     fat: fdRound1(staged.reduce((a, e) => a + (e.fat || 0), 0)),
   }), [staged]);
+  // The amount-sheet forecast is for the date currently on screen. Staged
+  // rows intentionally survive date navigation, so do not let a pick for
+  // tomorrow (or yesterday) leak into today's "Day if logged" figure. The
+  // resulting base is the same logged+planned projection the sheet used
+  // before multi-pick existed, with this day's still-uncommitted picks
+  // layered on top.
+  const stagedDayTotals = useMemoFd(() => sumTotals(staged.filter(e => e.date === curDate)), [staged, curDate]);
+  const projectedWithStagedTotals = useMemoFd(() => ({
+    calories: projectedTotals.calories + stagedDayTotals.calories,
+    protein: projectedTotals.protein + stagedDayTotals.protein,
+    carbs: projectedTotals.carbs + stagedDayTotals.carbs,
+    fat: projectedTotals.fat + stagedDayTotals.fat,
+  }), [projectedTotals, stagedDayTotals]);
   // What's left of the day's target once this batch is actually added,
   // shown in the staged bar so a heavy add (rice, etc.) reveals an overshoot
   // BEFORE committing instead of after. projectedTotals already covers
@@ -5912,10 +5925,18 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat}
                 sugar={qtyPreview.sugar} satFat={qtyPreview.satFat} sodiumMg={qtyPreview.sodiumMg}
                 dayProjection={{
-                  baseTotals: projectedTotals,
+                  baseTotals: projectedWithStagedTotals,
                   addition: editingMealItemId ? mealItemsProjectedTotals : qtyPreview,
                   target: dayTarget,
-                  replace: editingMealItemId || !editingEntry || editingEntry.date !== curDate ? null : editingEntry,
+                  // A staged row is already included in the base above. When
+                  // its amount is edited, remove the old staged value before
+                  // adding the live quantity preview, just like an existing
+                  // logged/planned entry; otherwise Save would show the old
+                  // and new amounts together for one frame.
+                  replace: editingMealItemId ? null
+                    : editingEntry && editingEntry.date === curDate ? editingEntry
+                    : editingStagedId ? staged.find(e => e.id === editingStagedId && e.date === curDate) || null
+                    : null,
                 }} />
             )}
             <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
@@ -6013,7 +6034,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {customPreview && (
           <FdMacroPreview calories={customPreview.calories} protein={customPreview.protein} carbs={customPreview.carbs} fat={customPreview.fat}
             sugar={customPreview.sugar} satFat={customPreview.satFat} sodiumMg={customPreview.sodiumMg}
-            dayProjection={{ baseTotals: projectedTotals, addition: customPreview, target: dayTarget }} />
+            dayProjection={{ baseTotals: projectedWithStagedTotals, addition: customPreview, target: dayTarget }} />
         )}
         <button onClick={() => toggleFavorite(buildCustomEntry())} disabled={!customValid} style={fdFavBtn(!!favedId, !customValid)}>
           <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
@@ -6088,7 +6109,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <FdMacroGhosts protein={mealItemsTotals.protein} carbs={mealItemsTotals.carbs} fat={mealItemsTotals.fat} />
         </div>
         <div style={{ marginBottom: 16 }}>
-          <FdDayMacroProjection baseTotals={projectedTotals} addition={mealItemsTotals} target={dayTarget} />
+          <FdDayMacroProjection baseTotals={projectedWithStagedTotals} addition={mealItemsTotals} target={dayTarget} />
         </div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 16 }}>
           {(mealItems || []).map(i => {
@@ -6228,7 +6249,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         {repeatSelected.length > 0 && (
           <FdMacroPreview calories={repeatTotals.calories} protein={repeatTotals.protein} carbs={repeatTotals.carbs} fat={repeatTotals.fat}
             sugar={repeatTotals.sugar} satFat={repeatTotals.satFat} sodiumMg={repeatTotals.sodiumMg}
-            dayProjection={{ baseTotals: projectedTotals, addition: repeatTotals, target: dayTarget }} />
+            dayProjection={{ baseTotals: projectedWithStagedTotals, addition: repeatTotals, target: dayTarget }} />
         )}
         <div style={{ display: 'flex', gap: 8 }}>
           <Btn kind="ghost" onClick={() => setRepeat(null)} style={{ flex: 1 }}>Cancel</Btn>
@@ -6568,7 +6589,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {recipeLogPreview && (
               <FdMacroPreview calories={recipeLogPreview.calories} protein={recipeLogPreview.protein} carbs={recipeLogPreview.carbs} fat={recipeLogPreview.fat}
                 dayProjection={{
-                  baseTotals: projectedTotals,
+                  baseTotals: projectedWithStagedTotals,
                   addition: recipeLogPreview,
                   target: dayTarget,
                   replace: editingEntry && editingEntry.date === curDate ? editingEntry : null,
@@ -6765,7 +6786,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           {ingredientEditorEntry && (
             <div style={{ marginTop: 10 }}>
               <FdDayMacroProjection
-                baseTotals={projectedTotals}
+                baseTotals={projectedWithStagedTotals}
                 addition={ingredientTotals}
                 target={dayTarget}
                 replace={ingredientEditorEntry.date === curDate ? ingredientEditorEntry : null}
@@ -6826,7 +6847,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           <FdMacroPreview calories={ingrEditPreview.calories} protein={ingrEditPreview.protein} carbs={ingrEditPreview.carbs} fat={ingrEditPreview.fat}
             sugar={ingrEditPreview.sugar} satFat={ingrEditPreview.satFat} sodiumMg={ingrEditPreview.sodiumMg}
             dayProjection={{
-              baseTotals: projectedTotals,
+              baseTotals: projectedWithStagedTotals,
               addition: ingredientEditProjection,
               target: dayTarget,
               replace: ingredientEditorEntry && ingredientEditorEntry.date === curDate ? ingredientEditorEntry : null,
@@ -12719,12 +12740,12 @@ function FdMacroHero({ label, calories, protein, carbs, fat, compact = false }) 
 // decimal in their own grey style, so the same food read "P 20.4" while you
 // confirmed it and "P20" a second later in the timeline.
 // Adds a live "where would my day land?" readout to an amount sheet. The
-// base is the day's logged+planned forecast, so food already planned remains
-// reserved while another amount is being chosen. `replace` is used whenever
-// an existing entry is being edited, regardless of its planned flag, so the
-// old value is removed before the new preview is added. Keeping this
-// arithmetic here means every sheet uses the same rounding and replacement
-// rules.
+// base is the day's logged+planned forecast, plus any same-day picks still in
+// the multi-pick stager, so food already planned or picked remains reserved
+// while another amount is being chosen. `replace` is used whenever an
+// existing entry is being edited, regardless of its planned flag, so the old
+// value is removed before the new preview is added. Keeping this arithmetic
+// here means every sheet uses the same rounding and replacement rules.
 function fdProjectDayTotals(base, addition, replace) {
   const value = (source, key) => Number(source?.[key]) || 0;
   return ['calories', 'protein', 'carbs', 'fat'].reduce((out, key) => {
