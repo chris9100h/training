@@ -5986,14 +5986,12 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               const entryVolB = (cmpEntry && !isMobilityEx) ? LB.entryVolume(cmpEntry, true, store.exercises.find(x => x.id === cmpEntry.exId), bwB) : 0;
               const entryDelta = entryVolA - entryVolB;
               const entryDeltaRounded = Math.round(entryDelta);
-              // Neither side's own reduction may drive a red/gold per-set verdict:
-              // a lighter cleanup set compared against a full-weight baseline (or
-              // the reverse) is not an honest apples-to-apples read. Mirrors
-              // SessionDetailScreen's reducedLoad exactly, checked on both sessions
-              // since either one, not just "today", can be the reduced side here.
+              // A cleanup session as TODAY must not show deliberate load cuts as
+              // regressions. A normal session MAY compare against cleanup,
+              // however: cleanup is the intended last baseline for the rebuild.
+              // Deload remains non-comparative on either side.
               const reducedInS = s.isDeload || (s.isCleanup && !s.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, s.dayId));
-              const reducedInCmp = cmp.isDeload || (cmp.isCleanup && !cmp.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, cmp.dayId));
-              const reducedLoad = reducedInS || reducedInCmp;
+              const reducedLoad = reducedInS || cmp.isDeload;
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>

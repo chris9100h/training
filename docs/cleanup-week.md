@@ -18,7 +18,7 @@ Der Nutzer will nach einer längeren Pause die Technik wieder auf Stand bringen:
 **Kern des Designs** (im Gegensatz zu Deload):
 - Cleanup-Sessions sind **normale Sessions** (kein `isDeload`-Flag): die reduzierten Gewichte fließen in die Seed-Kette, damit die Folgewoche darauf aufbaut.
 - Die **Autoreg-Bewertung** ignoriert die Woche: kein Earn/Cut, keine rep_miss_counts, keine Regression-/PR-Baselines, keine Overreach-/Stagnations-Flags. Der Nutzer hat explizit betont: "keine Stagnation oder Overreaching, sondern ein geplanter Rückschritt zugunsten besserer Ausführung".
-- Die **direkte Last-/Sessionvergleichskette** überspringt nur Deloads. Die Folgewoche vergleicht also mit der letzten Cleanup-Session statt mit dem Vor-Cleanup-Zyklus; während der aktiven Cleanup-Session bleiben die absichtlich leichteren Sets selbst ohne Verbesserungs-/Regressionspfeil.
+- Die **direkte Last-/Sessionvergleichskette** überspringt nur Deloads. Die Folgewoche vergleicht also mit der letzten Cleanup-Session statt mit dem Vor-Cleanup-Zyklus; nur wenn Cleanup das aktuelle Training ist, bleiben die absichtlich leichteren Sets selbst ohne Verbesserungs-/Regressionspfeil.
 
 ## Was sich gegenüber dem ersten Entwurf ändert
 
