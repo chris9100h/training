@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 <title>Zane · The all-in-one fitness app</title>
-<meta name="description" content="Training, nutrition, health metrics and coaching in one log. Plans that adapt to how the last session actually felt, logging built for the gym floor, and it installs on your phone from the browser." />
+<meta name="description" content="Training, nutrition, health metrics, Friends and coaching in one log. Adaptive plans, gym-floor logging, offline workouts and home-screen install." />
 <meta name="theme-color" content="#141218" />
 <link rel="icon" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
@@ -21,12 +21,12 @@
 <meta property="og:site_name" content="Zane" />
 <meta property="og:url" content="https://zane-wo.com/welcome.html" />
 <meta property="og:title" content="Zane · Train with Zane or remain the same" />
-<meta property="og:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<meta property="og:description" content="Training, nutrition, Health, Friends and coaching in one log. The plan adapts to how the last session felt, and full workout logging works offline." />
 <meta property="og:image" content="https://zane-wo.com/icons/og-card.jpg" />
 <meta property="og:image:alt" content="The Zane wordmark beside the app running on two phones" />
 <meta name="twitter:card" content="summary_large_image" />
 <meta name="twitter:title" content="Zane · Train with Zane or remain the same" />
-<meta name="twitter:description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<meta name="twitter:description" content="Training, nutrition, Health, Friends and coaching in one log. The plan adapts to how the last session felt, and full workout logging works offline." />
 <meta name="twitter:image" content="https://zane-wo.com/icons/og-card.jpg" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -330,6 +330,7 @@
       <a href="#what" class="hide-s">What it is</a>
       <a href="features.html">Features</a>
       <a href="autoreg.html" class="hide-s">Autoregulation</a>
+      <a href="#friends" class="hide-s">Friends</a>
       <a href="#pricing">Pricing</a>
       <a href="index.html">Open app</a>
       <button class="tt" id="themeBtn" title="Toggle light / dark" aria-label="Toggle light or dark theme">
@@ -500,6 +501,7 @@
         <p class="sec-lede">Training is the easy half. The food tracker reads <b>barcodes and nutrition labels</b>, turns a typed description or a photo of your plate into an estimate you check before it lands, and remembers what you eat so logging it again is a tap and a confirm.</p>
         <ul class="bullets">
           <li><b>Meal planning that fills itself.</b> Set your recurring meals once and the next seven days arrive already planned out, hour by hour. Tick each one off as you eat it, or change it first. Nothing counts until you do.</li>
+          <li><b>See the total before you commit.</b> Change an amount and the live Day if logged macros include everything already planned for the day. Build a recipe and the whole batch updates as ingredients and nested recipes go in.</li>
           <li><b>A shopping list from real data.</b> Built from what you actually ate over the last two weeks and what you have planned, with stock tracking that flags whatever is running low.</li>
           <li><b>Cook it, weigh it, log it.</b> A guided cooking mode where you tick off ingredients, swap them mid-recipe, and weigh the finished dish. A portion becomes a real number instead of a guess.</li>
           <li><b>The clinical stuff too.</b> Glucose, blood pressure, body temperature, and a medication tracker with reminders and a weekly pillbox packing list.</li>
@@ -513,6 +515,36 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><rect x="6" y="2.5" width="12" height="19" rx="2.5"/><path d="M10.5 5.5h3"/></svg>
             <div class="t">Food tracker<br />screenshot</div>
           </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="band" id="friends">
+  <div class="wrap">
+    <div class="split">
+      <div>
+        <div class="sec-head"><span class="dot"></span><span class="micro">Friends &amp; social</span><span class="rule"></span></div>
+        <h2 class="sec">Train together, on your terms</h2>
+        <p class="sec-lede">Friends is an opt-in layer around your training, not a noisy feed. Choose who can see your activity, what metrics they can see, and which moments deserve a notification.</p>
+        <ul class="bullets">
+          <li><b>Build your circle.</b> Connect by handle or friend code, confirm requests before sending, and remove or block connections whenever you want.</li>
+          <li><b>See a workout live.</b> Follow exercise names, sets, reps and unit-converted weights from Home or Friends, then leave a comment or send one of five themed cheers.</li>
+          <li><b>Keep the conversation private.</b> One-to-one chats, private groups, shared weekly metrics and plan snapshots you can import without changing the original.</li>
+          <li><b>Choose what reaches you.</b> Decide separately whether native push may notify you about messages, friend requests, finished-workout comments or workout starts.</li>
+        </ul>
+      </div>
+      <div class="split-media">
+        <div class="demo" aria-label="Friends feature overview">
+          <div class="demo-head"><span class="t">Friends</span><span class="tag">opt-in social</span></div>
+          <div class="demo-body">
+            <div class="drow"><span class="wk">Circle</span><span class="fb"><b>Build your circle</b></span><span class="out">private</span></div>
+            <div class="drow"><span class="wk">Activity</span><span class="fb"><b>Follow a live workout</b></span><span class="out up">live</span></div>
+            <div class="drow"><span class="wk">Chats</span><span class="fb"><b>Friends and groups</b></span><span class="out">private</span></div>
+            <div class="drow"><span class="wk">Plans</span><span class="fb"><b>Share a snapshot</b></span><span class="out">import</span></div>
+          </div>
+          <div class="demo-foot">You choose the metrics friends can see. Comments and cheers stay in the app; push alerts are separate opt-ins.</div>
         </div>
       </div>
     </div>
@@ -555,7 +587,7 @@
     <ul class="bullets" style="max-width:66ch">
       <li><b>Every set arrives pre-filled.</b> Not from your last session, from your best of the recent ones, so one bad day does not set the target. Earn the jump and you get told about it.</li>
       <li><b>Sign in with your face.</b> Passkeys, Face ID, Touch ID or your device PIN. No password to type at the gym.</li>
-      <li><b>Rack the bar, pocket the phone.</b> The rest timer reaches you with the screen locked and the app closed, and so do reminders for training, water, meals, medication and messages from your coach.</li>
+      <li><b>Rack the bar, pocket the phone.</b> The rest timer reaches you with the screen locked and the app closed, and so do reminders for training, water, meals, medication, your coach and any Friends alerts you opt into.</li>
       <li><b>Offline once installed.</b> A full workout logs with no signal and syncs itself the moment you are back. Only the first sign-in needs a connection.</li>
     </ul>
     <div class="shots">
@@ -658,6 +690,7 @@
     <div class="col">
       <div class="h">On this page</div>
       <a href="#what">What it is</a>
+      <a href="#friends">Friends</a>
       <a href="#pricing">Pricing</a>
       <a href="#access">Start training</a>
     </div>
@@ -673,7 +706,7 @@
      from the browser cache even after a fresh deploy. tools/check-cache-version.cjs
      gates this. The catalog is loaded purely so the hero counters below state a
      real number instead of a marketing one that quietly goes stale. -->
-    <script src="src/feature-map-db.js?v=2.804"></script>
+    <script src="src/feature-map-db.js?v=2.805"></script>
 <script>
 (function(){
   // ---- hero counters, straight from the bundled feature catalog ----
