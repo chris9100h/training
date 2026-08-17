@@ -2126,6 +2126,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     });
   };
   const daysListRef = UI.useDragReorder({ onReorder: reorderDays });
+  // Cycle start / Week plan start used to write straight into the store on
+  // every keystroke. They live on the store, not on the schedule, so `dirty`
+  // (which diffs draft against original) never saw them: Save stayed grey and
+  // Discard could not put the date back, leaving the active plan pointing at a
+  // different training day than before the edit. Held here and applied in
+  // doSave instead, the same deferral the flex anchor already uses.
+  const [startDateDraft, setStartDateDraft] = useStateS(null);
 
   if (!draft) return null;
 
@@ -2231,6 +2238,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       const turnedOn = LB.isFlexPlan(draft);
       setStore(s => ({ ...s, cycleStartDate: turnedOn ? null : LB.todayISO() }));
     }
+    // Commit the deferred start date. After the flex block on purpose: turning
+    // flex on clears cycleStartDate, and a stale draft date must not undo that.
+    if (isActive && startDateDraft && !LB.isFlexPlan(draft)) {
+      const key = isWeekday ? 'weekPlanStartDate' : 'cycleStartDate';
+      setStore(s => ({ ...s, [key]: startDateDraft }));
+    }
+    setStartDateDraft(null);
 
     const asClient = store.coaching?.asClient;
     if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
@@ -2342,7 +2356,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const dirtyBaseline = (editVerIdx > 0 && original?.versions?.[editVerIdx])
     ? { ...original, days: original.versions[editVerIdx].days || [] }
     : original;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline);
+  const committedStartDate = (isWeekday ? store.weekPlanStartDate : store.cycleStartDate) || '';
+  const effectiveStartDate = startDateDraft ?? committedStartDate;
+  const startDateDirty = startDateDraft != null && startDateDraft !== committedStartDate;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline) || startDateDirty;
   const dateInputStyle = {
     background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
@@ -2519,12 +2536,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         {isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
-              <input type="date" value={store.cycleStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+              <input type="date" value={effectiveStartDate}
+                onChange={e => { if (e.target.value) setStartDateDraft(e.target.value); }}
                 style={dateInputStyle} />
             </div>
-            {store.cycleStartDate && draft.days.length > 0 && (() => {
-              const idx = LB.cyclePosFromStartDate(store.cycleStartDate, draft.days.length, LB.todayISO());
+            {effectiveStartDate && draft.days.length > 0 && (() => {
+              const idx = LB.cyclePosFromStartDate(effectiveStartDate, draft.days.length, LB.todayISO());
               return <div className="micro" style={{ marginTop: 8 }}>Today = Day {idx + 1} of {draft.days.length}</div>;
             })()}
           </Field>
@@ -2532,12 +2549,12 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
         {isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
-              <input type="date" value={store.weekPlanStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
+              <input type="date" value={effectiveStartDate}
+                onChange={e => { if (e.target.value) setStartDateDraft(e.target.value); }}
                 style={dateInputStyle} />
             </div>
-            {store.weekPlanStartDate && (() => {
-              const start = LB.parseDate(store.weekPlanStartDate);
+            {effectiveStartDate && (() => {
+              const start = LB.parseDate(effectiveStartDate);
               const today = new Date(); today.setHours(12, 0, 0, 0);
               const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
               return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
@@ -3120,13 +3137,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                           </div>
                         )}
                       </div>
+                      {/* Confirmed rather than deferred into the draft: meso state
+                          is its own table, not part of the plan, so Save/Discard
+                          never governed it and moving it into the draft would be a
+                          lie in the other direction. What was missing is that this
+                          is immediate and permanent: one stray tap wiped the
+                          completed-block history and Discard could not bring it
+                          back. */}
                       {mesoCompletions > 0 && (
-                        <button onClick={() => setStore(s => ({
-                          ...s,
-                          mesoStates: (s.mesoStates || []).map(m =>
-                            m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
-                          ),
-                        }))} style={{
+                        <button onClick={async () => {
+                          if (!await confirm(`Reset this plan's mesocycle history? ${mesoCompletions} completed block${mesoCompletions === 1 ? '' : 's'} will be cleared. This applies immediately and is not undone by discarding your plan edits.`, { title: 'Reset meso history', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
+                          setStore(s => ({
+                            ...s,
+                            mesoStates: (s.mesoStates || []).map(m =>
+                              m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
+                            ),
+                          }));
+                        }} style={{
                           marginTop: 10, width: '100%', background: 'transparent',
                           border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
                           padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
