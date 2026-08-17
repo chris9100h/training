@@ -6777,11 +6777,11 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
   }, { current: 0, longest: 0 }).longest;
   const highlights = [];
   if (snapshot.longestSession && snapshot.longestDuration) highlights.push(`Longest session: ${fmtDuration(snapshot.longestDuration)}`);
-  if (snapshot.volume > 0) highlights.push(`Total volume: ${fmtVolume(snapshot.volume)}`);
-  if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} progression win${snapshot.progressionWins === 1 ? '' : 's'}`);
-  if (snapshot.cardioPrs) highlights.push(`${snapshot.cardioPrs} cardio personal best${snapshot.cardioPrs === 1 ? '' : 's'}`);
   if (heaviestSessionVolume > 0) highlights.push(`Heaviest session: ${fmtVolume(heaviestSessionVolume)}`);
-  if (longestActivityStreak > 0) highlights.push(`Longest activity streak: ${longestActivityStreak} day${longestActivityStreak === 1 ? '' : 's'}`);
+  if (snapshot.volume > 0) highlights.push(`Total volume: ${fmtVolume(snapshot.volume)}`);
+  if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} personal best${snapshot.progressionWins === 1 ? '' : 's'}`);
+  if (snapshot.cardioPrs) highlights.push(`${snapshot.cardioPrs} cardio best${snapshot.cardioPrs === 1 ? '' : 's'}`);
+  if (longestActivityStreak > 0) highlights.push(`Longest streak: ${longestActivityStreak} day${longestActivityStreak === 1 ? '' : 's'}`);
 
   if (!open) return null;
   return (
