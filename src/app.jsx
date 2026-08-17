@@ -2460,6 +2460,7 @@ function App() {
         // Do this before clearing the refs so a late A-sync cannot serialize
         // its baseline into the next account's local cache.
         syncGeneration.current += 1;
+        const signedOutUid = userIdRef.current;
         userIdRef.current = null;
         unitPicked.current = false;
         recoveryInProgress.current = false;
@@ -2484,7 +2485,26 @@ function App() {
           setSyncStatus('error');
           const offlineUser = LB.getOfflineUser();
           const recovery = LB.getAuthRecoveryState();
-          if (phaseRef.current === 'ready') return;
+          // An app that is already 'ready' must not be torn down here:
+          // enterOfflineCache re-enters the boot and would throw away the
+          // screen (and any running session) the user is looking at. But
+          // returning outright stranded it instead. userIdRef was already
+          // null, so scheduleLocalSave and persistLocalNow stopped writing
+          // every later edit, and both flushSync and probeSyncConnection bail
+          // out unless authStatus is 'online', which left the red retry dot a
+          // silent no-op with no other way back. Restore the ref and hand over
+          // to the 'recovering' loop above, which refreshes the JWT and
+          // flushes the pending diff once the session is valid again. Writes
+          // stay blocked meanwhile: the generation bumped above invalidates
+          // any in-flight sync, and 'recovering' is not 'online'.
+          if (phaseRef.current === 'ready') {
+            const resumeUid = signedOutUid || offlineUser?.userId || null;
+            if (resumeUid) {
+              userIdRef.current = resumeUid;
+              setAuthState('recovering');
+            }
+            return;
+          }
           if (offlineUser && recovery) enterOfflineCache(offlineUser.userId);
           else setPhase('error');
           return;
@@ -3272,6 +3292,14 @@ function App() {
   const onRetrySync = () => {
     setStorageFull(false);
     const uid = userIdRef.current || userId;
+    // A red dot can also mean the session died, not just that a write failed.
+    // flushSync and probeSyncConnection both return early unless authStatus is
+    // 'online', so routing there would do nothing in exactly the case the user
+    // is trying to fix. Re-entering 'recovering' restarts the refresh loop.
+    if (authStatusRef.current !== 'online') {
+      if (uid) setAuthState('recovering');
+      return;
+    }
     if (pendingStore.current !== syncBase.current) flushSync(uid);
     else probeSyncConnection(uid);
   };
