@@ -6642,7 +6642,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
     </div>
   );
   const section = (title, children, note = null, wide = false) => (
-    <Card style={{ padding: capturing ? 18 : 14, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { position: 'relative', zIndex: 1 } : {}), ...(capturing && wide ? { gridColumn: '1 / -1' } : {}) }}>
+    <Card style={{ padding: capturing ? 18 : 14, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 1 } : {}), ...(capturing && wide ? { gridColumn: '1 / -1' } : {}) }}>
       <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
         {note && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{note}</span>}
@@ -6735,7 +6735,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
   const stats = snapshot.stats;
   const highlights = [];
   if (snapshot.longestSession && snapshot.longestDuration) highlights.push(`Longest session: ${fmtDuration(snapshot.longestDuration)}`);
-  if (snapshot.highestVolumeSession && snapshot.volume > 0) highlights.push(`Top weekly volume: ${fmtVolume(snapshot.volume)}`);
+  if (snapshot.highestVolumeSession && snapshot.volume > 0) highlights.push(`Total weight moved: ${fmtVolume(snapshot.volume)}`);
   if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} progression win${snapshot.progressionWins === 1 ? '' : 's'}`);
   if (snapshot.cardioPrs) highlights.push(`${snapshot.cardioPrs} cardio personal best${snapshot.cardioPrs === 1 ? '' : 's'}`);
 
@@ -6763,6 +6763,18 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           position: 'relative',
           background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
         }}>
+          {capturing && <img
+            data-shot-avatar
+            src={shotLogo}
+            alt=""
+            aria-hidden="true"
+            crossOrigin="anonymous"
+            style={{
+              position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+              maxHeight: '70%', pointerEvents: 'none', zIndex: 0, display: 'block',
+              ...shotLogoStyle,
+            }}
+          />}
           {capturing && <div style={{ gridColumn: '1 / -1', position: 'relative', zIndex: 1 }}>
             <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
@@ -6773,7 +6785,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
             </div>
           </div>}
-          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { position: 'relative', zIndex: 1 } : {}) }}>
+          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 1 } : {}) }}>
             {!capturing && <>
               <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
                 <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
