@@ -10305,15 +10305,23 @@ function upsertMedicationLog(logs, entry) {
 
 function dsMedsDueTaken(store, dateISO) {
   const wd = isoWd(new Date(dateISO + 'T12:00:00'));
-  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
+  // Client templates live in the coach's account but belong to a client, so
+  // they must not count toward the coach's own doses.
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active && !p.isTemplate).map(p => p.id));
   // Tombstones excluded, like logsForStock in screens-medications.jsx. A
   // deliberately removed dose is { skipped: true, planned: false }, and `taken`
   // below counts exactly "a row exists and is not planned", so without this two
   // deleted doses reported a fully adherent day, extended the streak, and told
   // the AI summary the user had taken medication they explicitly removed.
-  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO && !l.skipped);
+  const allDayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO);
+  const dayLogs = allDayLogs.filter(l => !l.skipped);
+  // A removed dose is not "due but untaken", it is gone: the confirm says
+  // "remove this entry", so the slot drops out of the denominator too.
+  // Without this the timeline stopped showing the dose while streak,
+  // adherence and the AI summary still counted it as outstanding forever.
+  const tombstonedSlotIds = new Set(allDayLogs.filter(l => l.skipped && l.scheduleSlotId).map(l => l.scheduleSlotId));
   const medsById = new Map((store.medications || []).map(m => [m.id, m]));
-  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
+  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => !tombstonedSlotIds.has(slot.id) && dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
   const taken = dueSlots.filter(slot => {
     const row = dayLogs.find(l => l.scheduleSlotId === slot.id);
     return row ? !row.planned : false;

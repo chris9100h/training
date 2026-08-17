@@ -371,7 +371,10 @@ function mdAutoFillToday(store, setStore, todayISO) {
   // deterministic at midnight and in tests that advance todayISO explicitly.
   const wd = LB.isoWd(new Date(todayISO + 'T12:00:00'));
   const medsById = new Map((store.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
-  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
+  // A plan marked as a client template belongs to a client, it just lives
+  // in the coach's account until it is pushed. It must never materialise
+  // doses, pillbox rows, adherence or reminders here.
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active && !p.isTemplate).map(p => p.id));
   const existingSlotIds = new Set(
     (store.medicationLogs || []).filter(l => l.date === todayISO && l.scheduleSlotId).map(l => l.scheduleSlotId)
   );
@@ -388,7 +391,7 @@ function mdAutoFillToday(store, setStore, todayISO) {
     const existing = new Set(logs.filter(l => l.date === todayISO && l.scheduleSlotId).map(l => l.scheduleSlotId));
     const slotsById = new Map((s.medicationScheduleSlots || []).map(slot => [slot.id, slot]));
     const medsByIdNow = new Map((s.medications || []).filter(m => !m.archived).map(m => [m.id, m]));
-    const activePlanIdsNow = new Set((s.medicationPlans || []).filter(p => p.active).map(p => p.id));
+    const activePlanIdsNow = new Set((s.medicationPlans || []).filter(p => p.active && !p.isTemplate).map(p => p.id));
     const wdNow = LB.isoWd(new Date(todayISO + 'T12:00:00'));
     const fresh = [];
     for (const entry of toAdd) {
@@ -616,9 +619,16 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // (no checkbox/delete in the render below), the hour's own "+" is still
     // there to log a real dose if the user wants one.
     const wd = LB.isoWd(new Date(curDate + 'T12:00:00'));
-    const existingSlotIds = new Set(curDateLogs.filter(e => e.scheduleSlotId).map(e => e.scheduleSlotId));
+    // Built from the UNFILTERED logs, exactly like mdAutoFillToday: a
+    // deliberately removed dose survives as a skipped tombstone, and
+    // curDateLogs drops those (medicationLogs above filters !skipped). Using
+    // the filtered list meant the slot looked unlogged again, so the very
+    // dose the user just removed came straight back as a preview row.
+    const existingSlotIds = new Set(
+      (store.medicationLogs || []).filter(l => l.date === curDate && l.scheduleSlotId).map(l => l.scheduleSlotId)
+    );
     const medsById = new Map(activeMedications.map(m => [m.id, m]));
-    const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
+    const activePlanIds = new Set(medicationPlans.filter(p => p.active && !p.isTemplate).map(p => p.id));
     scheduleSlots.forEach(slot => {
       const med = medsById.get(slot.medicationId);
       if (!med || existingSlotIds.has(slot.id)) return;
@@ -641,7 +651,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // re-render before the Timeline's preview rows caught up. medications
     // (not just activeMedications) is a dependency too, for medsByIdAll's
     // live name resolution above.
-  }, [curDateLogs, curDate, activeMedications, medications, scheduleSlots, medicationPlans]);
+  }, [curDateLogs, curDate, activeMedications, medications, scheduleSlots, medicationPlans, store.medicationLogs]);
   // Timeline hero's own tally: only entries tied to a real schedule slot
   // count as "due" (an ad-hoc extra dose, scheduleSlotId null, was never due
   // in the first place, so it shouldn't inflate the denominator); planned:
@@ -762,7 +772,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     // taken, instead of a random-id row with no scheduleSlotId.
     const wd = LB.isoWd(new Date(curDate + 'T12:00:00'));
     const existingSlotIds = new Set(curDateLogs.filter(l => l.scheduleSlotId).map(l => l.scheduleSlotId));
-    const activePlanIds = new Set(medicationPlans.filter(p => p.active).map(p => p.id));
+    const activePlanIds = new Set(medicationPlans.filter(p => p.active && !p.isTemplate).map(p => p.id));
     const dueSlot = scheduleSlots.find(slot =>
       slot.medicationId === med.id && slot.hour === hour && !existingSlotIds.has(slot.id) &&
       LB.dsSlotAppliesOn(slot, curDate, wd, activePlanIds));
@@ -959,7 +969,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
     setViewedPlanId(null);
   }
   function toggleTemplate(plan) {
-    setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === plan.id ? { ...p, isTemplate: !p.isTemplate, updatedAt: new Date().toISOString() } : p) }));
+    const becomingTemplate = !plan.isTemplate;
+    setStore(s => ({ ...s, medicationPlans: (s.medicationPlans || []).map(p => p.id === plan.id
+      // Moving a plan into the client-template bucket also deactivates it.
+      // isTemplate and active were independent, so an active plan kept
+      // firing the coach's own doses and reminders for medication that was
+      // only ever meant for a client.
+      ? { ...p, isTemplate: becomingTemplate, active: becomingTemplate ? false : p.active, updatedAt: new Date().toISOString() }
+      : p) }));
+    // Same cleanup pausing a plan already does: today's rows are already
+    // materialised and would otherwise stay due.
+    if (becomingTemplate && plan.active) {
+      const slotIds = new Set((store.medicationScheduleSlots || []).filter(sl => sl.medicationPlanId === plan.id).map(sl => sl.id));
+      if (slotIds.size) mdReconcilePlannedLogs(setStore, today, slotIds);
+    }
   }
 
   // Medication identity + inventory edit sheet. draft.id === null means
@@ -1050,12 +1073,20 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
   async function deleteMedication(med) {
     if (!await confirm(`Delete "${med.name}"? Its schedule goes with it, past log entries stay (as history).`, { title: 'Delete medication', ok: 'Delete', cancel: 'Cancel', danger: true })) return;
+    // Collect the slots BEFORE they are removed from the store: the server
+    // only nulls schedule_slot_id and leaves planned true, and the reminder
+    // cron selects on planned=eq.true, so without this today's doses stayed
+    // in the timeline, kept counting in the ring and still pushed.
+    // deletePlan, deleteSlot and removeMedicationFromPlan all do this
+    // already; this was the one delete path that did not.
+    const slotIds = new Set((store.medicationScheduleSlots || []).filter(sl => sl.medicationId === med.id).map(sl => sl.id));
     setStore(s => ({
       ...s,
       medications: (s.medications || []).filter(m => m.id !== med.id),
       medicationPlanItems: (s.medicationPlanItems || []).filter(it => it.medicationId !== med.id),
       medicationScheduleSlots: (s.medicationScheduleSlots || []).filter(sl => sl.medicationId !== med.id),
     }));
+    if (slotIds.size) mdReconcilePlannedLogs(setStore, today, slotIds);
     closeMedSheet();
   }
   // Removes ONE plan membership (a medication can be in several, see the
@@ -1131,6 +1162,17 @@ function MedicationsScreen({ store, setStore, go, userId }) {
       ),
     }));
     setMovePlanOpen(false);
+    // The slot ids do not change on a move, only medicationPlanId does, so
+    // rows already materialised for today survive. Pausing a plan reconciles
+    // them; moving INTO a plan that does not fire has to do the same, or the
+    // doses stay due and the cron keeps nudging (it selects planned=eq.true
+    // with no join on the plan).
+    const target = medicationPlans.find(p => p.id === targetPlanId);
+    if (target && (!target.active || target.isTemplate)) {
+      const slotIds = new Set((store.medicationScheduleSlots || [])
+        .filter(sl => sl.medicationId === schedMed.id && sl.medicationPlanId === sourcePlanId).map(sl => sl.id));
+      if (slotIds.size) mdReconcilePlannedLogs(setStore, today, slotIds);
+    }
     // No longer part of the plan being viewed, nothing left to show here.
     closeSchedMed();
   }
@@ -1943,6 +1985,21 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   (several plans can be active at once, unlike Training's
                   single active pointer, so this is a real on/off switch, not
                   a read-only status). */}
+              {/* A client template is built here but belongs to a client, so
+                  there is nothing to activate: firing it would dose the coach.
+                  Same read-only status treatment the meal-plan templates get. */}
+              {viewedPlan.isTemplate ? (
+                <div style={{
+                  display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
+                  border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
+                  padding: '10px 14px', minHeight: 44, width: '100%',
+                }}>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: UI.inkFaint, flexShrink: 0 }} />
+                  <span className="label" style={{ color: UI.inkFaint, marginBottom: 0 }}>
+                    Client template, push it to a client to use it
+                  </span>
+                </div>
+              ) : (
               <button onClick={() => togglePlanActive(viewedPlan)} style={{
                 display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
                 border: `1px solid ${viewedPlan.active ? UI.goldSoft : UI.hairStrong}`, borderRadius: 4,
@@ -1955,6 +2012,7 @@ function MedicationsScreen({ store, setStore, go, userId }) {
                   {viewedPlan.active ? 'Active, doses fire on schedule' : "Paused, tap to activate"}
                 </span>
               </button>
+              )}
               <div style={{ display: 'flex', gap: 8 }}>
                 {/* "Add" not "Add medication": sharing the row with Coach at
                     flex:1 halves its width, the full label wrapped to two
@@ -2756,7 +2814,7 @@ function WeeklyPrepScreen({ open, onClose, store, setStore, userId }) {
     [store.medications],
   );
   const activePlanIds = useMemoMd(
-    () => new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id)),
+    () => new Set((store.medicationPlans || []).filter(p => p.active && !p.isTemplate).map(p => p.id)),
     [store.medicationPlans],
   );
   const checkedIds = useMemoMd(() => new Set((store.medicationPillboxChecks || []).map(c => c.id)), [store.medicationPillboxChecks]);

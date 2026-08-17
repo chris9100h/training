@@ -132,7 +132,11 @@ function slotAppliesOn(slot: Slot, dateISO: string, wd: number, activePlanIds: S
 // materializing off a partial/wrong picture of what's active.
 async function materializeDueDoses(userId: string, dateISOs: string[]) {
   const [plansRes, slotsRes, medsRes, logsRes] = await Promise.all([
-    dbFetch(`zane_medication_plans?user_id=eq.${userId}&active=eq.true&select=id`),
+    // is_template excluded: a plan a coach builds FOR a client sits in the
+    // coach's own account until it is pushed. Without this filter the coach
+    // got real reminders to take their client's medication. Defence in depth,
+    // the client now also refuses to leave a template active.
+    dbFetch(`zane_medication_plans?user_id=eq.${userId}&active=eq.true&is_template=eq.false&select=id`),
     dbFetch(`zane_medication_schedule_slots?user_id=eq.${userId}&select=id,medication_id,medication_plan_id,weekdays,hour,dose_qty,interval_days,start_date,end_date`),
     dbFetch(`zane_medications?user_id=eq.${userId}&archived=eq.false&select=id,name`),
     dbFetch(`zane_medication_logs?user_id=eq.${userId}&date=in.(${dateISOs.join(',')})&schedule_slot_id=not.is.null&select=date,schedule_slot_id`),
