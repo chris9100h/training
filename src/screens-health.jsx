@@ -6767,11 +6767,21 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
   };
   const target = snapshot.target;
   const stats = snapshot.stats;
+  const heaviestSessionVolume = snapshot.highestVolumeSession
+    ? LB.totalVolume(snapshot.highestVolumeSession, store?.exercises || [], store?.dailyLogs || [])
+    : 0;
+  const longestActivityStreak = snapshot.days.reduce((best, day) => {
+    const active = day.trained || day.cardio;
+    const current = active ? (best.current + 1) : 0;
+    return { current, longest: Math.max(best.longest, current) };
+  }, { current: 0, longest: 0 }).longest;
   const highlights = [];
   if (snapshot.longestSession && snapshot.longestDuration) highlights.push(`Longest session: ${fmtDuration(snapshot.longestDuration)}`);
-  if (snapshot.highestVolumeSession && snapshot.volume > 0) highlights.push(`Total weight moved: ${fmtVolume(snapshot.volume)}`);
+  if (snapshot.volume > 0) highlights.push(`Total volume: ${fmtVolume(snapshot.volume)}`);
   if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} progression win${snapshot.progressionWins === 1 ? '' : 's'}`);
   if (snapshot.cardioPrs) highlights.push(`${snapshot.cardioPrs} cardio personal best${snapshot.cardioPrs === 1 ? '' : 's'}`);
+  if (heaviestSessionVolume > 0) highlights.push(`Heaviest session: ${fmtVolume(heaviestSessionVolume)}`);
+  if (longestActivityStreak > 0) highlights.push(`Longest activity streak: ${longestActivityStreak} day${longestActivityStreak === 1 ? '' : 's'}`);
 
   if (!open) return null;
   return (
@@ -6902,8 +6912,8 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           ))}
 
           {highlights.length > 0 && section('HIGHLIGHTS', (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {highlights.map((highlight, index) => <div key={index} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}><i className="fa-solid fa-star" style={{ color: 'var(--accent)', fontSize: 10 }} />{highlight}</div>)}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px 14px' }}>
+              {highlights.map((highlight, index) => <div key={index} style={{ minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}><i className="fa-solid fa-star" style={{ flexShrink: 0, color: 'var(--accent)', fontSize: 10, marginTop: 3 }} />{highlight}</div>)}
             </div>
           ))}
 
