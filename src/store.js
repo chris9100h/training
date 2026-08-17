@@ -838,7 +838,6 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_medication_plan_items').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
-    unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)),
     // These three don't cascade off any table already in this list (only off
     // auth.users, which this function never deletes), so without them "delete
     // all my data" and a backup restore's wipe-first step both left plan
@@ -853,6 +852,15 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   // wipe. Same carve-out as push subscriptions: a RESTORE reuses this function
   // and must not kill links the user already handed out.
   if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_my_recipe_shares')));
+  // Pillbox ticks get the same carve-out, for the same reason. They are pure
+  // existence markers keyed <user>_<date>_<slot>, never exported and never
+  // re-imported, and importFromBackup preserves schedule slot ids verbatim, so
+  // every surviving tick still points at a live slot. Wiping them on restore
+  // un-ticked a pillbox the user had already physically packed for the week.
+  // Only the explicit "delete all my data" flow clears them.
+  if (!keepPush) {
+    ops.push(unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)));
+  }
   // Push subscriptions are device-scoped and are never re-uploaded by
   // importFromBackup, so a restore (which reuses this fn) must NOT drop them,
   // that would silently unsubscribe the device from Web Push. Only the

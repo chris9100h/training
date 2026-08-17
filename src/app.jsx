@@ -2058,6 +2058,22 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            // Glucose, blood pressure and body temperature were the only three
+            // health collections this merge did not handle: they came straight
+            // out of `fresh`, so a reading added, edited or deleted between the
+            // server SELECT and this merge briefly vanished or reappeared. The
+            // staged boot and softRefresh both already merge them by id. They
+            // are written directly to Supabase (never through the sync diff),
+            // so there is no deleted-id set to honour here.
+            const serverGlucoseIds = new Set((fresh.glucoseLogs || []).map(l => l.id));
+            const baseGlucoseIds = base ? new Set((base.glucoseLogs || []).map(l => l.id)) : null;
+            const localOnlyGlucose = (cur.glucoseLogs || []).filter(x => !serverGlucoseIds.has(x.id) && !baseGlucoseIds?.has(x.id));
+            const serverBpIds = new Set((fresh.bloodPressureLogs || []).map(l => l.id));
+            const baseBpIds = base ? new Set((base.bloodPressureLogs || []).map(l => l.id)) : null;
+            const localOnlyBp = (cur.bloodPressureLogs || []).filter(x => !serverBpIds.has(x.id) && !baseBpIds?.has(x.id));
+            const serverTempIds = new Set((fresh.bodyTempLogs || []).map(l => l.id));
+            const baseTempIds = base ? new Set((base.bodyTempLogs || []).map(l => l.id)) : null;
+            const localOnlyTemp = (cur.bodyTempLogs || []).filter(x => !serverTempIds.has(x.id) && !baseTempIds?.has(x.id));
             const serverWaterIds = new Set((fresh.waterLogs || []).map(l => l.id));
             const baseWaterIds = base ? new Set((base.waterLogs || []).map(l => l.id)) : null;
             const localOnlyWaterLogs = (cur.waterLogs || []).filter(x => !serverWaterIds.has(x.id) && !baseWaterIds?.has(x.id));
@@ -2283,6 +2299,9 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...LB.mergeWindowedCollectionById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds, 'dailyLogs')],
               cardioLogs: [...localOnlyCardioLogs, ...LB.mergeWindowedCollectionById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds, 'cardioLogs')],
+              glucoseLogs: [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], cur.glucoseLogs, base?.glucoseLogs, null, 'glucoseLogs')],
+              bloodPressureLogs: [...localOnlyBp, ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], cur.bloodPressureLogs, base?.bloodPressureLogs, null, 'bloodPressureLogs')],
+              bodyTempLogs: [...localOnlyTemp, ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], cur.bodyTempLogs, base?.bodyTempLogs, null, 'bodyTempLogs')],
               waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
               foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
