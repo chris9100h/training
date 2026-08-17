@@ -6757,7 +6757,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           gridTemplateColumns: capturing ? '1fr' : undefined,
           gap: capturing ? 20 : 14,
           padding: capturing ? '28px 30px 32px' : 2,
-          width: capturing ? 1200 : 'auto',
+          width: capturing ? 640 : 'auto',
           maxWidth: capturing ? 'none' : '100%',
           boxSizing: 'border-box',
           position: 'relative',
