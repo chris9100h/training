@@ -2214,7 +2214,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!toAdd.length) return;
     setStore(s => {
       const nextLogs = [...toAdd, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
-      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      // Plan Mode: splitting or merging PLANNED entries does not change what
+      // was actually eaten, so the daily log must not be rebuilt from it.
+      // patchDaily nulls calories/protein/carbs/fat whenever a day holds no
+      // logged entries, which silently wiped macros the user had typed by
+      // hand in the Health tab. commitEntries and deleteEntry guard exactly
+      // this; these three paths did not.
+      const dailyLogs = entries.some(e => !e.planned)
+        ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate))
+        : s.dailyLogs;
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     clearTimeout(splitUndoTimer.current);
@@ -2245,7 +2253,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const touchedDates = new Set([...batchEntries.map(l => l.date), ...removedEntries.map(l => l.date)]);
       const nextLogs = [...removedEntries, ...logs.filter(l => l.splitBatch?.id !== batchId)];
       let dailyLogs = s.dailyLogs || [];
-      touchedDates.forEach(d => { dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d)); });
+      // Per date, same reasoning as applySplit above: undoing a split of
+      // planned entries must not rewrite (and thereby null) that day's
+      // hand-entered macros. An undo can straddle two dates, so this is
+      // decided per date rather than once for the batch.
+      touchedDates.forEach(d => {
+        const touchesLogged = batchEntries.some(l => l.date === d && !l.planned)
+          || removedEntries.some(l => l.date === d && !l.planned);
+        if (!touchesLogged) return;
+        dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      });
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
@@ -2368,7 +2385,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const removeIds = new Set(entries.map(e => e.id));
     setStore(s => {
       const nextLogs = [...portionEntries, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
-      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      // Plan Mode: splitting or merging PLANNED entries does not change what
+      // was actually eaten, so the daily log must not be rebuilt from it.
+      // patchDaily nulls calories/protein/carbs/fat whenever a day holds no
+      // logged entries, which silently wiped macros the user had typed by
+      // hand in the Health tab. commitEntries and deleteEntry guard exactly
+      // this; these three paths did not.
+      const dailyLogs = entries.some(e => !e.planned)
+        ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate))
+        : s.dailyLogs;
       const nextRecipes = recipeBlockSave
         ? [{
             id: recipeId, name,

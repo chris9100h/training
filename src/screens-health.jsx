@@ -1641,7 +1641,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const del = async () => {
     if (!existing) return;
     if (!await confirm("Delete this day's log? Weight, macros, steps and water for this day are removed.", { title: 'Delete day?', ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, dailyLogs: (s.dailyLogs || []).filter(l => l.id !== existing.id) }));
+    // The water entries go too, or the confirm above lies. waterMl in the
+    // daily log is only a mirror of the tracker's own rows: dropping the log
+    // alone left them behind, so the Water card's 1D view (which sums
+    // waterLogs) still showed the day's intake while Today and 1W (which read
+    // dailyLogs.waterMl) showed nothing.
+    setStore(s => ({
+      ...s,
+      dailyLogs: (s.dailyLogs || []).filter(l => l.id !== existing.id),
+      waterLogs: (s.waterLogs || []).filter(l => l.date !== date),
+    }));
     onClose();
   };
 
