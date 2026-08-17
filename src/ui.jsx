@@ -264,8 +264,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   ].map(t => {
     const healthSlot = t.id === 'health' ? (enabledSlots.includes(routeName) ? routeName : enabledSlots[0]) : null;
     const socialSlot = t.id === 'social' ? (enabledSocialSlots.includes(routeName) ? routeName : enabledSocialSlots[0]) : null;
+    // 'Coach', not 'Coaching': with five tabs each column is exactly a fifth of
+    // the bar, and at 11px/0.14em uppercase the longer word overran its column
+    // on a 320px screen. The long-press popup keeps the full word, it has room.
     const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot]
-      || { coaching: 'Coaching', friends: 'Friends' }[socialSlot]
+      || { coaching: 'Coach', friends: 'Friends' }[socialSlot]
       || t.label;
     return { ...t, healthSlot, socialSlot, iconKey: healthSlot || socialSlot || t.id, label: slotLabel };
   });
@@ -708,7 +711,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
-                fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                // Five tabs make every column a fifth of the bar, which is not
+                // enough for HISTORY at the roomier five-tab-and-under sizing.
+                // Shrinking beats truncating: an all-caps 4-8 char label reads
+                // worse clipped than one point smaller.
+                fontSize: tabs.length >= 5 ? 10 : 11, letterSpacing: tabs.length >= 5 ? '0.08em' : '0.14em', textTransform: 'uppercase',
                 fontWeight: on ? 700 : 500,
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
@@ -742,7 +749,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 </div>
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
-                <span style={{ marginRight: '-0.14em' }}>{label}</span>
+                <span style={{ marginRight: tabs.length >= 5 ? '-0.08em' : '-0.14em' }}>{label}</span>
                 <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>
                   {isHealthTab && healthDots(on, healthSlot, enabledSlots)}
                   {isSocialTab && socialDots(on, socialSlot, enabledSocialSlots)}

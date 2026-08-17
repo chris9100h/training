@@ -1757,7 +1757,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     };
     let improvements = 0, regressions = 0;
     const neededIds = new Set();
-    doneSession.entries.forEach(e => {
+    // The completed session itself can sit outside the boot history window
+    // (entries: [] plus aggExercises > 0). The loop below then walks nothing
+    // and both counts stay 0, so paging Home back to an old training day
+    // showed "Workout complete" with no up or down arrow at all. Only prior
+    // sessions were ever queued for hydration; queue this one too.
+    if (doneSession.ended && !(doneSession.entries || []).length && (doneSession.aggExercises || 0) > 0) {
+      neededIds.add(doneSession.id);
+    }
+    (doneSession.entries || []).forEach(e => {
       // A deload, or a cleanup week's reduced load, must not count toward
       // either arrow: the drop is deliberate, not lost strength. Mirrors the
       // live training screen's isDeloadSession gate and the same reducedLoad

@@ -2698,7 +2698,15 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
             </div>
           )}
         </div>
-        {setsPerMuscle.length === 0 ? (
+        {/* Three ways, not two. setsPerMuscle only sums local entries, and a
+            session older than the boot window carries entries: [] until the
+            hydration effect above fetches it. Keyed purely on length, paging
+            back to a cycle beyond that window claimed there were no sessions
+            at all while the fetch was still in flight. Same predicate the
+            effect uses to decide what to fetch. */}
+        {setsPerMuscle.length === 0 && thisPeriodSessions.some(s => s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0) ? (
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>Loading older sessions…</div>
+        ) : setsPerMuscle.length === 0 ? (
           <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? `No sessions in cycle ${selectedCycleNum + 1}.` : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
