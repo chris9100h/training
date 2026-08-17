@@ -6654,6 +6654,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
   const dayState = day => {
     const mode = modeLabel(day.mode);
     if (mode) return { label: mode, color: UI.warn, icon: day.mode === 'sick' ? 'fa-bed-pulse' : day.mode === 'vacation' ? 'fa-umbrella-beach' : 'fa-battery-quarter' };
+    if (day.trained && day.cardio) return {
+      label: 'TRAINED + CARDIO', color: 'var(--accent)',
+      icons: [
+        { icon: 'fa-dumbbell', color: 'var(--accent)' },
+        { icon: 'fa-person-running', color: UI.ok },
+      ],
+    };
     if (day.trained) return { label: 'TRAINED', color: 'var(--accent)', icon: 'fa-dumbbell' };
     if (day.cardio) return { label: 'CARDIO', color: UI.ok, icon: 'fa-person-running' };
     if (day.foodClosed) return { label: 'CLOSED', color: UI.inkSoft, icon: 'fa-check' };
@@ -6810,11 +6817,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           </Card>
 
           {section('TRAINING', (
-            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
               {metric('Sessions', snapshot.sessions)}
               {metric('Time', snapshot.durationMinutes ? Math.round(snapshot.durationMinutes) : null, snapshot.durationMinutes ? 'min' : '')}
               {metric('Sets', snapshot.sets)}
               {metric('Volume', snapshot.volume ? Math.round(snapshot.volume).toLocaleString('en-US') : null, snapshot.volume ? weightUnit : '')}
+              {metric('Cardio sessions', snapshot.cardioSessions || null)}
+              {metric('Cardio minutes', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
             </div>
           ), snapshot.exerciseCount ? `${snapshot.exerciseCount} exercises` : null)}
 
@@ -6831,7 +6840,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
                   {[['P', target.protein], ['C', target.carbs], ['F', target.fat]].map(([label, value]) => <div key={label} style={{ textAlign: 'center', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint }}><span style={{ color: UI.inkGhost }}>{label}</span> {value != null ? `${value}g` : '—'}</div>)}
                 </div>
               )}
-              <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 12, fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, width: '100%', textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
                 <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.loggedDays}</span> logged days</span>
                 <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.closedFoodDays}</span> food days closed</span>
                 {stats.mealOfChoice > 0 && <span><span className="num" style={{ color: 'var(--accent)' }}>{stats.mealOfChoice}</span> meal-of-choice</span>}
@@ -6840,13 +6849,11 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
           ), target.calories != null ? `${target.calories} kcal target` : 'averages')}
 
           {section('MOVEMENT & HEALTH', (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '14px 10px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '14px 10px' }}>
               {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
               {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
               {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
               {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
-              {metric('Cardio', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
-              {metric('Cardio sessions', snapshot.cardioSessions || null)}
             </div>
           ))}
 
@@ -6856,7 +6863,11 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
                 const state = dayState(day);
                 return <div key={day.date} title={`${day.label}: ${state.label}`} style={{ minWidth: 0, textAlign: 'center', padding: '7px 2px 6px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hair}` }}>
                   <div style={{ color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi }}>{day.label.split(' ')[0]}</div>
-                  <i className={`fa-solid ${state.icon}`} style={{ display: 'block', color: state.color, fontSize: 12, margin: '8px auto 6px' }} />
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 18, margin: '8px auto 6px' }}>
+                    {(state.icons || [{ icon: state.icon, color: state.color }]).map((activity, index) => (
+                      <i key={`${activity.icon}-${index}`} className={`fa-solid ${activity.icon}`} style={{ color: activity.color, fontSize: 12 }} />
+                    ))}
+                  </div>
                   <div className="num" style={{ color: day.adherence != null ? adherenceColor(day.adherence) : UI.inkFaint, fontSize: 9 }}>{day.adherence != null ? `${Math.round(day.adherence)}%` : state.label === 'CLOSED' ? 'DONE' : state.label === 'REST' ? 'REST' : '—'}</div>
                 </div>;
               })}
