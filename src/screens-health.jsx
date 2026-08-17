@@ -6885,7 +6885,6 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>Nothing is logged for this week on this device.</div>
             </Card>
           )}
-          <div style={{ gridColumn: capturing ? '1 / -1' : undefined, position: capturing ? 'relative' : undefined, zIndex: capturing ? 1 : undefined, textAlign: 'center', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 9, lineHeight: '14px', padding: '2px 12px 4px' }}>Based on the data currently loaded on this device. Today's nutrition score is provisional until the food day is closed.</div>
         </div>
 
         {!capturing && (
