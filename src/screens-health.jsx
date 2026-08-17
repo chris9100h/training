@@ -6853,7 +6853,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Macro adherence</span>
             </div>
             <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 5 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px 10px', marginTop: 18 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: '14px 10px', marginTop: 18 }}>
               {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
               {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
               {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
