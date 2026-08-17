@@ -161,6 +161,18 @@ async function markDelivered(eventKey: string, recipientId: string) {
   if (!result.ok) console.error(`[social-notify] delivery mark failed: ${result.status}`);
 }
 
+async function clearAttempt(eventKey: string, recipientId: string) {
+  const result = await dbFetch(
+    `zane_social_notification_deliveries?event_key=eq.${encodeURIComponent(eventKey)}&recipient_id=eq.${encodeURIComponent(recipientId)}&delivered_at=is.null`,
+    {
+      method: 'PATCH',
+      headers: { Prefer: 'return=minimal' },
+      body: JSON.stringify({ last_attempt_at: null }),
+    },
+  );
+  if (!result.ok) console.error(`[social-notify] attempt reset failed: ${result.status}`);
+}
+
 type PendingPush = {
   recipientId: string;
   title: string;
@@ -185,6 +197,11 @@ async function deliver(eventKind: string, eventId: string, push: PendingPush) {
     logPrefix: 'social-notify',
   });
   if (sent) await markDelivered(eventKey, push.recipientId);
+  // Clear the attempt stamp on failure. claimDelivery refuses a second attempt
+  // within 30 seconds, so without this the client's immediate retry would come
+  // straight back as a duplicate and the push would be lost anyway, even now
+  // that the status code keeps the row queued.
+  else await clearAttempt(eventKey, push.recipientId);
   return sent ? 'sent' : 'retryable';
 }
 
@@ -321,7 +338,20 @@ Deno.serve(async (req) => {
           : await notifyFriendStarted(callerId, id);
 
     const results = await Promise.all(pending.map(push => deliver(event, id, push)));
-    return response({ sent: results.filter(result => result === 'sent').length, skipped: results.filter(result => result === 'skipped').length, duplicates: results.filter(result => result === 'duplicate').length, retryable: results.filter(result => result === 'retryable').length });
+    const counts = {
+      sent: results.filter(result => result === 'sent').length,
+      skipped: results.filter(result => result === 'skipped').length,
+      duplicates: results.filter(result => result === 'duplicate').length,
+      retryable: results.filter(result => result === 'retryable').length,
+    };
+    // A provider handoff that failed and is worth retrying must not come back
+    // as 200: the client outbox treats any ok as delivered and drops the row,
+    // and no cron picks these up, so the push was simply lost. 503 is one of
+    // the statuses flushSocialNotificationOutbox already keeps queued. Only
+    // when nothing at all got through, since a partial success has already
+    // reached a device and re-sending would nudge twice.
+    if (counts.retryable > 0 && counts.sent === 0) return response(counts, 503);
+    return response(counts);
   } catch (error) {
     console.error('[social-notify] failed:', error);
     if (error instanceof Error && error.message === 'session not ready') {

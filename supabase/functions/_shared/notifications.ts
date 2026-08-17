@@ -82,7 +82,10 @@ export async function sendNotification(args: NotificationArgs): Promise<boolean>
         Authorization: `Bearer ${key}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ userId: args.userId, title: args.title, message: args.message }),
+      // ttl was accepted in NotificationArgs and forwarded to Pushover, but
+      // never to Web Push, which hardcoded 300 seconds. Reminders that ask for
+      // hours were silently expiring in five minutes on that channel.
+      body: JSON.stringify({ userId: args.userId, title: args.title, message: args.message, ...(args.ttl ? { ttl: args.ttl } : {}) }),
     });
     // zane_social-notify uses the immediate path, which now waits for the
     // provider result and returns 200 only when at least one subscription was

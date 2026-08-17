@@ -64,7 +64,7 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   return { internal: false, userId: user?.id ?? null };
 }
 
-async function deliverPush(userId: string, title: string, text: string, url: string): Promise<{ sent: number; failed: number }> {
+async function deliverPush(userId: string, title: string, text: string, url: string, ttl: number): Promise<{ sent: number; failed: number }> {
   const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=id,endpoint,p256dh,auth`);
   // Same non-2xx-still-parses-as-JSON trap as isNonceCurrent above: an error
   // object's .length is undefined, `undefined === 0` is false, so the "no
@@ -88,7 +88,10 @@ async function deliverPush(userId: string, title: string, text: string, url: str
       await webpush.sendNotification(
         { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
         payload,
-        { TTL: 300 },
+        // Per-call TTL. This was hardcoded at 300, so a reminder that meant to
+        // stay deliverable for 12 hours expired after five minutes: a phone
+        // that was off or offline at send time simply never got it.
+        { TTL: ttl },
       );
       sent++;
     } catch (err: any) {
@@ -122,6 +125,7 @@ Deno.serve(async (req) => {
     message,
     url          = '/',
     delaySeconds = 0,
+    ttl          = 300,
     nonce        = '',
     _relay       = false,
     cancel       = false,
@@ -141,6 +145,10 @@ Deno.serve(async (req) => {
     targetUserId = caller.userId!;
     _relay = false;
     delaySeconds = Math.min(Math.max(0, Number(delaySeconds) || 0), MAX_DELAY);
+    // Clamped like delaySeconds. Default stays 300 so anything that does not
+    // ask for a TTL (the rest timer above all) keeps behaving exactly as it
+    // did; callers that mean hours now actually get them.
+    ttl = Math.min(Math.max(0, Number(ttl) || 300), 86_400);
     const settRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(targetUserId)}&select=push_enabled`);
     const [sett] = await settRes.json().catch(() => [null]);
     if (!cancel && !verify && !sett?.push_enabled) {
@@ -183,7 +191,7 @@ Deno.serve(async (req) => {
             'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
             'Content-Type': 'application/json',
           },
-          body: JSON.stringify({ userId: targetUserId, title, message: text, url, delaySeconds: delaySeconds - MAX_CHUNK, nonce, _relay: true }),
+          body: JSON.stringify({ userId: targetUserId, title, message: text, url, delaySeconds: delaySeconds - MAX_CHUNK, ttl, nonce, _relay: true }),
         }).catch(e => console.error('[web-push] relay error:', e))
       );
     } else {
@@ -192,7 +200,7 @@ Deno.serve(async (req) => {
         console.log('[web-push] cancelled, newer rest timer active');
         return { sent: 0, failed: 0 };
       }
-      return await deliverPush(targetUserId, title, text, url);
+      return await deliverPush(targetUserId, title, text, url, ttl);
     }
     return { sent: 0, failed: 0 };
   };
@@ -200,7 +208,14 @@ Deno.serve(async (req) => {
   if (delaySeconds === 0) {
     const result = await run();
     return new Response(JSON.stringify({ sent: result.sent, failed: result.failed, scheduled: false }), {
-      status: result.sent > 0 && result.failed === 0 ? 200 : 503,
+      // sent > 0 is success. Requiring failed === 0 as well meant one dead
+      // subscription alongside a live one (a user with a phone and a laptop,
+      // where the old registration 404s) reported failure even though a device
+      // had the message, and the next cron tick sent it again. The dead
+      // subscription is deleted inside deliverPush on 404/410, so this only
+      // ever double-sent once, but once per stale device is still a nudge the
+      // user did not ask for.
+      status: result.sent > 0 ? 200 : 503,
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
   }

@@ -71,5 +71,26 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
     userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
   });
   assert(noSubscription === false, 'a missing web-push subscription was treated as delivered');
-  console.log('notification-delivery OK: provider failure and missing subscriptions stay retryable');
+
+  // ttl was declared in NotificationArgs and forwarded to Pushover but never
+  // to Web Push, which hardcoded 300 seconds, so a reminder meant to stay
+  // deliverable for 12 hours expired in five minutes on that channel.
+  let webPushBody = null;
+  sandbox.fetch = async (url, init) => {
+    if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, [{ id: 'sub-1' }]);
+    if (url.includes('/functions/v1/web-push')) { webPushBody = JSON.parse(init.body); return fakeResponse(200, 'accepted'); }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  await sendNotification({
+    userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, ttl: 43200, logPrefix: 'test',
+  });
+  assert(webPushBody && webPushBody.ttl === 43200, 'ttl was not forwarded to web-push');
+
+  webPushBody = null;
+  await sendNotification({
+    userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
+  });
+  assert(webPushBody && webPushBody.ttl === undefined, 'a caller without a ttl must not pin one, web-push defaults it');
+
+  console.log('notification-delivery OK: provider failure, missing subscriptions and ttl forwarding all hold');
 })().catch(error => { console.error(error); process.exit(1); });
