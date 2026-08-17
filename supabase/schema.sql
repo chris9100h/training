@@ -1024,14 +1024,37 @@ CREATE OR REPLACE FUNCTION public.invite_client(p_email text)
  RETURNS text
  LANGUAGE plpgsql
  SECURITY DEFINER
- SET search_path TO 'public'
+ SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE
   v_client_id uuid;
   v_id        text;
   v_existing  text;
   v_schema    jsonb;
+  v_window    timestamptz;
+  v_attempts  integer;
 BEGIN
+  IF auth.uid() IS NULL THEN
+    RAISE EXCEPTION 'Authentication required';
+  END IF;
+
+  -- Counted BEFORE the lookup, so a failed probe costs the attacker the same
+  -- budget as a real invite. Counting only successes would leave the oracle
+  -- wide open, since enumeration is built entirely out of misses.
+  INSERT INTO public.zane_invite_attempts(caller_id, window_started_at, attempts)
+  VALUES (auth.uid(), now(), 0) ON CONFLICT (caller_id) DO NOTHING;
+  SELECT window_started_at, attempts INTO v_window, v_attempts
+    FROM public.zane_invite_attempts WHERE caller_id = auth.uid() FOR UPDATE;
+  IF v_window < now() - interval '1 hour' THEN
+    UPDATE public.zane_invite_attempts
+      SET window_started_at = now(), attempts = 1 WHERE caller_id = auth.uid();
+  ELSIF v_attempts >= 10 THEN
+    RETURN 'ERROR:rate_limited';
+  ELSE
+    UPDATE public.zane_invite_attempts
+      SET attempts = v_attempts + 1 WHERE caller_id = auth.uid();
+  END IF;
+
   v_client_id := find_user_by_email(p_email);
   IF v_client_id IS NULL THEN
     RETURN 'ERROR:not_found';
@@ -3720,6 +3743,18 @@ CREATE INDEX zane_social_notification_deliveries_recipient_idx
 
 -- Server-only rate state for the notification Edge Function. This table is
 -- derived operational state, not user content, and has no client policies.
+-- Per-caller invite throttle for invite_client(). Bookkeeping only, never read
+-- by a client: the function is SECURITY DEFINER and the table has RLS on with
+-- no policies. Counted on every attempt including misses, since enumeration is
+-- built out of misses.
+CREATE TABLE IF NOT EXISTS public.zane_invite_attempts (
+  caller_id         uuid        PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
+  window_started_at timestamptz NOT NULL DEFAULT now(),
+  attempts          integer     NOT NULL DEFAULT 0
+);
+ALTER TABLE public.zane_invite_attempts ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.zane_invite_attempts FROM PUBLIC, anon, authenticated;
+
 CREATE TABLE public.zane_social_notification_attempts (
   caller_id uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   window_started_at timestamptz NOT NULL DEFAULT now(),
@@ -5915,11 +5950,17 @@ BEGIN
         )
     ),
     (
+      -- Newest 300 VISIBLE messages first (own ones included, exactly like the
+      -- client's query), then count the unread ones among them. Filtering the
+      -- sender out before the limit would widen the window past what the
+      -- client can actually load and reintroduce the unclearable badge.
       SELECT count(*)::integer
-      FROM zane_social_messages m
-      WHERE m.sender_id <> v_uid
-        AND (
+      FROM (
+        SELECT m.id, m.sender_id
+        FROM zane_social_messages m
+        WHERE (
           m.recipient_id = v_uid
+          OR m.sender_id = v_uid
           OR (
             m.group_id IS NOT NULL
             AND EXISTS (
@@ -5936,10 +5977,14 @@ BEGIN
             )
           )
         )
+        ORDER BY m.created_at DESC
+        LIMIT 300
+      ) visible
+      WHERE visible.sender_id <> v_uid
         AND NOT EXISTS (
           SELECT 1
           FROM zane_social_message_reads mr
-          WHERE mr.message_id = m.id AND mr.user_id = v_uid
+          WHERE mr.message_id = visible.id AND mr.user_id = v_uid
         )
     );
 END;
@@ -6921,12 +6966,32 @@ BEGIN
 END;
 $function$;
 
+CREATE OR REPLACE FUNCTION app_private.social_tab_enabled(p_user_id uuid)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+  -- Defaults to FALSE, matching the column default: show_friends_tab is an
+  -- opt-in preview flag, so "no row" means the user never turned Friends on
+  -- and should not be pushed about it. handle_new_user creates a settings row
+  -- for every account anyway, so this fallback is a belt-and-braces case.
+  SELECT COALESCE(
+    (SELECT us.show_friends_tab FROM public.zane_user_settings us WHERE us.user_id = p_user_id),
+    false
+  );
+$function$;
+
+REVOKE EXECUTE ON FUNCTION app_private.social_tab_enabled(uuid) FROM PUBLIC, anon, authenticated;
+
 CREATE OR REPLACE FUNCTION public.social_can_notify_message(p_message_id uuid, p_recipient_id uuid)
 RETURNS boolean LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
 AS $function$
 DECLARE v_sender uuid; v_recipient uuid; v_group uuid; v_created timestamptz;
 BEGIN
   IF p_message_id IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  IF NOT app_private.social_tab_enabled(p_recipient_id) THEN RETURN false; END IF;
   SELECT sender_id, recipient_id, group_id, created_at INTO v_sender, v_recipient, v_group, v_created FROM public.zane_social_messages WHERE id = p_message_id;
   IF NOT FOUND OR v_sender = p_recipient_id OR v_created < now() - interval '24 hours' THEN RETURN false; END IF;
   IF v_recipient IS NOT NULL THEN
@@ -6946,6 +7011,7 @@ AS $function$
 DECLARE v_author uuid; v_created timestamptz; v_owner uuid; v_started timestamptz; v_ended timestamptz; v_visible boolean;
 BEGIN
   IF p_comment_id IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  IF NOT app_private.social_tab_enabled(p_recipient_id) THEN RETURN false; END IF;
   SELECT wc.author_id, wc.created_at, s.user_id, COALESCE(s.started_at, s.date::timestamptz), s.ended, sp.workouts_visible INTO v_author, v_created, v_owner, v_started, v_ended, v_visible
     FROM public.zane_social_workout_comments wc JOIN public.zane_sessions s ON s.id = wc.session_id JOIN public.zane_social_profiles sp ON sp.user_id = s.user_id WHERE wc.id = p_comment_id;
   IF NOT FOUND OR v_owner <> p_recipient_id OR v_author = p_recipient_id OR v_ended IS NULL OR v_created < v_ended OR v_created < now() - interval '7 days' OR NOT COALESCE(v_visible, false) THEN RETURN false; END IF;
@@ -6960,8 +7026,12 @@ AS $function$
 DECLARE v_owner uuid; v_started timestamptz; v_ended timestamptz; v_visible boolean;
 BEGIN
   IF NULLIF(trim(p_session_id), '') IS NULL OR p_recipient_id IS NULL THEN RETURN false; END IF;
+  IF NOT app_private.social_tab_enabled(p_recipient_id) THEN RETURN false; END IF;
   SELECT s.user_id, s.started_at, s.ended, sp.workouts_visible INTO v_owner, v_started, v_ended, v_visible FROM public.zane_sessions s JOIN public.zane_social_profiles sp ON sp.user_id = s.user_id WHERE s.id = p_session_id;
   IF NOT FOUND OR v_started IS NULL OR v_ended IS NOT NULL OR v_started < now() - interval '24 hours' OR v_owner = p_recipient_id OR NOT COALESCE(v_visible, false) THEN RETURN false; END IF;
+  -- The sender's own switch counts here too: an opted-out user should not be
+  -- broadcasting workout starts to other people's lock screens either.
+  IF NOT app_private.social_tab_enabled(v_owner) THEN RETURN false; END IF;
   RETURN EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.status = 'accepted' AND f.accepted_at IS NOT NULL AND f.accepted_at <= v_started AND ((f.requester_id = v_owner AND f.addressee_id = p_recipient_id) OR (f.requester_id = p_recipient_id AND f.addressee_id = v_owner)))
     AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = v_owner AND b.blocked_id = p_recipient_id) OR (b.blocker_id = p_recipient_id AND b.blocked_id = v_owner));
 END;
@@ -6970,7 +7040,8 @@ $function$;
 CREATE OR REPLACE FUNCTION public.social_can_notify_friend_request(p_friendship_id uuid, p_recipient_id uuid)
 RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public', 'pg_temp'
 AS $function$
-  SELECT EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.id = p_friendship_id AND f.addressee_id = p_recipient_id AND f.status = 'pending' AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = f.requester_id AND b.blocked_id = f.addressee_id) OR (b.blocker_id = f.addressee_id AND b.blocked_id = f.requester_id)));
+  SELECT app_private.social_tab_enabled(p_recipient_id)
+    AND EXISTS (SELECT 1 FROM public.zane_social_friendships f WHERE f.id = p_friendship_id AND f.addressee_id = p_recipient_id AND f.status = 'pending' AND NOT EXISTS (SELECT 1 FROM public.zane_social_blocks b WHERE (b.blocker_id = f.requester_id AND b.blocked_id = f.addressee_id) OR (b.blocker_id = f.addressee_id AND b.blocked_id = f.requester_id)));
 $function$;
 
 REVOKE EXECUTE ON FUNCTION public.social_take_notification_rate_limit(uuid) FROM PUBLIC, anon, authenticated;

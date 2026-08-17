@@ -175,6 +175,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       if (result?.startsWith('ERROR:self')) { setInviteError('Cannot coach yourself.'); return; }
       if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
       if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
+      if (result?.startsWith('ERROR:rate_limited')) { setInviteError('Too many invites just now. Try again in a little while.'); return; }
       // Any other ERROR:* (rate-limit, permission, a future code) must not fall
       // through to the success path and pretend the invite was sent.
       if (result?.startsWith('ERROR:')) { setInviteError('Could not send invite.'); return; }
