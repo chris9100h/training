@@ -6838,7 +6838,10 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               </div>
               <div className="num" style={{ color: UI.inkSoft, fontSize: 12, marginTop: 8 }}>{dateRange}</div>
             </>}
-            {capturing && <div style={{ ...HEALTH_CARD_HEADER_STYLE, marginBottom: 12 }}>OVERVIEW</div>}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+              <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>NUTRITION OVERVIEW</span>
+              {target.calories != null && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{target.calories} kcal target</span>}
+            </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 18 }}>
               {adherence != null ? (
                 <>
@@ -6847,12 +6850,35 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
                 </>
               ) : <span style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>No nutrition score for this week yet</span>}
               <span style={{ flex: 1 }} />
-              <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300 }}>{snapshot.stats.trainingsDone}<span style={{ fontSize: 11, color: UI.inkFaint }}> / {snapshot.stats.trainingsPlanned || snapshot.stats.trainingsDone}</span></span>
-              <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>workouts</span>
+              <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Macro adherence</span>
             </div>
-            <div style={{ marginTop: 10, fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Macro adherence</div>
             <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 5 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '14px 10px', marginTop: 18 }}>
+              {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
+              {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
+              {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
+              {metric('Fat / day', stats.fat != null ? fmt(stats.fat) : null, stats.fat != null ? 'g' : '')}
+            </div>
+            {(target.protein != null || target.carbs != null || target.fat != null) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14, paddingTop: 10, borderTop: `1px solid ${UI.hair}` }}>
+                {[['P', target.protein], ['C', target.carbs], ['F', target.fat]].map(([label, value]) => <div key={label} style={{ textAlign: 'center', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint }}><span style={{ color: UI.inkGhost }}>{label}</span> {value != null ? `${value}g` : '—'}</div>)}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, width: '100%', textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+              <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.loggedDays}</span> logged days</span>
+              <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.closedFoodDays}</span> food days closed</span>
+              {stats.mealOfChoice > 0 && <span><span className="num" style={{ color: 'var(--accent)' }}>{stats.mealOfChoice}</span> meal-of-choice</span>}
+            </div>
           </Card>
+
+          {section('BODY, STEPS & WATER', (
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '14px 10px' }}>
+              {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
+              {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
+              {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
+              {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
+            </div>
+          ))}
 
           {section('TRAINING', (
             <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
@@ -6864,36 +6890,6 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               {metric('Cardio minutes', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
             </div>
           ), snapshot.exerciseCount ? `${snapshot.exerciseCount} exercises` : null)}
-
-          {section('NUTRITION', (
-            <>
-              <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(2, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
-                {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
-                {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
-                {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
-                {metric('Fat / day', stats.fat != null ? fmt(stats.fat) : null, stats.fat != null ? 'g' : '')}
-              </div>
-              {(target.protein != null || target.carbs != null || target.fat != null) && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14, paddingTop: 10, borderTop: `1px solid ${UI.hair}` }}>
-                  {[['P', target.protein], ['C', target.carbs], ['F', target.fat]].map(([label, value]) => <div key={label} style={{ textAlign: 'center', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint }}><span style={{ color: UI.inkGhost }}>{label}</span> {value != null ? `${value}g` : '—'}</div>)}
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, width: '100%', textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-                <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.loggedDays}</span> logged days</span>
-                <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.closedFoodDays}</span> food days closed</span>
-                {stats.mealOfChoice > 0 && <span><span className="num" style={{ color: 'var(--accent)' }}>{stats.mealOfChoice}</span> meal-of-choice</span>}
-              </div>
-            </>
-          ), target.calories != null ? `${target.calories} kcal target` : 'averages')}
-
-          {section('MOVEMENT & HEALTH', (
-            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '14px 10px' }}>
-              {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
-              {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
-              {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
-              {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
-            </div>
-          ))}
 
           {section('WEEK AT A GLANCE', (
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
