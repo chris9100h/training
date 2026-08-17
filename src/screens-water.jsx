@@ -487,7 +487,11 @@ function WaterScreen({ store, setStore, go, userId }) {
   return (
     <Screen>
       {confirmEl}
-      <TopBar title="Water" sub="Hydration" onBack={() => go({ name: 'home' })} right={
+      {/* Food, Water and Medications share the Health tab slot, so back stays
+          in that slot rather than dropping the user into the Train tab. Same
+          expression as screens-food.jsx: with the Health tab switched off
+          'health' is not in enabledSlots, and Home is the only sane target. */}
+      <TopBar title="Water" sub="Hydration" onBack={() => go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' })} right={
         <div style={{ display: 'flex', gap: 8 }}>
           <button onClick={takeScreenshot} disabled={capturing} aria-label="Screenshot" style={{ ...wtIconBtn, cursor: capturing ? 'default' : 'pointer', color: capturing ? UI.inkGhost : UI.inkSoft }}>
             {capturing ? <span style={{ fontFamily: UI.fontUi, fontSize: 10 }}>…</span> : <i className="fa-solid fa-camera" style={{ fontSize: 15 }} />}

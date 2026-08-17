@@ -2222,14 +2222,34 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (data?.length) entriesBySession[histInProgId] = data;
   }
 
+  // Indexes 7 (get_exercise_best_e1rm) and 8 (get_session_stats) are the two
+  // heaviest aggregates and are deliberately NOT thrown on, same soft-fail
+  // reasoning as the coaching block further down: they are derived display
+  // caches, and one statement timeout must not discard every other source
+  // already fetched for this boot. They must not be read as "empty" either,
+  // which is what silently happened before: an errored result yielded {},
+  // that empty map overwrote a perfectly good cached one, and
+  // compactLocalSnapshot then persisted the emptiness so it survived
+  // restarts until the next successful RPC.
+  const bestsFailed = !!queryResults[7]?.error;
+  const sessionStatsFailed = !!queryResults[8]?.error;
+  if (bestsFailed) console.warn('[load] get_exercise_best_e1rm failed, keeping the cached PR baseline', queryResults[7].error);
+  if (sessionStatsFailed) console.warn('[load] get_session_stats failed, windowed session aggregates degraded', queryResults[8].error);
   const statsBySession = {};
   for (const r of (queryResults[8]?.data || [])) statsBySession[r.session_id] = r;
-  const exerciseBests = {};
+  const bestsMap = {};
   for (const r of (queryResults[7]?.data || [])) {
-    if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
+    if (r.ex_id != null && r.best_e1rm != null) bestsMap[r.ex_id] = r.best_e1rm;
   }
+  // Omitted (not empty) on failure, so the boot merges keep the cached map.
+  const exerciseBests = bestsFailed ? undefined : bestsMap;
 
-  const orphanIds = isCoachLoad ? [] : (queryResults[3].data || [])
+  // statsBySession is one of the two proofs that an unended session holds
+  // real work; the other is entriesBySession. When the stats RPC failed the
+  // map is empty for every session, so an unended session whose sets live
+  // only on the server would look verifiably empty and get deleted. Skip the
+  // sweep entirely rather than delete on missing evidence.
+  const orphanIds = (isCoachLoad || sessionStatsFailed) ? [] : (queryResults[3].data || [])
     .filter(s => {
       if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
       const entryRows = entriesBySession[s.id];

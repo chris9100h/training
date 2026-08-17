@@ -685,6 +685,10 @@ function hasNewlyCompletedSession(previous, next) {
 function mergeStagedBootStore(fresh, cur, base) {
   if (!cur || !base) return fresh;
   const merged = { ...fresh };
+  // loadFromSupabase omits this when its aggregate RPC failed, so a transient
+  // server error cannot blank the PR baseline that history stars, the PR
+  // count and the 5/3/1 TM suggestion all read straight out of the store.
+  if (!merged.exerciseBests && cur.exerciseBests) merged.exerciseBests = cur.exerciseBests;
   const inProgressId = LB.resolveInProgressId(cur, fresh, base);
   const sessionMerge = LB.mergeSessions(fresh.sessions || [], cur.sessions || [], inProgressId, base.sessions || []);
   merged.sessions = sessionMerge.sessions;
@@ -2257,6 +2261,9 @@ function App() {
             if (!base && fresh.settings.unit == null) mergedSettings.unit = null;
             merged = {
               ...fresh,
+              // Omitted by loadFromSupabase when get_exercise_best_e1rm
+              // failed; keep the cached baseline instead of blanking it.
+              exerciseBests: fresh.exerciseBests || cur.exerciseBests || {},
               // This admin-only counter is deliberately omitted from the
               // server payload and local snapshots. Preserve the live value
               // while replacing the rest of the boot state.

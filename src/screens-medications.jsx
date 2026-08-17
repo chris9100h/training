@@ -1666,7 +1666,10 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   if (!store) return null;
   return (
     <Screen>
-      <TopBar title="Medications" onBack={() => go({ name: 'home' })} right={
+      {/* Shares the Health tab slot with Food and Water, see the note in
+          screens-water.jsx: back stays in the slot, Home only when the Health
+          tab itself is switched off. */}
+      <TopBar title="Medications" onBack={() => go(store.settings?.showHealthTab ? { name: 'health' } : { name: 'home' })} right={
         screenTab === 'timeline' && (
           <div style={{ display: 'flex', gap: 8 }}>
             <button onClick={() => setWeeklyPrepOpen(true)} aria-label="Weekly Prep" style={mdTopAddBtn}>

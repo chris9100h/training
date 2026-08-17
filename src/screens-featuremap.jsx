@@ -663,7 +663,9 @@ function FeatureEditor({ draft, busy, onChange, onClose, onSave, onRevert }) {
         <Field label="Who it is for">
           <div style={{ display: 'flex', gap: 8 }}>
             {FM_ROLE_ORDER.map(r => {
-              const sel = draft.role === r; const col = FM_ROLES[r].color;
+              // Same light-canvas correction the rendered role chip applies
+              // above: FM_ROLES holds the dark-tuned raw tint.
+              const sel = draft.role === r; const col = r === 'coach' ? fmCoachTint() : FM_ROLES[r].color;
               return (
                 <button key={r} onClick={() => set({ role: r })} style={{
                   flex: 1, padding: '9px 0', borderRadius: 4, cursor: 'pointer', fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600,
