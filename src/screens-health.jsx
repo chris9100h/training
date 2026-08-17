@@ -6754,7 +6754,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
         <div ref={recapRef} style={{
           display: capturing ? 'grid' : 'flex',
           flexDirection: capturing ? undefined : 'column',
-          gridTemplateColumns: capturing ? 'repeat(3, minmax(0, 1fr))' : undefined,
+          gridTemplateColumns: capturing ? 'repeat(2, minmax(0, 1fr))' : undefined,
           gap: capturing ? 20 : 14,
           padding: capturing ? '28px 30px 32px' : 2,
           width: capturing ? 1500 : 'auto',
