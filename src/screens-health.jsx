@@ -6850,7 +6850,8 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
               <span className="num" style={{ fontSize: 18, color: 'var(--accent)', fontWeight: 300 }}>{snapshot.stats.trainingsDone}<span style={{ fontSize: 11, color: UI.inkFaint }}> / {snapshot.stats.trainingsPlanned || snapshot.stats.trainingsDone}</span></span>
               <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>workouts</span>
             </div>
-            <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 10 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
+            <div style={{ marginTop: 10, fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Macro adherence</div>
+            <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 5 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
           </Card>
 
           {section('TRAINING', (
