@@ -6678,20 +6678,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
     setCapturing(true);
     const parent = recapRef.current.parentElement;
     const saved = parent ? { overflow: parent.style.overflow, height: parent.style.height, minHeight: parent.style.minHeight } : null;
+    let captureHost = null;
     if (parent) {
       parent.style.overflow = 'visible';
       parent.style.height = 'auto';
       parent.style.minHeight = 'auto';
     }
     await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
-    const logo = recapRef.current.querySelector('img[data-shot-avatar]');
-    if (logo && !logo.complete) {
-      await new Promise(resolve => {
-        logo.addEventListener('load', resolve, { once: true });
-        logo.addEventListener('error', resolve, { once: true });
-      });
-      await new Promise(resolve => requestAnimationFrame(resolve));
-    }
     try {
       await Promise.all([
         document.fonts?.load('600 64px "Inter"'),
@@ -6701,13 +6694,46 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
     } catch (_) {}
     if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
     try {
-      const element = recapRef.current;
+      // The recap normally lives inside the animated Sheet. On mobile Safari,
+      // html2canvas can measure that ancestor at a different animation frame
+      // than the child and bake its translateY into the output. Capture a
+      // cloned poster under body instead, where no Sheet transform or scroll
+      // container can influence the coordinates.
+      const source = recapRef.current;
+      if (!source) return;
+      captureHost = document.createElement('div');
+      captureHost.setAttribute('data-weekly-recap-capture', '');
+      captureHost.style.position = 'fixed';
+      captureHost.style.inset = '0';
+      captureHost.style.zIndex = '1000';
+      captureHost.style.overflow = 'auto';
+      captureHost.style.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820';
+      captureHost.style.pointerEvents = 'none';
+      const element = source.cloneNode(true);
+      element.style.margin = '0 auto';
+      element.style.transform = 'none';
+      captureHost.appendChild(element);
+      document.body.appendChild(captureHost);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const logo = element.querySelector('img[data-shot-avatar]');
+      if (logo && !logo.complete) {
+        await new Promise(resolve => {
+          logo.addEventListener('load', resolve, { once: true });
+          logo.addEventListener('error', resolve, { once: true });
+        });
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      }
       const canvas = await html2canvas(element, {
         backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
         scale: 2, useCORS: true, logging: false,
         scrollX: 0, scrollY: 0,
         width: element.scrollWidth, windowWidth: element.scrollWidth,
         height: element.scrollHeight, windowHeight: element.scrollHeight,
+        onclone: clonedDoc => {
+          const style = clonedDoc.createElement('style');
+          style.textContent = '*,*::before,*::after{animation:none !important;transition:none !important;}';
+          (clonedDoc.head || clonedDoc.documentElement).appendChild(style);
+        },
       });
       const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
       if (!blob) return;
@@ -6724,6 +6750,7 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
         setTimeout(() => URL.revokeObjectURL(url), 1000);
       }
     } finally {
+      if (captureHost) captureHost.remove();
       if (parent && saved) {
         parent.style.overflow = saved.overflow;
         parent.style.height = saved.height;
