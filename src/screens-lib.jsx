@@ -6147,7 +6147,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   );
 }
 
-function ComparisonScreen({ session, onDismiss, go, userName }) {
+function ComparisonScreen({ session, onDismiss, go, userName, back }) {
   const entries     = session.entries || [];
   const lastEntries = session.last_session_entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted),
@@ -6161,7 +6161,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
+      <TopBar title={userName} onBack={() => go(back || { name: 'settings' })} />
       <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>
           {session.day_name} · COMPLETE
@@ -6368,7 +6368,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       }
       go(back || { name: 'settings' });
     };
-    return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;
+    return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} back={back} />;
   }
 
   if (!session) return (
@@ -6404,7 +6404,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
         background: 'rgba(var(--bg-rgb),0.9)',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
-        <button onClick={() => go({ name: 'settings' })} style={{
+        <button onClick={() => go(back || { name: 'settings' })} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.gold, cursor: 'pointer', flexShrink: 0,

@@ -1613,6 +1613,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       mealOfChoice: !!existing?.mealOfChoice,
       mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
       foodDayClosed: !!existing?.foodDayClosed,
+      // Same reasoning as the three lines above, these were the pair that got
+      // missed. Both are server-authored by ai-daily-summary and sit outside
+      // the sync RPC's column list, so the server keeps them regardless, but
+      // this object is rebuilt from scratch: omitting them made the summary
+      // card disappear from the Health tab the moment the user saved the form
+      // for that day, and it only came back on the next full load.
+      aiSummary: existing?.aiSummary ?? null,
+      aiSummaryGeneratedAt: existing?.aiSummaryGeneratedAt ?? null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),

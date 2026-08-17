@@ -2582,7 +2582,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // neither done nor skipped (what this used to do) is the ambiguous
         // third state that made the finish sheet's own count disagree with
         // what was actually written.
-        const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+        // timeSec counts as a number here: a time-based set logs a duration
+        // instead of kg/reps, and the sheet's own copy promises that "sets
+        // that already hold numbers are logged as completed". Leaving it out
+        // meant Mark as done silently skipped every plank, hold and carry the
+        // user had actually timed. Matches the canonical has-values test in
+        // store.js (bestE1rm/session hydration). Checkbox sets are deliberately
+        // NOT included: they hold no numbers at all, so "the rest as skipped"
+        // is exactly what the same copy promises for them.
+        const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null;
         return hasValue && sealMode === 'done' ? { ...st, done: true } : { ...st, skipped: true };
       }),
     };
