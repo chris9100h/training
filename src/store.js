@@ -51,13 +51,11 @@ async function subscribeWebPush(userId) {
     });
   }
   const json = sub.toJSON();
-  await unwrap(_supabase.from('zane_push_subscriptions').upsert({
-    id: json.endpoint,
-    user_id: userId,
-    endpoint: json.endpoint,
-    p256dh: json.keys.p256dh,
-    auth: json.keys.auth,
-  }, { onConflict: 'id' }));
+  await unwrap(_supabase.rpc('register_web_push_subscription', {
+    p_endpoint: json.endpoint,
+    p_p256dh: json.keys.p256dh,
+    p_auth: json.keys.auth,
+  }));
   return sub;
 }
 
@@ -115,6 +113,22 @@ function isAuthRequest(input) {
 
 function isTransientAuthStatus(status) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+// A rejected refresh token cannot heal through retries. Keep transport and
+// provider failures on the recovery loop, but hand permanent session failures
+// back to the login screen so the local cache can be reattached after login.
+function isPermanentAuthRefreshError(error) {
+  if (!error || error.__zaneAuthTransient) return false;
+  const status = Number(error.status || error.statusCode || 0);
+  if (status === 400 || status === 401 || status === 403) return true;
+  const code = String(error.code || '').toLowerCase();
+  const name = String(error.name || '').toLowerCase();
+  return name === 'authsessionmissingerror'
+    || code === 'refresh_token_not_found'
+    || code === 'refresh_token_already_used'
+    || code === 'invalid_refresh_token'
+    || code === 'session_not_found';
 }
 
 function writeAuthRecovery(reason) {
@@ -511,6 +525,7 @@ function authRecoveryTestApi() {
     rememberUser: rememberOfflineUser,
     offlineUser: getOfflineUser,
     clearUser: clearOfflineUser,
+    isPermanentRefreshError: isPermanentAuthRefreshError,
   };
 }
 
@@ -623,6 +638,46 @@ function nowHHMM() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+
+// Manual Health edits replace a day's detailed Water Tracker rows with one
+// canonical total. Keeping that total in waterLogs prevents the Health card
+// and Water screen from disagreeing until the next drink is logged.
+function reconcileManualWaterLogs(waterLogs, date, amountMl) {
+  const rows = waterLogs || [];
+  const nextTotal = Math.max(0, Number(amountMl) || 0);
+  const currentTotal = rows
+    .filter(entry => entry.date === date)
+    .reduce((sum, entry) => sum + (Number(entry.amountMl) || 0), 0);
+  if (currentTotal === nextTotal) return rows;
+  const otherDays = rows.filter(entry => entry.date !== date);
+  if (!nextTotal) return otherDays;
+  return [{
+    id: uid(), date, time: nowHHMM(), amountMl: nextTotal,
+    name: 'Manual total', category: 'custom', createdAt: new Date().toISOString(),
+  }, ...otherDays];
+}
+
+function positiveNumberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function retainedStateForUser(retained, userId, currentUserId = null, currentStore = null, currentBase = null) {
+  // Prefer the live snapshot for a same-account recovery. localStorage may be
+  // stale precisely because quota/private mode caused the last save to fail.
+  if (userId && currentUserId === userId && currentStore) {
+    return { uid: userId, store: currentStore, base: currentBase };
+  }
+  return retained?.uid === userId && retained.store ? retained : null;
+}
+
+function retainedStateAfterSignedOut(retained, signedOutUserId, currentStore = null, currentBase = null) {
+  // A permanent refresh failure clears userIdRef before GoTrue emits its
+  // delayed SIGNED_OUT event. In that case `retained` is the only copy of an
+  // in-memory edit that localStorage could not persist, so leave it untouched.
+  if (!signedOutUserId) return retained || null;
+  return retainedStateForUser(retained, signedOutUserId, signedOutUserId, currentStore, currentBase);
+}
 // Short display date (e.g. "Wed, Jul 23"), en-US per the app-wide locale
 // standard. Shared helper (was duplicated as healthFmtDate/fdFmtDate in
 // screens-health.jsx/screens-food.jsx with a locale mismatch until both
@@ -701,14 +756,26 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
 
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
-async function recoverAuthSession() {
+async function recoverAuthSessionDetailed() {
   try {
     const { data, error } = await _supabase.auth.refreshSession();
-    if (error || !data?.session) return null;
+    if (error || !data?.session) {
+      const permanent = isPermanentAuthRefreshError(error);
+      if (permanent) clearAuthRecovery();
+      return { session: null, permanent, error: error || null };
+    }
     rememberOfflineUser(data.session.user?.id);
     clearAuthRecovery();
-    return data.session;
-  } catch (_) { return null; }
+    return { session: data.session, permanent: false, error: null };
+  } catch (error) {
+    const permanent = isPermanentAuthRefreshError(error);
+    if (permanent) clearAuthRecovery();
+    return { session: null, permanent, error };
+  }
+}
+
+async function recoverAuthSession() {
+  return (await recoverAuthSessionDetailed()).session;
 }
 
 async function signIn(email, password) {
@@ -1100,6 +1167,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.foodTemplateSlots?.length ? 1 : 0)
+    + (backup.foodTemplateDays?.length ? 1 : 0)
     + (backup.foodMealPlans?.length ? 1 : 0)
     + (backup.foodShoppingPrefs?.length ? 1 : 0)
     + (backup.medicationPlans?.length ? 1 : 0)
@@ -1455,6 +1523,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     ));
     stepsDone++;
   }
+  if (backup.foodTemplateDays?.length) {
+    prog('Restoring meal template history...');
+    await unwrap(_supabase.from('zane_food_template_days').upsert(
+      backup.foodTemplateDays.map(d => ({ id: d.id, user_id: userId, date: d.date }))
+    ));
+    stepsDone++;
+  }
   if (backup.workoutTemplates?.length) {
     prog('Uploading workout templates…');
     await unwrap(_supabase.from('zane_workout_templates').upsert(
@@ -1588,6 +1663,12 @@ async function exportBackup(store, userId) {
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_adaptive_tdee_history').select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
       .eq('user_id', userId).order('as_of_date', { ascending: false }),
+    // These rows are deletion tombstones for template auto-fill. The local
+    // store keeps only a bounded window, but restore deletes the whole table;
+    // fetch every marker so a deliberately removed planned meal never comes
+    // back after importing a backup.
+    _supabase.from('zane_food_template_days').select('id, date')
+      .eq('user_id', userId).order('date', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -1598,7 +1679,7 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, foodTemplateDaysRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
   // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
@@ -1606,6 +1687,7 @@ async function exportBackup(store, userId) {
   if (foodLogsRes.error) throw foodLogsRes.error;
   if (medicationLogsRes.error) throw medicationLogsRes.error;
   if (adaptiveTdeeHistoryRes.error) throw adaptiveTdeeHistoryRes.error;
+  if (foodTemplateDaysRes.error) throw foodTemplateDaysRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -1637,6 +1719,7 @@ async function exportBackup(store, userId) {
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
+    foodTemplateDays: (foodTemplateDaysRes.data || []).map(d => ({ id: d.id, date: d.date })),
     adaptiveTdeeHistory: (adaptiveTdeeHistoryRes.data || []).map(mapAdaptiveTdeeHistoryRow),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
@@ -1869,10 +1952,10 @@ function mapUserSettings(sett = {}) {
 function buildEssentialLoadResult({
   isCoachLoad, profileRes, exRes, schRes, sessRes, settRes, skipsRes,
   cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes, mesoStatesRes,
-  authUser, entriesBySession, statsBySession, exerciseBests,
+  authUser, entriesBySession, statsBySession, exerciseBests, sessionStatsFailed,
 }) {
   const sett = settRes.data || {};
-  return {
+  const result = {
     user: {
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
@@ -2011,6 +2094,11 @@ function buildEssentialLoadResult({
     supportTickets: [],
     supportUnread: 0,
   };
+  Object.defineProperty(result, '__sessionStatsAvailable', {
+    value: !sessionStatsFailed,
+    enumerable: false,
+  });
+  return result;
 }
 
 function mapUserSupportTickets(rows) {
@@ -2276,7 +2364,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       settRes: queryResults[4], skipsRes: queryResults[5],
       cardioLogsRes: queryResults[14], cardioPlansRes: queryResults[15], dailyLogsRes: queryResults[16],
       statusPeriodsRes: queryResults[17], mesoStatesRes: queryResults[23],
-      authUser, entriesBySession, statsBySession, exerciseBests,
+      authUser, entriesBySession, statsBySession, exerciseBests, sessionStatsFailed,
     }));
   }
 
@@ -2667,6 +2755,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     supportTickets: mapUserSupportTickets(supportTicketsRes?.data),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
+  Object.defineProperty(result, '__sessionStatsAvailable', {
+    value: !sessionStatsFailed,
+    enumerable: false,
+  });
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
   return result;
 }
@@ -3020,7 +3112,21 @@ async function syncStore(prev, next, userId) {
     const nextSessIds = nextSessionIds;
     const upsert = next.sessions.filter(s => {
       const p = prevSessMap.get(s.id);
-      return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
+      const confirmed = localConfirmedRow('sessions', s.id);
+      // A lazy history read is server-authoritative input, not a local edit.
+      // If the DB-backed session metadata is unchanged and the only new value
+      // is the exact confirmed entry payload, keep this refresh read-only.
+      if (p && confirmed && syncValuesEqual(s.entries || [], confirmed.entries || [])
+          && syncValuesEqual(sessionToRow(s, userId), sessionToRow(p, userId))) {
+        return false;
+      }
+      if (!p) return true;
+      // Compare only values that can actually be written. agg* and the other
+      // cache-only fields are deliberately stripped by sessionToRow; treating
+      // them as DB edits caused a full session upsert exactly when the stats
+      // RPC was failing and the DB was already degraded.
+      return !syncValuesEqual(sessionToRow(p, userId), sessionToRow(s, userId))
+        || !syncValuesEqual(p.entries || [], s.entries || []);
     });
     const removed = [...prevSessMap.values()].filter(s => !nextSessIds.has(s.id));
     if (removed.length) rememberLocalDeletedRows('sessions', removed);
@@ -3043,7 +3149,13 @@ async function syncStore(prev, next, userId) {
       // _syncEntryRelational still diffs per set: sessions already in prev write
       // only changed sets; sessions NOT in prev (just created, or offline-created
       // and re-synced after a reload merge) write all their seeded sets once.
-      sessionUpserts = upsert;
+      // Metadata may legitimately change in the same render as a lazy fetch.
+      // Upsert that metadata, but do not rewrite server-confirmed entries. A
+      // later real set edit differs from the fingerprint and syncs normally.
+      sessionUpserts = upsert.filter(s => {
+        const confirmed = localConfirmedRow('sessions', s.id);
+        return !confirmed || !syncValuesEqual(s.entries || [], confirmed.entries || []);
+      });
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
@@ -6024,7 +6136,7 @@ function locallyEditedSessionScalars(mem, baseMem) {
   return SESSION_SYNC_SCALAR_FIELDS.filter(k => edited.has(k));
 }
 
-function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
+function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date(), options = {}) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   const baseById = baseSessions ? new Map(baseSessions.map(s => [s.id, s])) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
@@ -6083,8 +6195,14 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     const cachedDiffersFromBase = baseEntries ? entrySetsDifferFromBase(mem.entries, baseEntries) : true;
     const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
       ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
+    const cachedAggregates = options.preserveCachedAggregates ? {
+      ...(s.aggVolume == null && mem.aggVolume != null ? { aggVolume: mem.aggVolume } : {}),
+      ...(s.aggDoneSets == null && mem.aggDoneSets != null ? { aggDoneSets: mem.aggDoneSets } : {}),
+      ...(s.aggExercises == null && mem.aggExercises != null ? { aggExercises: mem.aggExercises } : {}),
+    } : {};
     return {
       ...s,
+      ...cachedAggregates,
       // An unsynced local edit of any scalar field the server actually
       // stores (audit H2, see locallyEditedSessionScalars above) must win
       // over the server's stale copy, `ended` above all: the follow-up flush
@@ -7235,7 +7353,8 @@ async function loadSocialMessageState(userId) {
 // durable. A tab can be closed or go offline immediately after a message is
 // committed; the small local outbox retries after the next auth/online/focus
 // event. The server still re-checks the event and caller, so an old outbox
-// entry is harmless and is discarded on a permanent 4xx response.
+// entry is harmless. Only a successful handoff or a structurally invalid
+// payload is terminal; Auth and lookup failures can be transient upstream.
 const SOCIAL_NOTIFY_OUTBOX_KEY_PREFIX = 'zane-social-notification-outbox-v2:';
 const _socialNotifyFlushPromises = new Map();
 
@@ -7268,6 +7387,10 @@ function writeSocialNotifyOutbox(userId, rows) {
   } catch (_) {}
 }
 
+function socialNotifyResponseIsTerminal(response) {
+  return !!response && (response.ok || response.status === 400);
+}
+
 function enqueueSocialNotify(userId, event, eventId) {
   const rows = readSocialNotifyOutbox(userId);
   if (!rows.some(row => row.event === event && row.id === String(eventId))) {
@@ -7295,7 +7418,7 @@ async function flushSocialNotificationOutbox(userIdArg = null) {
       lastResponse = response;
       if (!response) break;
       if (await socialNotifyUserId() !== userId) break;
-      if (response.ok || [400, 401, 403, 404].includes(response.status)) {
+      if (socialNotifyResponseIsTerminal(response)) {
         rows.shift();
         writeSocialNotifyOutbox(userId, rows);
         continue;
@@ -8693,6 +8816,16 @@ function macroAdherence(actual, target) {
   if (totalKcal <= 0) return null;
   const weighted = entries.reduce((s, e) => s + e.score * (e.kcal / totalKcal), 0);
   return Math.round(weighted * 100);
+}
+
+// A closed historical food day keeps the target captured when it was closed,
+// but backlogged food must still update the score shown for that frozen target.
+function historicalClosedFoodDayPatch(log, actual, hasEntries) {
+  if (!log?.foodDayClosed) return {};
+  const adherence = hasEntries && !log.mealOfChoice
+    ? macroAdherence(actual, log.targetsSnap)
+    : null;
+  return { adherence, targetsSnap: log.targetsSnap ?? null };
 }
 
 // ── Food tracker meal categories (migration 0206) ───────────────────────────
@@ -12990,18 +13123,18 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   resignSocialAttachment,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
-  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
@@ -13019,7 +13152,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, macroApplyRollbackInfo, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, historicalClosedFoodDayPatch, hasMacroTargets, effectiveMacroTargets, macroApplyRollbackInfo, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,

@@ -8,10 +8,20 @@ type NotificationArgs = {
   ttl?: number;
 };
 
+async function fetchWithTimeout(input: string, options: RequestInit = {}, timeoutMs = 12_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       Authorization: `Bearer ${key}`,
@@ -35,7 +45,7 @@ export async function sendNotification(args: NotificationArgs): Promise<boolean>
       return false;
     }
     try {
-      const response = await fetch('https://api.pushover.net/1/messages.json', {
+      const response = await fetchWithTimeout('https://api.pushover.net/1/messages.json', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -66,17 +76,10 @@ export async function sendNotification(args: NotificationArgs): Promise<boolean>
     return false;
   }
   try {
-    const subscriptionsResponse = await dbFetch(`zane_push_subscriptions?user_id=eq.${args.userId}&select=id`);
-    if (!subscriptionsResponse.ok) {
-      console.error(`[${args.logPrefix}] subscription lookup failed for ${args.userId}: ${subscriptionsResponse.status}`);
-      return false;
-    }
-    const subscriptions: { id: string }[] = await subscriptionsResponse.json().catch(() => []);
-    if (!subscriptions.length) {
-      console.error(`[${args.logPrefix}] no web-push subscription for ${args.userId}`);
-      return false;
-    }
-    const response = await fetch(`${base}/functions/v1/web-push`, {
+    // web-push already owns the subscription lookup and reports 503 when no
+    // device accepted the message. Doing the same query here doubled every
+    // recipient's DB work, especially painful for group fan-out.
+    const response = await fetchWithTimeout(`${base}/functions/v1/web-push`, {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${key}`,
@@ -86,7 +89,7 @@ export async function sendNotification(args: NotificationArgs): Promise<boolean>
       // never to Web Push, which hardcoded 300 seconds. Reminders that ask for
       // hours were silently expiring in five minutes on that channel.
       body: JSON.stringify({ userId: args.userId, title: args.title, message: args.message, ...(args.ttl ? { ttl: args.ttl } : {}) }),
-    });
+    }, 25_000);
     // zane_social-notify uses the immediate path, which now waits for the
     // provider result and returns 200 only when at least one subscription was
     // accepted. A 202 is reserved for delayed reminder scheduling and must

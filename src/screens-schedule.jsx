@@ -2365,7 +2365,10 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     : original;
   const committedStartDate = (isWeekday ? store.weekPlanStartDate : store.cycleStartDate) || '';
   const effectiveStartDate = startDateDraft ?? committedStartDate;
-  const startDateDirty = startDateDraft != null && startDateDraft !== committedStartDate;
+  // Historical version editing replaces only that version's days. A global
+  // active-plan anchor is unrelated and doSaveVersion intentionally cannot
+  // commit it, so it must neither make this screen dirty nor be editable here.
+  const startDateDirty = editVerIdx <= 0 && startDateDraft != null && startDateDraft !== committedStartDate;
   const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline) || startDateDirty;
   const dateInputStyle = {
     background: UI.bgInset, border: 'none',
@@ -2540,7 +2543,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           );
         })()}
 
-        {isActive && !isWeekday && !isFlex && (
+        {editVerIdx <= 0 && isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={effectiveStartDate}
@@ -2553,7 +2556,7 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
             })()}
           </Field>
         )}
-        {isActive && isWeekday && (
+        {editVerIdx <= 0 && isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
               <input type="date" value={effectiveStartDate}

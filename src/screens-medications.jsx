@@ -404,7 +404,7 @@ function mdAutoFillToday(store, setStore, todayISO) {
     return fresh.length ? { ...s, medicationLogs: [...logs, ...fresh] } : s;
   });
 }
-// Removes today's still-pending (planned: true) materialized rows for
+// Removes today and yesterday's still-pending (planned: true) materialized rows for
 // schedule slots that just stopped applying, because the plan they belong
 // to was paused/deleted or the slot itself was deleted. Without this, a row
 // mdAutoFillToday already wrote before the change stuck around: the hero
@@ -413,14 +413,15 @@ function mdAutoFillToday(store, setStore, todayISO) {
 // plan-state join either) kept pushing a reminder for a stopped
 // medication. Already-taken doses (planned: false, toggleTaken/
 // checkAllHour flip it one-way) are real history, never touched, and
-// nothing before today is either, mdAutoFillToday only ever materializes
-// today's date to begin with.
+// older history is never touched. The server materializes both dates so a
+// late-night dose can still notify after midnight.
 function mdReconcilePlannedLogs(setStore, todayISO, invalidSlotIds) {
   if (!invalidSlotIds || !invalidSlotIds.size) return;
+  const yesterdayISO = LB.shiftDate(todayISO, -1);
   setStore(s => ({
     ...s,
     medicationLogs: (s.medicationLogs || []).filter(l =>
-      !(l.date === todayISO && l.planned && l.scheduleSlotId && invalidSlotIds.has(l.scheduleSlotId))
+      !((l.date === todayISO || l.date === yesterdayISO) && l.planned && l.scheduleSlotId && invalidSlotIds.has(l.scheduleSlotId))
     ),
   }));
 }

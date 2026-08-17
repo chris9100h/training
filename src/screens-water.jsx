@@ -100,6 +100,9 @@ function wtDateRange(from, to) {
 }
 function wtAmt(ml) { return `${UI.waterToEntry(ml)}`; }
 function wtUnit() { return UI.waterEntryUnit(); }
+function wtDisplayEntryName(name) {
+  return String(name || '').replace(/\+\s*(\d+)ml Milk/ig, (_match, ml) => `+ ${wtAmt(Number(ml))} ${wtUnit()} Milk`);
+}
 
 // Win streak derived purely from the daily-log history.
 function wtStreak(dailyLogs, goalMl) {
@@ -427,13 +430,13 @@ function WaterScreen({ store, setStore, go, userId }) {
   }
 
   async function addWithConfirm(amountMl, name, category) {
-    const label = name ? `+${wtAmt(amountMl)} ${wtUnit()} · ${name}` : `+${wtAmt(amountMl)} ${wtUnit()}`;
+    const label = name ? `+${wtAmt(amountMl)} ${wtUnit()} · ${wtDisplayEntryName(name)}` : `+${wtAmt(amountMl)} ${wtUnit()}`;
     const ok = await confirm(label, { title: 'Add entry', ok: 'Add', cancel: 'Cancel' });
     if (ok) doAdd(amountMl, name, category);
   }
 
   async function deleteEntry(entry) {
-    const label = entry.name ? `${wtAmt(entry.amountMl)} ${wtUnit()} · ${entry.name}` : `${wtAmt(entry.amountMl)} ${wtUnit()}`;
+    const label = entry.name ? `${wtAmt(entry.amountMl)} ${wtUnit()} · ${wtDisplayEntryName(entry.name)}` : `${wtAmt(entry.amountMl)} ${wtUnit()}`;
     const ok = await confirm(label, { title: 'Delete entry?', ok: 'Delete', cancel: 'Cancel', danger: true });
     if (!ok) return;
     setStore(s => {
@@ -683,8 +686,8 @@ function WaterScreen({ store, setStore, go, userId }) {
             {Object.entries(breakdown.grouped).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
               <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} color={g.color} />
             ))}
-            {breakdown.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${breakdown.milk} ml`} />}
-            {breakdown.custom > 0 && <WaterBreakdownRow icon="fa-pen" name="Custom entries" value={`${breakdown.custom} ml`} />}
+            {breakdown.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${wtAmt(breakdown.milk)} ${wtUnit()}`} />}
+            {breakdown.custom > 0 && <WaterBreakdownRow icon="fa-pen" name="Custom entries" value={`${wtAmt(breakdown.custom)} ${wtUnit()}`} />}
           </Card>
         )}
 
@@ -702,7 +705,7 @@ function WaterScreen({ store, setStore, go, userId }) {
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                     <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
                     <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{wtAmt(e.amountMl)} {wtUnit()}</span>
-                    {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
+                    {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{wtDisplayEntryName(e.name)}</span>}
                   </div>
                   <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
                     <i className="fa-solid fa-trash" style={{ fontSize: 12 }} />

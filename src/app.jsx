@@ -690,7 +690,14 @@ function mergeStagedBootStore(fresh, cur, base) {
   // count and the 5/3/1 TM suggestion all read straight out of the store.
   if (!merged.exerciseBests && cur.exerciseBests) merged.exerciseBests = cur.exerciseBests;
   const inProgressId = LB.resolveInProgressId(cur, fresh, base);
-  const sessionMerge = LB.mergeSessions(fresh.sessions || [], cur.sessions || [], inProgressId, base.sessions || []);
+  const sessionMerge = LB.mergeSessions(
+    fresh.sessions || [],
+    cur.sessions || [],
+    inProgressId,
+    base.sessions || [],
+    new Date(),
+    { preserveCachedAggregates: fresh.__sessionStatsAvailable === false },
+  );
   merged.sessions = sessionMerge.sessions;
   merged.inProgress = sessionMerge.activeExists ? inProgressId : null;
 
@@ -794,6 +801,12 @@ function App() {
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
+  // Memory fallback for the narrow but destructive case where Auth requires a
+  // fresh login while localStorage is unavailable/full. The pending snapshot
+  // must survive that same-page reauthentication even though it could not be
+  // serialized. It is consumed only by the same user and discarded on an
+  // explicit logout or an account switch.
+  const reauthPending             = useRefA(null);
   const syncing                   = useRefA(false); // true while a sync is in flight
   const inFlightSync              = useRefA(null);  // promise for the current account's sync request
   const syncGeneration             = useRefA(0);     // invalidates completions after account switches
@@ -888,6 +901,13 @@ function App() {
 
   useEffectA(() => {
     const onAuthDegraded = () => {
+      reauthPending.current = LB.retainedStateForUser(
+        reauthPending.current,
+        userIdRef.current,
+        userIdRef.current,
+        pendingStore.current,
+        syncBase.current,
+      );
       setAuthState('recovering');
       setSyncStatus('error');
     };
@@ -1604,6 +1624,27 @@ function App() {
     return ok;
   }, [cancelScheduledLocalSave]);
 
+  // A revoked, expired or otherwise invalid refresh token needs a real login,
+  // not an endless retry loop. Persist the pending snapshot before detaching
+  // the account so the next successful login can merge and sync it normally.
+  const requireReauthentication = useCallbackA(() => {
+    const uid = userIdRef.current;
+    const target = pendingStore.current;
+    const base = syncBase.current;
+    const persisted = persistLocalNow();
+    if (!persisted && uid && target) reauthPending.current = { uid, store: target, base };
+    clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    syncGeneration.current += 1;
+    loadSeq.current += 1;
+    LB.clearAuthRecovery();
+    setAuthState('reauth-required');
+    setSyncStatus('error');
+    userIdRef.current = null;
+    setUserId(null);
+    setPhase('unauthed');
+  }, [persistLocalNow, setAuthState]);
+
   const scheduleLocalSave = useCallbackA((delay = 300) => {
     cancelScheduledLocalSave();
     const task = { debounceId: null, idleId: null, idleIsTimeout: false };
@@ -1914,10 +1955,19 @@ function App() {
         timer = setTimeout(attempt, delay);
         return;
       }
-      const session = await LB.recoverAuthSession();
+      const recovery = await LB.recoverAuthSessionDetailed();
       if (cancelled) return;
+      if (recovery.permanent) {
+        requireReauthentication();
+        return;
+      }
+      const session = recovery.session;
       if (session?.user?.id) {
         const uid = session.user.id;
+        const retained = LB.retainedStateForUser(
+          reauthPending.current, uid, userIdRef.current, pendingStore.current, syncBase.current,
+        );
+        reauthPending.current = null;
         LB.rememberOfflineUser(uid);
         LB.clearAuthRecovery();
         setAuthState('online');
@@ -1925,7 +1975,7 @@ function App() {
           userIdRef.current = uid;
           setUserId(uid);
         }
-        loadData(uid);
+        loadData(uid, { retainedState: retained });
         if (pendingStore.current !== syncBase.current) flushSync(uid);
         return;
       }
@@ -1937,9 +1987,9 @@ function App() {
     // connectivity; ordinary Auth failures wait five seconds first.
     timer = setTimeout(attempt, delay);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [authStatus, flushSync, setAuthState]);
+  }, [authStatus, flushSync, requireReauthentication, setAuthState]);
 
-  const loadData = async (uid, { offlineOnly = false } = {}) => {
+  const loadData = async (uid, { offlineOnly = false, retainedState = null } = {}) => {
     // Generation stamp: SIGNED_OUT and every newer loadData bump this, and
     // nothing below writes to the store, the diff base or the local cache
     // unless it is still the newest load for the CURRENT user. Without it a
@@ -1949,13 +1999,17 @@ function App() {
     const seq = ++loadSeq.current;
     const isStale = () => seq !== loadSeq.current || uid !== userIdRef.current;
     const localState = LB.loadLocalState(uid);
-    const cached = localState.store;
+    // A failed localStorage write immediately before reauthentication leaves
+    // a newer in-memory snapshot than the persisted cache. Prefer it for this
+    // same-user login; the normal base-aware boot merge then preserves and
+    // uploads its unsynced changes.
+    const cached = retainedState?.store || localState.store;
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
       // base = last state confirmed written to Supabase. Lets the merge below
       // tell apart locally-changed-but-unsynced settings from server state.
-      const base = localState.base;
+      const base = retainedState ? retainedState.base : localState.base;
       syncBase.current = base || cached;
       pendingStore.current = cached;
       setStore(cached);
@@ -2035,7 +2089,14 @@ function App() {
             // The persisted base tells apart "never reached the server" (keep
             // + re-sync) from "deleted on another device" (drop, keeping it
             // would push it right back).
-            const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId, base?.sessions);
+            const { sessions, activeExists } = LB.mergeSessions(
+              fresh.sessions,
+              cur.sessions,
+              inProgressId,
+              base?.sessions,
+              new Date(),
+              { preserveCachedAggregates: fresh.__sessionStatsAvailable === false },
+            );
             // Same resurrection guard for the other ID-merged collections:
             // local-only items are kept only if they were never confirmed
             // synced (not in the base). No base (legacy cache) → keep.
@@ -2058,13 +2119,10 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
-            // Glucose, blood pressure and body temperature were the only three
-            // health collections this merge did not handle: they came straight
-            // out of `fresh`, so a reading added, edited or deleted between the
-            // server SELECT and this merge briefly vanished or reappeared. The
-            // staged boot and softRefresh both already merge them by id. They
-            // are written directly to Supabase (never through the sync diff),
-            // so there is no deleted-id set to honour here.
+            // Glucose, blood pressure and body temperature are written directly
+            // to Supabase, but their optimistic local delete can still race the
+            // boot SELECT. Track base ids exactly like the other collections so
+            // an older server response cannot resurrect a just-deleted reading.
             const serverGlucoseIds = new Set((fresh.glucoseLogs || []).map(l => l.id));
             const baseGlucoseIds = base ? new Set((base.glucoseLogs || []).map(l => l.id)) : null;
             const localOnlyGlucose = (cur.glucoseLogs || []).filter(x => !serverGlucoseIds.has(x.id) && !baseGlucoseIds?.has(x.id));
@@ -2153,6 +2211,12 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            const curGlucoseIdSet = new Set((cur.glucoseLogs || []).map(l => l.id));
+            const delGlucoseIds = baseGlucoseIds ? new Set([...baseGlucoseIds].filter(id => !curGlucoseIdSet.has(id))) : null;
+            const curBpIdSet = new Set((cur.bloodPressureLogs || []).map(l => l.id));
+            const delBpIds = baseBpIds ? new Set([...baseBpIds].filter(id => !curBpIdSet.has(id))) : null;
+            const curTempIdSet = new Set((cur.bodyTempLogs || []).map(l => l.id));
+            const delTempIds = baseTempIds ? new Set([...baseTempIds].filter(id => !curTempIdSet.has(id))) : null;
             const curWaterIdSet = new Set((cur.waterLogs || []).map(l => l.id));
             const delWaterIds = baseWaterIds ? new Set([...baseWaterIds].filter(id => !curWaterIdSet.has(id))) : null;
             const curFoodIdSet = new Set((cur.foodLogs || []).map(l => l.id));
@@ -2299,9 +2363,9 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...LB.mergeWindowedCollectionById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds, 'dailyLogs')],
               cardioLogs: [...localOnlyCardioLogs, ...LB.mergeWindowedCollectionById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds, 'cardioLogs')],
-              glucoseLogs: [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], cur.glucoseLogs, base?.glucoseLogs, null, 'glucoseLogs')],
-              bloodPressureLogs: [...localOnlyBp, ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], cur.bloodPressureLogs, base?.bloodPressureLogs, null, 'bloodPressureLogs')],
-              bodyTempLogs: [...localOnlyTemp, ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], cur.bodyTempLogs, base?.bodyTempLogs, null, 'bodyTempLogs')],
+              glucoseLogs: [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], cur.glucoseLogs, base?.glucoseLogs, delGlucoseIds, 'glucoseLogs')],
+              bloodPressureLogs: [...localOnlyBp, ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], cur.bloodPressureLogs, base?.bloodPressureLogs, delBpIds, 'bloodPressureLogs')],
+              bodyTempLogs: [...localOnlyTemp, ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], cur.bodyTempLogs, base?.bodyTempLogs, delTempIds, 'bodyTempLogs')],
               waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
               foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
@@ -2400,23 +2464,31 @@ function App() {
   // after an explicit logout or a permanent Auth rejection.
   const enterOfflineCache = (uid) => {
     if (!uid) { setPhase('error'); return; }
+    const retained = LB.retainedStateForUser(
+      reauthPending.current, uid, userIdRef.current, pendingStore.current, syncBase.current,
+    );
     userIdRef.current = uid;
     setUserId(uid);
     setAuthState('recovering');
     setSyncStatus('error');
-    loadData(uid, { offlineOnly: true });
+    loadData(uid, { offlineOnly: true, retainedState: retained });
   };
 
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) {
+          const retained = LB.retainedStateForUser(
+            reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+          );
+          reauthPending.current = null;
+          userIdRef.current = session.user.id;
           LB.rememberOfflineUser(session.user.id);
           LB.clearAuthRecovery();
           setAuthState('online');
           setUserId(session.user.id);
           if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
-          else loadData(session.user.id);
+          else loadData(session.user.id, { retainedState: retained });
         }
         else {
           const offlineUser = LB.getOfflineUser();
@@ -2450,14 +2522,19 @@ function App() {
         // userId effect below is intentionally redundant because Auth events
         // can arrive before React commits the new state.
         syncGeneration.current += 1;
+        const retained = LB.retainedStateForUser(
+          reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+        );
+        // Never let one account's in-memory fallback cross into another.
+        reauthPending.current = null;
         userIdRef.current = session.user.id;
-        pendingStore.current = null;
+        if (!retained) pendingStore.current = null;
         LB.rememberOfflineUser(session.user.id);
         LB.clearAuthRecovery();
         setAuthState('online');
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
-        else loadData(session.user.id);
+        else loadData(session.user.id, { retainedState: retained });
       } else if (event === 'TOKEN_REFRESHED') {
         const wasRecovering = authStatusRef.current !== 'online';
         LB.rememberOfflineUser(session?.user?.id);
@@ -2467,7 +2544,11 @@ function App() {
           // The offline cache was intentionally not refreshed while Auth was
           // down. Re-enter the normal cache-first boot path now that the JWT
           // is valid again; its merge preserves any local pending edits.
-          loadData(session.user.id);
+          const retained = LB.retainedStateForUser(
+            reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+          );
+          reauthPending.current = null;
+          loadData(session.user.id, { retainedState: retained });
           if (pendingStore.current !== syncBase.current) flushSync(session.user.id);
         }
       } else if (event === 'PASSWORD_RECOVERY') {
@@ -2487,6 +2568,9 @@ function App() {
         // its baseline into the next account's local cache.
         syncGeneration.current += 1;
         const signedOutUid = userIdRef.current;
+        reauthPending.current = LB.retainedStateAfterSignedOut(
+          reauthPending.current, signedOutUid, pendingStore.current, syncBase.current,
+        );
         userIdRef.current = null;
         unitPicked.current = false;
         recoveryInProgress.current = false;
@@ -2507,8 +2591,17 @@ function App() {
         const armed = !!armedAt && (Date.now() - armedAt) < INTENTIONAL_SIGNOUT_TTL_MS;
         intentionalSignOut.current = null;
         if (!armed) {
+          const alreadyRequiresLogin = authStatusRef.current === 'reauth-required';
           setAuthState('reauth-required');
           setSyncStatus('error');
+          // recoverAuthSessionDetailed may have already classified the token
+          // as permanent. A later SDK SIGNED_OUT event must not re-arm the
+          // recovery loop after the app has deliberately returned to Login.
+          if (alreadyRequiresLogin) {
+            setUserId(null);
+            setPhase('unauthed');
+            return;
+          }
           const offlineUser = LB.getOfflineUser();
           const recovery = LB.getAuthRecoveryState();
           // An app that is already 'ready' must not be torn down here:
@@ -2537,7 +2630,8 @@ function App() {
         }
         LB.clearOfflineUser();
         LB.clearAuthRecovery();
-        LB.clearLocal(userIdRef.current);
+        reauthPending.current = null;
+        LB.clearLocal(signedOutUid);
         clearTimeout(retryTimer.current);
         setStore(null);
         setUserId(null);
@@ -2753,11 +2847,15 @@ function App() {
         coachingPending = false;
         try {
           const coaching = await LB.reloadCoachingState(userId);
-          if (!disposed) setStore(s => s ? { ...s, coaching: {
-            ...coaching,
-            anyClientLive: s.coaching?.anyClientLive,
-            pendingCheckinsCount: s.coaching?.pendingCheckinsCount,
-          } } : s);
+          if (!disposed) {
+            const stillCoaching = (coaching.asCoach || []).some(c => c.status === 'active');
+            setStore(s => s ? { ...s, coaching: {
+              ...coaching,
+              anyClientLive: stillCoaching ? !!s.coaching?.anyClientLive : false,
+              pendingCheckinsCount: stillCoaching ? (s.coaching?.pendingCheckinsCount || 0) : 0,
+            } } : s);
+            if (stillCoaching) triggerPoll();
+          }
         } catch (_) {}
       } while (!disposed && coachingPending);
       coachingInFlight = false;
@@ -3196,7 +3294,12 @@ function App() {
   useEffectA(() => {
     const onOffline = () => setSyncStatus('error');
     const onOnline  = async () => {
-      const session = await LB.recoverAuthSession();
+      const recovery = await LB.recoverAuthSessionDetailed();
+      if (recovery.permanent) {
+        requireReauthentication();
+        return;
+      }
+      const session = recovery.session;
       const uid = session?.user?.id || userIdRef.current;
       if (!session && authStatusRef.current !== 'online') {
         setAuthState('recovering');
@@ -3217,7 +3320,7 @@ function App() {
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online',  onOnline);
     };
-  }, [userId, flushSync, probeSyncConnection]);
+  }, [userId, flushSync, probeSyncConnection, requireReauthentication]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
   useEffectA(() => {
@@ -3254,10 +3357,23 @@ function App() {
   // interval is only the fallback for a dropped/reconnecting channel, so it
   // can be slow, it's a safety net.
   const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
+  const coachStatusSignature = (store?.coaching?.asCoach || [])
+    .map(c => `${c.id}:${c.status}:${c.checkinEnabled !== false}`)
+    .sort()
+    .join('|');
   const prevAnyLiveRef = useRefA(false);
   const prevPendingRef = useRefA(0);
   useEffectA(() => {
-    if (!isCoachActive) { pollFnRef.current = null; return; }
+    if (!isCoachActive) {
+      pollFnRef.current = null;
+      prevAnyLiveRef.current = false;
+      prevPendingRef.current = 0;
+      setStore(s => {
+        if (!s?.coaching || (!s.coaching.anyClientLive && !(s.coaching.pendingCheckinsCount || 0))) return s;
+        return { ...s, coaching: { ...s.coaching, anyClientLive: false, pendingCheckinsCount: 0 } };
+      });
+      return;
+    }
     const poll = () => {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
@@ -3282,7 +3398,7 @@ function App() {
     poll();
     const iv = setInterval(poll, 60000);
     return () => { clearInterval(iv); pollFnRef.current = null; };
-  }, [isCoachActive]);
+  }, [isCoachActive, coachStatusSignature]);
 
   // Exposed globally so Settings → How to… can launch any tour.
   // Also clears WhatsNew so it doesn't block the tour overlay (z-index).

@@ -1,7 +1,7 @@
 // Native Web Push via VAPID, supports immediate sends and relay-chain delayed
-// sends (same architecture as the pushover function). Both chains share the
-// same zane_pushover_active nonce table so cancelPushover() in the app
-// invalidates both at once.
+// sends (same architecture as the pushover function). Each channel owns one
+// atomically claimed nonce per user, so duplicate requests cannot multiply a
+// long relay chain and a newer timer invalidates the previous chain.
 //
 // Called by:
 //   • the signed-in user (app), immediate or delayed, acting on themselves
@@ -11,6 +11,7 @@
 // VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY must be set as Supabase secrets.
 
 import webpush from 'npm:web-push@3.6.7';
+import { isAllowedWebPushEndpoint } from '../_shared/web-push-security.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -21,11 +22,23 @@ const corsHeaders = {
 const FALLBACK_ANON_KEY = '';
 const MAX_CHUNK = 10;
 const MAX_DELAY = 3600;
+const MAX_SUBSCRIPTIONS = 8;
+const PUSH_CONCURRENCY = 4;
+
+async function fetchWithTimeout(input: string, options: RequestInit = {}, timeoutMs = 8_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -37,7 +50,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
-  const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  const r = await dbFetch(`zane_push_schedule_claims?user_id=eq.${encodeURIComponent(userId)}&channel=eq.web-push&select=nonce`);
   // A non-2xx PostgREST reply still parses as JSON (an error object, not an
   // array), so the .catch fallback below never fires and rows[0] would read
   // undefined off that object. Fail OPEN (still current) rather than
@@ -56,7 +69,7 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   if (serviceKey && token === serviceKey) return { internal: true, userId: null };
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? FALLBACK_ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
+  const r = await fetchWithTimeout(`${base}/auth/v1/user`, {
     headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
   }).catch(() => null);
   if (!r?.ok) return { internal: false, userId: null };
@@ -64,8 +77,26 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   return { internal: false, userId: user?.id ?? null };
 }
 
+async function takeDirectPushRateLimit(userId: string, cost: number): Promise<'allowed' | 'limited' | 'unavailable'> {
+  const result = await dbFetch('rpc/social_take_notification_rate_limit', {
+    method: 'POST',
+    body: JSON.stringify({ p_caller_id: userId, p_cost: cost }),
+  }).catch(() => null);
+  if (!result?.ok) return 'unavailable';
+  return await result.json().catch(() => false) === true ? 'allowed' : 'limited';
+}
+
+async function claimSchedule(userId: string, nonce: string): Promise<'claimed' | 'duplicate' | 'unavailable'> {
+  const result = await dbFetch('rpc/claim_push_schedule', {
+    method: 'POST',
+    body: JSON.stringify({ p_user_id: userId, p_channel: 'web-push', p_nonce: nonce }),
+  }).catch(() => null);
+  if (!result?.ok) return 'unavailable';
+  return await result.json().catch(() => false) === true ? 'claimed' : 'duplicate';
+}
+
 async function deliverPush(userId: string, title: string, text: string, url: string, ttl: number): Promise<{ sent: number; failed: number }> {
-  const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=id,endpoint,p256dh,auth`);
+  const subRes = await dbFetch(`zane_push_subscriptions?user_id=eq.${encodeURIComponent(userId)}&select=id,endpoint,p256dh,auth&order=created_at.desc&limit=${MAX_SUBSCRIPTIONS}`);
   // Same non-2xx-still-parses-as-JSON trap as isNonceCurrent above: an error
   // object's .length is undefined, `undefined === 0` is false, so the "no
   // subscriptions" early return below was skipped and subs.map (an object
@@ -73,7 +104,13 @@ async function deliverPush(userId: string, title: string, text: string, url: str
   // response had already gone out, silently killing the push with nothing
   // ever surfacing the failure.
   if (!subRes.ok) { console.error(`[web-push] subscriptions query failed for ${userId}: ${subRes.status} ${await subRes.text().catch(() => '')}`); return { sent: 0, failed: 1 }; }
-  const subs: { id: string; endpoint: string; p256dh: string; auth: string }[] = await subRes.json().catch(() => []);
+  const rawSubs: { id: string; endpoint: string; p256dh: string; auth: string }[] = await subRes.json().catch(() => []);
+  const subs = rawSubs.filter(sub => isAllowedWebPushEndpoint(sub.endpoint));
+  const unsafe = rawSubs.filter(sub => !isAllowedWebPushEndpoint(sub.endpoint));
+  await Promise.all(unsafe.map(sub => dbFetch(
+    `zane_push_subscriptions?id=eq.${encodeURIComponent(sub.id)}&user_id=eq.${encodeURIComponent(userId)}`,
+    { method: 'DELETE' },
+  ).catch(() => null)));
   if (subs.length === 0) { console.log(`[web-push] no subscriptions for ${userId}`); return { sent: 0, failed: 1 }; }
 
   const vapidPublic  = Deno.env.get('VAPID_PUBLIC_KEY') ?? '';
@@ -83,27 +120,29 @@ async function deliverPush(userId: string, title: string, text: string, url: str
   const payload = JSON.stringify({ title, body: text, url: url || '/' });
   let sent = 0, failed = 0;
 
-  await Promise.all(subs.map(async (sub) => {
-    try {
-      await webpush.sendNotification(
-        { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
-        payload,
-        // Per-call TTL. This was hardcoded at 300, so a reminder that meant to
-        // stay deliverable for 12 hours expired after five minutes: a phone
-        // that was off or offline at send time simply never got it.
-        { TTL: ttl },
-      );
-      sent++;
-    } catch (err: any) {
-      if (err.statusCode === 410 || err.statusCode === 404) {
-        await dbFetch(`zane_push_subscriptions?id=eq.${encodeURIComponent(sub.id)}`, { method: 'DELETE' }).catch(() => {});
-        console.log(`[web-push] removed stale subscription ${sub.id.slice(-12)}`);
-      } else {
-        console.error(`[web-push] send error ${sub.id.slice(-12)}: ${err.statusCode} ${err.body}`);
+  for (let offset = 0; offset < subs.length; offset += PUSH_CONCURRENCY) {
+    await Promise.all(subs.slice(offset, offset + PUSH_CONCURRENCY).map(async (sub) => {
+      try {
+        await webpush.sendNotification(
+          { endpoint: sub.endpoint, keys: { p256dh: sub.p256dh, auth: sub.auth } },
+          payload,
+          // Per-call TTL. This was hardcoded at 300, so a reminder that meant to
+          // stay deliverable for 12 hours expired after five minutes: a phone
+          // that was off or offline at send time simply never got it.
+          { TTL: ttl, timeout: 10_000 },
+        );
+        sent++;
+      } catch (err: any) {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          await dbFetch(`zane_push_subscriptions?id=eq.${encodeURIComponent(sub.id)}&user_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' }).catch(() => {});
+          console.log(`[web-push] removed stale subscription ${sub.id.slice(-12)}`);
+        } else {
+          console.error(`[web-push] send error ${sub.id.slice(-12)}: ${err.statusCode} ${err.body}`);
+        }
+        failed++;
       }
-      failed++;
-    }
-  }));
+    }));
+  }
   console.log(`[web-push] sent=${sent} failed=${failed} user=${userId}`);
   return { sent, failed };
 }
@@ -132,6 +171,7 @@ Deno.serve(async (req) => {
     verify       = false,
   } = await req.json().catch(() => ({}));
   const text = message || bodyText || '';
+  nonce = typeof nonce === 'string' ? nonce.trim() : '';
 
   let targetUserId: string = caller.internal ? bodyUserId : caller.userId!;
   if (!targetUserId) {
@@ -149,23 +189,55 @@ Deno.serve(async (req) => {
     // ask for a TTL (the rest timer above all) keeps behaving exactly as it
     // did; callers that mean hours now actually get them.
     ttl = Math.min(Math.max(0, Number(ttl) || 300), 86_400);
-    const settRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(targetUserId)}&select=push_enabled`);
-    const [sett] = await settRes.json().catch(() => [null]);
-    if (!cancel && !verify && !sett?.push_enabled) {
-      return new Response(JSON.stringify({ skipped: true }), {
-        status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    if (nonce.length > 200 || ((delaySeconds > 0 || cancel) && !nonce)) {
+      return new Response(JSON.stringify({ error: 'a valid nonce is required for delayed or cancel requests' }), {
+        status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
+    }
+    const rate = await takeDirectPushRateLimit(targetUserId, cancel ? 1 : 3);
+    if (rate === 'limited') {
+      return new Response(JSON.stringify({ error: 'rate limited' }), {
+        status: 429, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (rate === 'unavailable') {
+      return new Response(JSON.stringify({ error: 'rate limiter unavailable' }), {
+        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!cancel) {
+      const settRes = await dbFetch(`zane_user_settings?user_id=eq.${encodeURIComponent(targetUserId)}&select=push_enabled`);
+      const [sett] = await settRes.json().catch(() => [null]);
+      if (!verify && !sett?.push_enabled) {
+        return new Response(JSON.stringify({ skipped: true }), {
+          status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
     }
   }
 
-  // Register nonce on first call. Shares zane_pushover_active with the pushover
-  // function so a single cancelPushover() call from the app invalidates both chains.
+  if (nonce.length > 200 || ((delaySeconds > 0 || cancel || _relay) && !nonce)) {
+    return new Response(JSON.stringify({ error: 'a valid nonce is required for delayed, relay or cancel requests' }), {
+      status: 400, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // Only one initial request may create a chain for a user/channel/nonce.
+  // Replays are successful no-ops, while a different nonce atomically
+  // invalidates the previous timer before starting the new one.
   if (nonce && !_relay) {
-    await dbFetch('zane_pushover_active', {
-      method: 'POST',
-      headers: { 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ id: targetUserId, nonce }),
-    }).catch(e => console.error('[web-push] nonce upsert error:', e));
+    const scheduleClaim = await claimSchedule(targetUserId, nonce);
+    if (scheduleClaim === 'unavailable') {
+      return new Response(JSON.stringify({ error: 'schedule claim unavailable' }), {
+        status: 503, headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (scheduleClaim === 'duplicate') {
+      return new Response(JSON.stringify({ deduplicated: true, scheduled: delaySeconds > 0 }), {
+        status: delaySeconds > 0 ? 202 : 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   if (cancel) {

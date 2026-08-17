@@ -2858,8 +2858,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const keptDayType = existing?.targetsSnap?.dayType;
     const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
     const reopened = dateStr === today ? { foodDayClosed: false } : {};
+    // Historical closed days keep their frozen target, but their score must
+    // follow the food totals when a user backlogs or edits an item. Otherwise
+    // the visible macros change while the persisted adherence stays stale.
+    const closedPatch = dateStr !== today
+      ? LB.historicalClosedFoodDayPatch(existing, { protein, carbs, fat }, has)
+      : {};
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }), ...closedPatch }
       : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: false, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }

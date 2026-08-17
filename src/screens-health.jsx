@@ -1584,6 +1584,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       const v = toResponse(f, coachForm[f.key]);
       if (v != null) savedCoachFields[f.key] = v;
     });
+    const waterEntry = healthNum(form.water);
+    const convertedWaterMl = waterEntry != null ? UI.waterEntryToMl(waterEntry) : null;
+    const savedWaterMl = waterLocked
+      ? (existing?.waterMl ?? null)
+      : LB.positiveNumberOrNull(convertedWaterMl);
     const log = {
       id: existing?.id || LB.uid(),
       date,
@@ -1601,7 +1606,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       // (see the HYDRATION section below), but save() itself never trusts
       // form.water while locked either, so nothing can persist an override
       // the user never confirmed through requestWaterUnlock.
-      waterMl: waterLocked ? (existing?.waterMl ?? null) : (healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null),
+      waterMl: savedWaterMl,
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
@@ -1629,12 +1634,18 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     // toggled it this session. Otherwise merely opening and saving an old day
     // whose fiber value inferred net mode would silently flip the global default.
     const userToggledMode = !!(initialSnap.current && netCarbs !== initialSnap.current.net);
-    setStore(s => ({
-      ...s,
-      // Remember the carb mode globally so the next day defaults to it.
-      settings: (userToggledMode && s.settings?.netCarbs !== netCarbs) ? { ...s.settings, netCarbs } : s.settings,
-      dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
-    }));
+    setStore(s => {
+      const waterLogs = waterLocked
+        ? (s.waterLogs || [])
+        : LB.reconcileManualWaterLogs(s.waterLogs, date, savedWaterMl);
+      return {
+        ...s,
+        // Remember the carb mode globally so the next day defaults to it.
+        settings: (userToggledMode && s.settings?.netCarbs !== netCarbs) ? { ...s.settings, netCarbs } : s.settings,
+        dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
+        waterLogs,
+      };
+    });
     onClose();
   };
 
@@ -1656,7 +1667,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const requestWaterUnlock = async () => {
     const ok = await confirm(
-      "This day already has entries in the Water Tracker. Editing it here will be overwritten the next time you log a drink there.",
+      "This day already has entries in the Water Tracker. Editing it here will replace those entries with one manual total.",
       { title: 'Overwrite water tracker?', ok: 'Continue', cancel: 'Cancel' }
     );
     if (ok) setWaterUnlocked(true);
@@ -1884,7 +1895,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           {UI.waterQuickAdds().map(inc => waterLocked ? (
             <div key={inc} style={waterQuickAddTileStyle}>+{inc}</div>
           ) : (
-            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
+            <button key={inc} onClick={() => set('water', String((healthNum(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
           ))}
         </div>
         {waterLocked && (
