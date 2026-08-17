@@ -2390,7 +2390,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       try {
         await LB.enableSelfCoaching();
         const cs = await LB.reloadCoachingState(userId);
-        setStore(s => s ? { ...s, coaching: cs } : s);
+        setStore(s => s ? { ...s, coaching: { ...cs, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
       } catch (e) {
         setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: false } }));
       }
@@ -2400,7 +2400,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         try {
           await LB.endCoaching(selfId);
           const cs = await LB.reloadCoachingState(userId);
-          setStore(s => s ? { ...s, coaching: cs } : s);
+          setStore(s => s ? { ...s, coaching: { ...cs, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
         } catch (e) {
           setStore(s => ({ ...s, settings: { ...s.settings, beYourOwnCoach: true } }));
         }

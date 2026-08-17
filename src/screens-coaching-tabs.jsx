@@ -181,7 +181,12 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       setInviteEmail('');
       setInviteOpen(false);
       const coaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching } : s);
+      // reloadCoachingState does not return anyClientLive or
+      // pendingCheckinsCount, so replacing the whole object wiped the live
+      // dot and the check-in count off the tab. The 60s poll only rewrites
+      // them when a value actually changes, so they stayed gone until then.
+      // Same preserving merge the pending-invite banner already uses.
+      setStore(s => s ? { ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (e) {
       setInviteError(e.message);
     } finally {
@@ -202,7 +207,12 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
     try {
       await LB.endCoaching(client.id);
       const coaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching } : s);
+      // reloadCoachingState does not return anyClientLive or
+      // pendingCheckinsCount, so replacing the whole object wiped the live
+      // dot and the check-in count off the tab. The 60s poll only rewrites
+      // them when a value actually changes, so they stayed gone until then.
+      // Same preserving merge the pending-invite banner already uses.
+      setStore(s => s ? { ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (e) {
       UI.alert(e.message);
     } finally {
@@ -1729,7 +1739,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
     }
     try {
       const newCoaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching: newCoaching } : s);
+      setStore(s => s ? { ...s, coaching: { ...newCoaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (_) {
       setStore(s => s ? { ...s, coaching: { ...(s.coaching || {}), asClient: null } } : s);
     } finally {

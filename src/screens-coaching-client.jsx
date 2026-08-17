@@ -42,6 +42,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     setCiToggling(true);
     try {
       await LB.setCheckinEnabled(coachingId, next);
+      // The store's asCoach entry is what the client list, the CHECK-IN DUE
+      // marker and this toggle's own initial value all read. Without this
+      // patch only local state moved, so leaving and re-entering the screen
+      // showed the switch back on until a realtime invalidation happened to
+      // refresh asCoach, and offline it never did.
+      setStore(s => s ? { ...s, coaching: { ...s.coaching, asCoach: (s.coaching?.asCoach || []).map(c => c.id === coachingId ? { ...c, checkinEnabled: next } : c) } } : s);
     } catch (_) {
       setCheckinEnabled(!next);
       setCiToggling(false);

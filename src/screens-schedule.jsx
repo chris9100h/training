@@ -219,8 +219,15 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           delete pd.bumpedCycle;
           sch.program_data = pd;
         }
-        setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
-        go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
+        // Same self-heal pushToClient and loadFromSupabase already run. An
+        // exported file can carry a versions[] entry from before a
+        // cycle<->weekday switch, whose days no longer match the top-level
+        // mode. Without this the imported plan has days but resolves to zero
+        // for every weekday, so Home shows a rest day until the next online
+        // reload happens to heal it server-side.
+        const healed = LB.healScheduleWeekdays(sch);
+        setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, healed] }));
+        go({ name: 'plan-view', scheduleId: healed.id, fromPlan: true });
       } catch (_) { UI.alert('Could not read plan file.'); }
     };
     reader.readAsText(file);
@@ -2739,7 +2746,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           currentDayId={null}
           multiSelect={false}
           onClose={() => setImportDayOpen(false)}
-          onCopy={(sourceDay, migrateId) => {
+          onCopy={async (sourceDay, migrateId) => {
+            // Same 5/3/1 gate the day editor and the wizard already apply:
+            // max, percentage sets and the AMRAP top set do not travel, the
+            // lift quietly becomes an ordinary exercise on Smart Progression.
+            // This path and the cycle Add-Day path below were the two that
+            // imported main lifts with no warning at all.
+            const srcPlan = (store.schedules || []).find(sc => (sc.days || []).some(d => d.id === sourceDay.id));
+            if (!await confirm531LiftImport(confirm, srcPlan, sourceDay.items, LB.is531Plan(draft))) return;
             // Deep-copy items + remap superset group ids so the new day never
             // shares objects / group ids with the source day.
             const gidMap = {};
@@ -3313,7 +3327,20 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
           schedule={schedule}
           currentDayId={null}
           onClose={() => setImportOpen(false)}
-          onCopy={(selections) => {
+          onCopy={async (selections) => {
+            // Ask once per distinct source plan rather than per day: a
+            // multi-select import usually pulls several days out of the same
+            // 5/3/1 plan, and one dialog per day would be noise.
+            const seen = new Set();
+            for (const { day } of selections) {
+              const srcPlan = (store.schedules || []).find(sc => (sc.days || []).some(d => d.id === day.id));
+              if (!srcPlan || seen.has(srcPlan.id)) continue;
+              seen.add(srcPlan.id);
+              const planItems = selections
+                .filter(sel => (srcPlan.days || []).some(d => d.id === sel.day.id))
+                .flatMap(sel => sel.day.items || []);
+              if (!await confirm531LiftImport(confirm, srcPlan, planItems, LB.is531Plan(schedule))) return;
+            }
             selections.forEach(({ day, migrateId }) => onImport(day, migrateId));
             setImportOpen(false);
           }}
