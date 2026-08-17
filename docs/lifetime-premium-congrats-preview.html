@@ -1,0 +1,248 @@
+<div id="zane-lifetime-preview" class="zane-lp-preview" aria-label="Lifetime Premium congratulations modal preview">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+    #zane-lifetime-preview {
+      --zane-bg: #17151e;
+      --zane-panel: #24202f;
+      --zane-panel-soft: #2b2639;
+      --zane-gold: #d58a28;
+      --zane-gold-bright: #f0a63a;
+      --zane-ink: #f1ece5;
+      --zane-muted: #a49daa;
+      --zane-hair: rgba(232, 163, 66, .42);
+      --zane-grid: rgba(152, 134, 183, .08);
+      box-sizing: border-box;
+      width: min(100%, 390px);
+      margin: 0 auto;
+      color: var(--zane-ink);
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    #zane-lifetime-preview * { box-sizing: border-box; }
+
+    .zane-lp-device {
+      position: relative;
+      overflow: hidden;
+      aspect-ratio: 390 / 844;
+      min-height: 620px;
+      border: 1px solid rgba(230, 218, 250, .22);
+      border-radius: 22px;
+      background-color: var(--zane-bg);
+      background-image: linear-gradient(var(--zane-grid) 1px, transparent 1px), linear-gradient(90deg, var(--zane-grid) 1px, transparent 1px);
+      background-size: 32px 32px;
+      box-shadow: 0 26px 70px rgba(4, 2, 10, .42);
+    }
+
+    .zane-lp-device::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(circle at 54% 45%, rgba(209, 130, 37, .10), transparent 42%);
+      pointer-events: none;
+    }
+
+    .zane-lp-appbar {
+      position: relative;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 28px 22px 18px;
+      border-bottom: 1px solid rgba(230, 218, 250, .12);
+    }
+
+    .zane-lp-brand {
+      color: var(--zane-gold-bright);
+      font: 700 31px/1 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .1em;
+    }
+
+    .zane-lp-greeting {
+      color: var(--zane-ink);
+      font: 600 16px/1 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .zane-lp-fake-content {
+      display: grid;
+      gap: 12px;
+      padding: 22px;
+      opacity: .55;
+    }
+
+    .zane-lp-fake-card {
+      height: 92px;
+      border: 1px solid rgba(220, 210, 235, .14);
+      border-left: 3px solid rgba(213, 138, 40, .55);
+      border-radius: 8px;
+      background: rgba(36, 32, 47, .7);
+    }
+
+    .zane-lp-fake-card:nth-child(2) { height: 128px; }
+
+    .zane-lp-dim {
+      position: absolute;
+      inset: 0;
+      z-index: 2;
+      background: rgba(8, 6, 13, .68);
+    }
+
+    .zane-lp-modal {
+      position: absolute;
+      z-index: 3;
+      top: 50%;
+      left: 50%;
+      width: calc(100% - 34px);
+      transform: translate(-50%, -50%);
+      overflow: hidden;
+      border: 1px solid rgba(238, 171, 79, .68);
+      border-radius: 14px;
+      background-color: rgba(35, 31, 47, .98);
+      background-image: linear-gradient(rgba(151, 134, 182, .065) 1px, transparent 1px), linear-gradient(90deg, rgba(151, 134, 182, .065) 1px, transparent 1px);
+      background-size: 27px 27px;
+      box-shadow: 0 0 0 1px rgba(236, 163, 59, .10), 0 18px 55px rgba(0, 0, 0, .58), 0 0 46px rgba(213, 138, 40, .13);
+      text-align: center;
+    }
+
+    .zane-lp-modal::before {
+      content: '';
+      display: block;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, var(--zane-gold-bright), transparent);
+    }
+
+    .zane-lp-confetti {
+      position: absolute;
+      inset: 12px 18px auto;
+      height: 122px;
+      pointer-events: none;
+    }
+
+    .zane-lp-confetti i {
+      position: absolute;
+      display: block;
+      width: 5px;
+      height: 12px;
+      border-radius: 3px;
+      background: var(--zane-gold-bright);
+      opacity: .82;
+      transform: rotate(25deg);
+    }
+
+    .zane-lp-confetti i:nth-child(1) { top: 30px; left: 8%; }
+    .zane-lp-confetti i:nth-child(2) { top: 8px; left: 25%; height: 7px; background: #79dca8; transform: rotate(-35deg); }
+    .zane-lp-confetti i:nth-child(3) { top: 22px; right: 25%; width: 7px; height: 7px; border-radius: 50%; background: #e48477; }
+    .zane-lp-confetti i:nth-child(4) { top: 49px; right: 8%; height: 9px; transform: rotate(-25deg); }
+    .zane-lp-confetti i:nth-child(5) { top: 86px; left: 17%; width: 7px; height: 7px; border-radius: 50%; background: #a4adff; }
+    .zane-lp-confetti i:nth-child(6) { top: 80px; right: 18%; height: 11px; background: #79dca8; transform: rotate(42deg); }
+
+    .zane-lp-modal-body { padding: 38px 26px 27px; }
+
+    .zane-lp-emoji {
+      display: block;
+      margin: 0 auto 14px;
+      font-size: clamp(58px, 17vw, 76px);
+      line-height: 1;
+      filter: drop-shadow(0 7px 13px rgba(236, 163, 59, .28));
+    }
+
+    .zane-lp-eyebrow {
+      margin-bottom: 7px;
+      color: var(--zane-gold-bright);
+      font: 600 11px/1 'Inter', sans-serif;
+      letter-spacing: .25em;
+    }
+
+    .zane-lp-title {
+      margin: 0;
+      color: var(--zane-ink);
+      font: 600 clamp(29px, 8vw, 37px)/.98 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .08em;
+    }
+
+    .zane-lp-subtitle {
+      margin: 17px 0 0;
+      color: var(--zane-gold-bright);
+      font: 700 16px/1.1 'Inter', sans-serif;
+      letter-spacing: .12em;
+    }
+
+    .zane-lp-copy {
+      max-width: 275px;
+      margin: 12px auto 0;
+      color: var(--zane-muted);
+      font: 400 13px/1.55 'Inter', sans-serif;
+    }
+
+    .zane-lp-divider {
+      height: 1px;
+      margin: 23px 0 15px;
+      background: linear-gradient(90deg, transparent, var(--zane-hair), transparent);
+    }
+
+    .zane-lp-proof {
+      color: var(--zane-muted);
+      font: 600 10px/1.2 'Inter', sans-serif;
+      letter-spacing: .17em;
+      text-transform: uppercase;
+    }
+
+    .zane-lp-cta {
+      display: block;
+      width: 100%;
+      margin-top: 24px;
+      padding: 13px 16px 12px;
+      border: 1px solid rgba(255, 198, 104, .76);
+      border-radius: 7px;
+      background: linear-gradient(155deg, #f3ad49 0%, #d8811d 58%, #b96612 100%);
+      box-shadow: 0 8px 22px rgba(213, 138, 40, .24), inset 0 1px 0 rgba(255, 238, 193, .45);
+      color: #23170e;
+      font: 700 13px/1 'Inter', sans-serif;
+      letter-spacing: .16em;
+    }
+
+    .zane-lp-note {
+      margin-top: 14px;
+      color: rgba(164, 157, 170, .72);
+      font: 400 10px/1.4 'Inter', sans-serif;
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .zane-lp-emoji { animation: zane-lp-pop .7s cubic-bezier(.2, 1.4, .45, 1) both; }
+      .zane-lp-modal { animation: zane-lp-rise .45s cubic-bezier(.2, .8, .2, 1) both; }
+      .zane-lp-confetti i:nth-child(odd) { animation: zane-lp-float 2.8s ease-in-out infinite alternate; }
+    }
+
+    @keyframes zane-lp-pop { 0% { transform: scale(.55) rotate(-9deg); opacity: 0; } 70% { transform: scale(1.08) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
+    @keyframes zane-lp-rise { from { opacity: 0; transform: translate(-50%, -46%) scale(.96); } to { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+    @keyframes zane-lp-float { from { translate: 0 0; } to { translate: 0 8px; } }
+  </style>
+
+  <div class="zane-lp-device">
+    <div class="zane-lp-appbar">
+      <div class="zane-lp-brand">ZANE</div>
+      <div class="zane-lp-greeting">HEY, CHRIS</div>
+    </div>
+    <div class="zane-lp-fake-content" aria-hidden="true">
+      <div class="zane-lp-fake-card"></div>
+      <div class="zane-lp-fake-card"></div>
+      <div class="zane-lp-fake-card"></div>
+    </div>
+    <div class="zane-lp-dim"></div>
+    <section class="zane-lp-modal" role="dialog" aria-modal="true" aria-labelledby="zane-lp-title">
+      <div class="zane-lp-confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+      <div class="zane-lp-modal-body">
+        <span class="zane-lp-emoji" aria-hidden="true">🎉</span>
+        <div class="zane-lp-eyebrow">FOUNDING MEMBER</div>
+        <h2 id="zane-lp-title" class="zane-lp-title">LIFETIME PREMIUM</h2>
+        <p class="zane-lp-subtitle">YOU EARNED IT.</p>
+        <p class="zane-lp-copy">Every premium feature is now yours forever. No subscription. No expiry.</p>
+        <div class="zane-lp-divider"></div>
+        <div class="zane-lp-proof">ALL FEATURES &nbsp;·&nbsp; FOREVER</div>
+        <button class="zane-lp-cta" type="button">LET'S GO</button>
+        <div class="zane-lp-note">Your founding-member badge is now on your home screen.</div>
+      </div>
+    </section>
+  </div>
+</div>

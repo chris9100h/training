@@ -441,6 +441,151 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
+const LIFETIME_CONGRATS_SEEN_PREFIX = 'logbook-lifetime-premium-seen:';
+const LIFETIME_CONGRATS_PENDING_PREFIX = 'logbook-lifetime-premium-pending:';
+
+function lifetimeCongratsSeenKey(userId) {
+  return `${LIFETIME_CONGRATS_SEEN_PREFIX}${userId}`;
+}
+
+function lifetimeCongratsPendingKey(userId) {
+  return `${LIFETIME_CONGRATS_PENDING_PREFIX}${userId}`;
+}
+
+function lifetimeGrantKey(user) {
+  if (!user || user.tier !== 'lifetime') return null;
+  // Older profile caches do not have tierGrantedAt. The fallback is still
+  // account-scoped and gives those founding members one congratulations card.
+  return String(user.tierGrantedAt || 'legacy');
+}
+
+function LifetimePremiumCongratsModal({ onDone }) {
+  const ctaRef = useRefA(null);
+
+  useEffectA(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = setTimeout(() => ctaRef.current?.focus(), 40);
+    return () => {
+      clearTimeout(focusTimer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  const confetti = [
+    { top: 34, left: '9%', rotate: '25deg', color: 'var(--accent-light)' },
+    { top: 12, left: '25%', rotate: '-35deg', color: 'var(--ok)', height: 7 },
+    { top: 27, right: '25%', rotate: '0deg', color: 'var(--danger)', round: true },
+    { top: 52, right: '9%', rotate: '-25deg', color: 'var(--accent-light)', height: 9 },
+    { top: 91, left: '17%', rotate: '0deg', color: 'var(--info)', round: true },
+    { top: 85, right: '18%', rotate: '42deg', color: 'var(--ok)', height: 11 },
+  ];
+
+  const modal = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lifetime-premium-congrats-title"
+      aria-describedby="lifetime-premium-congrats-copy"
+      style={{
+        position: localViewportLayerPosition(), inset: 0, zIndex: 10000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100dvh', padding: '24px 16px',
+        background: 'rgba(8, 6, 13, 0.72)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      }}
+    >
+      <style>{`
+        @keyframes lifetimeCongratsRise {
+          from { opacity: 0; transform: translateY(12px) scale(.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes lifetimeCongratsPop {
+          0% { opacity: 0; transform: scale(.55) rotate(-9deg); }
+          70% { opacity: 1; transform: scale(1.08) rotate(3deg); }
+          100% { opacity: 1; transform: scale(1) rotate(0); }
+        }
+        @keyframes lifetimeCongratsFloat {
+          from { transform: translateY(0); }
+          to { transform: translateY(8px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .lifetime-congrats-modal, .lifetime-congrats-emoji, .lifetime-congrats-confetti i { animation: none !important; }
+        }
+      `}</style>
+      <section
+        className="lifetime-congrats-modal"
+        style={{
+          position: 'relative', width: 'min(100%, 380px)', overflow: 'hidden',
+          border: `1px solid ${UI.goldSoft}`, borderRadius: 14,
+          backgroundColor: UI.bgRaised,
+          backgroundImage: 'linear-gradient(rgba(151,134,182,.065) 1px, transparent 1px), linear-gradient(90deg, rgba(151,134,182,.065) 1px, transparent 1px)',
+          backgroundSize: '27px 27px',
+          boxShadow: '0 0 0 1px rgba(var(--accent-rgb),.10), 0 18px 55px rgba(0,0,0,.58), 0 0 46px rgba(var(--accent-rgb),.13)',
+          textAlign: 'center', animation: 'lifetimeCongratsRise .45s cubic-bezier(.2,.8,.2,1) both',
+        }}
+      >
+        <div style={{ height: 3, background: 'linear-gradient(90deg, transparent, var(--accent-light), transparent)' }} />
+        <div className="lifetime-congrats-confetti" aria-hidden="true" style={{ position: 'absolute', inset: '12px 18px auto', height: 122, pointerEvents: 'none' }}>
+          {confetti.map((piece, index) => (
+            <i key={index} style={{
+              position: 'absolute', display: 'block', top: piece.top, left: piece.left, right: piece.right,
+              width: piece.round ? 7 : 5, height: piece.height || (piece.round ? 7 : 12),
+              borderRadius: piece.round ? '50%' : 3, background: piece.color, opacity: .82,
+              transform: `rotate(${piece.rotate})`,
+              animation: index % 2 === 0 ? 'lifetimeCongratsFloat 2.8s ease-in-out infinite alternate' : undefined,
+              animationDelay: `${index * 90}ms`,
+            }} />
+          ))}
+        </div>
+        <div style={{ padding: '38px 26px 27px' }}>
+          <span
+            className="lifetime-congrats-emoji"
+            aria-hidden="true"
+            style={{ display: 'block', margin: '0 auto 14px', fontSize: 'clamp(58px, 17vw, 76px)', lineHeight: 1, filter: 'drop-shadow(0 7px 13px rgba(var(--accent-rgb),.28))', animation: 'lifetimeCongratsPop .7s cubic-bezier(.2,1.4,.45,1) both' }}
+          >🎉</span>
+          <div style={{ marginBottom: 7, color: UI.goldLight, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '.25em' }}>
+            FOUNDING MEMBER
+          </div>
+          <h2 id="lifetime-premium-congrats-title" style={{ margin: 0, color: UI.ink, fontFamily: UI.fontDisplay, fontSize: 'clamp(29px, 8vw, 37px)', fontWeight: 600, lineHeight: .98, letterSpacing: '.08em' }}>
+            LIFETIME PREMIUM
+          </h2>
+          <div style={{ marginTop: 17, color: UI.goldLight, fontFamily: UI.fontUi, fontSize: 16, fontWeight: 700, lineHeight: 1.1, letterSpacing: '.12em' }}>
+            YOU EARNED IT.
+          </div>
+          <p id="lifetime-premium-congrats-copy" style={{ maxWidth: 275, margin: '12px auto 0', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.55 }}>
+            Every premium feature is now yours forever. No subscription. No expiry.
+          </p>
+          <div style={{ height: 1, margin: '23px 0 15px', background: 'linear-gradient(90deg, transparent, var(--accent-soft), transparent)' }} />
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, lineHeight: 1.2, letterSpacing: '.17em' }}>
+            ALL FEATURES&nbsp;&nbsp;·&nbsp;&nbsp;FOREVER
+          </div>
+          <button
+            ref={ctaRef}
+            type="button"
+            onClick={onDone}
+            style={{
+              display: 'block', width: '100%', marginTop: 24, padding: '13px 16px 12px',
+              border: '1px solid rgba(255,198,104,.76)', borderRadius: 7,
+              background: 'linear-gradient(155deg, var(--accent-light) 0%, var(--accent) 58%, var(--accent-deep) 100%)',
+              boxShadow: '0 8px 22px rgba(var(--accent-rgb),.24), inset 0 1px 0 rgba(255,238,193,.45)',
+              color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
+              letterSpacing: '.16em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+            }}
+          >
+            LET'S GO
+          </button>
+          <div style={{ marginTop: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, lineHeight: 1.4 }}>
+            Your founding-member badge is now on your home screen.
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  return ReactDOM.createPortal(modal, document.body);
+}
+
 
 function LoadingScreen() {
   return (
@@ -525,6 +670,15 @@ function mergeProfileIdentity(fresh, cur, base) {
   return merged;
 }
 
+function hasNewlyCompletedSession(previous, next) {
+  const previousById = new Map((previous?.sessions || []).map(session => [session.id, session]));
+  return (next?.sessions || []).some(session => {
+    if (!session || session.ended == null) return false;
+    const old = previousById.get(session.id);
+    return !old || old.ended == null;
+  });
+}
+
 // A first-install boot renders its essential payload while secondary tables
 // hydrate. Any edit made during that short window must survive the full server
 // response exactly like an edit made against the normal persisted cache.
@@ -598,6 +752,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
+  const [lifetimeCongratsPending, setLifetimeCongratsPending] = useStateA(false);
   const onboardingChecked = useRefA(false);
   // Live snapshot of store, read (not subscribed to) by the What's New effect
   // below so it can peek at the current onboarding-relevant fields without
@@ -660,11 +815,46 @@ function App() {
   useEffectA(() => {
     syncGeneration.current += 1;
     userIdRef.current = userId;
+    setLifetimeCongratsPending(false);
     previousMedsEnabled.current = null;
     adminSupportUnreadRevision.current += 1;
     adminSupportUnreadRequest.current += 1;
     adminSupportUnreadRef.current = null;
   }, [userId]);
+
+  // A Lifetime seat is granted server-side by the completed-session trigger.
+  // Keep the congratulations pending across route changes, but only display
+  // it later on a quiet Home surface. The grant timestamp makes this once per
+  // actual unlock; the legacy fallback covers older profile caches safely.
+  const queueLifetimeCongrats = useCallbackA((uid, user) => {
+    const grantKey = lifetimeGrantKey(user);
+    if (!uid || !grantKey || user?.tier !== 'lifetime') return;
+    let seen = null;
+    try { seen = localStorage.getItem(lifetimeCongratsSeenKey(uid)); } catch (_) {}
+    // A legacy cache may briefly report the fallback key before the fresh
+    // profile query supplies its timestamp. Treat that as the same unlock in
+    // either direction so the first rollout cannot show the card twice.
+    if (seen && (seen === grantKey || seen === 'legacy' || grantKey === 'legacy')) return;
+    try { localStorage.setItem(lifetimeCongratsPendingKey(uid), grantKey); } catch (_) {}
+    setLifetimeCongratsPending(true);
+  }, []);
+
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || !store) return;
+    queueLifetimeCongrats(userId, store?.user);
+  }, [phase, userId, store?.user?.tier, store?.user?.tierGrantedAt, queueLifetimeCongrats]);
+
+  const dismissLifetimeCongrats = useCallbackA(() => {
+    const uid = userIdRef.current || userId;
+    const grantKey = lifetimeGrantKey(store?.user);
+    if (uid && grantKey) {
+      try {
+        localStorage.setItem(lifetimeCongratsSeenKey(uid), grantKey);
+        localStorage.removeItem(lifetimeCongratsPendingKey(uid));
+      } catch (_) {}
+    }
+    setLifetimeCongratsPending(false);
+  }, [userId, store?.user?.tier, store?.user?.tierGrantedAt]);
   useEffectA(() => {
     const selected = phase === 'ready' && userId ? store?.settings?.vipBackground : null;
     const syncBackgroundCache = () => tellServiceWorkerBackground(selected);
@@ -1461,6 +1651,8 @@ function App() {
     const generation = syncGeneration.current;
     const baseAtStart = syncBase.current;
     const targetAtStart = target;
+    const shouldRefreshLifetimeTier = targetAtStart.user?.tier !== 'lifetime'
+      && hasNewlyCompletedSession(baseAtStart, targetAtStart);
     const isCurrent = () => generation === syncGeneration.current && uid === userIdRef.current;
     let ok = false;
     const request = LB.syncStore(baseAtStart, targetAtStart, uid);
@@ -1474,6 +1666,22 @@ function App() {
         syncBase.current = targetAtStart;
         scheduleLocalSave(0);
         ok = true;
+        if (shouldRefreshLifetimeTier) {
+          // The database trigger runs in the same transaction as the session
+          // write. Read back only the two server-authored profile fields; do
+          // not reload the whole store or compete with the normal sync queue.
+          LB.refreshProfileTier(uid).then(profile => {
+            if (!isCurrent() || profile?.tier !== 'lifetime') return;
+            setStore(current => {
+              if (!current || current.user?.tier === 'lifetime' && current.user?.tierGrantedAt === profile.tierGrantedAt) return current;
+              return { ...current, user: {
+                ...current.user,
+                tier: profile.tier,
+                tierGrantedAt: profile.tierGrantedAt,
+              } };
+            });
+          }).catch(err => console.warn('Lifetime tier refresh failed; next boot will retry', err));
+        }
       })
       .catch(err => console.error('Supabase sync failed, will retry', err))
       .finally(() => {
@@ -3076,6 +3284,19 @@ function App() {
     && !onboardingState
     && openSheetCount === 0
     && !textEntryFocused;
+  const safeForLifetimeCongrats = route?.name === 'home'
+    && store?.user?.tier === 'lifetime'
+    && !store?.inProgress
+    && !onboardingState
+    && !whatsNew
+    && !autoCloseNotify
+    && !unitPromptOpen
+    && !xHandlePromptOpen
+    && !pendingShare
+    && !forceShowUpdateBanner
+    && !updateAvailable
+    && openSheetCount === 0
+    && !textEntryFocused;
 
   const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
@@ -3280,6 +3501,9 @@ function App() {
             setPendingShare(null);
           }}
         />
+      )}
+      {lifetimeCongratsPending && safeForLifetimeCongrats && (
+        <LifetimePremiumCongratsModal onDone={dismissLifetimeCongrats} />
       )}
     </>
   );

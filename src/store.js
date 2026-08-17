@@ -1869,6 +1869,7 @@ function buildEssentialLoadResult({
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      tierGrantedAt: profileRes.data?.tier_granted_at ?? null,
       xHandle: profileRes.data?.x_handle ?? null,
       xHandlePublic: profileRes.data?.x_handle_public ?? true,
       xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
@@ -2024,12 +2025,29 @@ async function loadUserSupportChats() {
   return mapUserSupportTickets(data);
 }
 
+// The founding-member trigger runs when a completed session lands. A full
+// background reload would be wasteful here, so the app uses this tiny,
+// authenticated read once after a newly completed session syncs. The tier and
+// grant timestamp are server-authored; neither is accepted by syncStore.
+async function refreshProfileTier(userId) {
+  if (!userId) return { tier: 'free', tierGrantedAt: null };
+  const { data, error } = await scheduleDbTask(
+    () => _supabase.from('zane_profiles').select('tier, tier_granted_at').eq('id', userId).maybeSingle(),
+    { priority: 'foreground', kind: 'read' },
+  );
+  if (error) throw error;
+  return {
+    tier: data?.tier || 'free',
+    tierGrantedAt: data?.tier_granted_at ?? null,
+  };
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, tier, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, tier, tier_granted_at, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
@@ -2357,6 +2375,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      tierGrantedAt: profileRes.data?.tier_granted_at ?? null,
       xHandle: profileRes.data?.x_handle ?? null,
       xHandlePublic: profileRes.data?.x_handle_public ?? true,
       xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
@@ -12919,7 +12938,7 @@ window.LB = {
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
-  loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
+  loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
