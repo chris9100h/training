@@ -2622,7 +2622,7 @@ function TourCrashCard({ onClose }) {
 // on a tap anywhere, so reaching it always ends the tour, even if individual
 // buttons misbehave. Kept deliberately simple (no heavy mockup) so its render
 // can't hang.
-function TourCompleteScreen({ title, onDone }) {
+function TourCompleteScreen({ title, body, onDone }) {
   const doneRef = useRefOB(onDone);
   doneRef.current = onDone;
   // Fire onDone at most once, even under wild tapping (tap-anywhere plus the
@@ -2653,8 +2653,15 @@ function TourCompleteScreen({ title, onDone }) {
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 42, color: 'var(--accent-ink)', fontWeight: 700, lineHeight: 1.04, letterSpacing: '0.02em' }}>
         {title || 'Guide Complete'}
       </div>
-      <div style={{ fontFamily: UI.fontUi, fontSize: 14.5, color: 'rgba(10,8,5,0.78)', fontWeight: 600, letterSpacing: '0.03em', maxWidth: 300, lineHeight: 1.5 }}>
-        You're all set, go crush your next session.
+      {/* accent-ink like the title above, not a fixed dark: this sits on an
+          accent gradient, and light/paper darken that gradient while flipping
+          --accent-ink light, so a hardcoded near-black disappeared into it. */}
+      <div style={{ fontFamily: UI.fontUi, fontSize: 14.5, color: 'var(--accent-ink)', opacity: 0.82, fontWeight: 600, letterSpacing: '0.03em', maxWidth: 300, lineHeight: 1.5, whiteSpace: 'pre-line' }}>
+        {/* The last step replaces the card entirely, so its body (where a tour
+            says what to do next and where to find How to again) was written
+            but never rendered anywhere. Shown here, with the generic line as
+            the fallback for tours whose final step carries no body. */}
+        {body || "You're all set, go crush your next session."}
       </div>
     </div>
   );
@@ -2715,7 +2722,7 @@ function OnboardingTourInner({ tourKey, onDone }) {
   if (!step) return null;
 
   // Final step: the shared auto-dismissing celebration (3s timer + tap-anywhere).
-  if (isLast) return <TourCompleteScreen title={step.title} onDone={onDone} />;
+  if (isLast) return <TourCompleteScreen title={step.title} body={step.body} onDone={onDone} />;
 
   // Every other step is a self-contained card floating on a dimmed backdrop:
   // progress bar, title, body, the optional illustration, and a button row. No

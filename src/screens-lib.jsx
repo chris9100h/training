@@ -6933,7 +6933,11 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const yPos = (v) => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
 
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
+  // Set 4 and 5 used to sit at 0.22 and 0.14, which on paper and on dark left
+  // them barely distinguishable from the grid. The ramp still falls off
+  // steeply enough that set 1 reads as the primary series, it just no longer
+  // fades the later sets out of visibility.
+  const setAlphas = [1, 0.62, 0.46, 0.34, 0.26];
 
   const labelIdxs = (() => {
     if (n <= 5) return allSessions.map((_, i) => i);
@@ -7012,7 +7016,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 .map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; })
                 .filter(Boolean);
               if (!pts.length) return null;
-              const a = setAlphas[si] ?? 0.12;
+              const a = setAlphas[si] ?? 0.24;
               return (
                 <g key={si}>
                   {pts.length > 1 && (
@@ -7041,7 +7045,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
               {Array.from({ length: maxSets }, (_, si) => (
                 <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
+                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.24})` }} />
                   <span className="micro" style={{ color: UI.inkFaint }}>Set {si + 1}</span>
                 </div>
               ))}

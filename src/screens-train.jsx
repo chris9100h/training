@@ -9372,13 +9372,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
           <div style={{ position: 'fixed', inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
-            <div className="micro-gold" style={{ letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
+            {/* Fixed light values, not theme tokens, for the same reason the
+                countdown digits use --accent-raw: this scrim is a hardcoded
+                near-black in every theme. On light and paper --ink-soft and
+                --hair-strong resolve to near-black too, which put these at
+                about 1.03:1 against the backdrop, so the exercise name, the
+                cheer and the Stop control were effectively invisible in two of
+                the four themes and Stop could only be hit blind. */}
+            <div className="micro" style={{ color: 'var(--accent-raw)', letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: 'rgba(236,228,208,0.66)', letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
             <TimeCountdown startedAt={countdown.startedAt} total={countdown.total} />
             <button onClick={() => finishCountdown(false)} style={{
               marginTop: 44, padding: '12px 44px', borderRadius: 6,
-              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, cursor: 'pointer',
+              background: 'transparent', border: '1px solid rgba(236,228,208,0.16)',
+              color: 'rgba(236,228,208,0.66)', cursor: 'pointer',
               fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 600,
               WebkitTapHighlightColor: 'transparent',
             }}>Stop</button>

@@ -29,6 +29,11 @@ const WT_CELEBRATED_KEY = 'logbook-water-celebrated'; // per-device day guard fo
 // privacy and consistency with the user-defined drinks). Empty until added.
 const WT_COFFEE_SIZES_DEFAULT = [];
 const WT_MILK_OPTS = [20, 40, 60, 80, 100, 0];
+// Imperial equivalents in whole fl oz. Converting WT_MILK_OPTS directly would
+// round 20 and 40 ml to the same 1 fl oz, so the picker gets its own ladder;
+// the chosen value is converted back to ml before it is stored.
+const WT_MILK_OPTS_OZ = [1, 2, 3, 4, 5, 0];
+function wtMilkOpts() { return UI.waterInFloz() ? WT_MILK_OPTS_OZ : WT_MILK_OPTS; }
 const WT_CUSTOM_PRESETS_ML = [100, 150, 200, 300, 330, 400, 750, 1000];
 // Drink-specific icons a user can pick for a custom drink (FA6 free solid).
 // fa-blender is the shake/smoothie icon; fa-jar suits a protein shaker.
@@ -613,7 +618,7 @@ function WaterScreen({ store, setStore, go, userId }) {
               <span style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <i className="fa-solid fa-bottle-water" style={{ fontSize: 12, color: WT_BLUE }} /> Current bottle
               </span>
-              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{pendingBottle} / {bottleMl} ml</span>
+              <span className="num" style={{ fontSize: 12, color: UI.inkSoft }}>{wtAmt(pendingBottle)} / {wtAmt(bottleMl)} {wtUnit()}</span>
             </div>
             <div style={{ height: 6, background: UI.bgInset, borderRadius: 999, overflow: 'hidden' }}>
               <div style={{ height: '100%', width: `${Math.min(100, Math.round(pendingBottle / bottleMl * 100))}%`, background: WT_BLUE, borderRadius: 999, transition: 'width 0.5s' }} />
@@ -640,7 +645,7 @@ function WaterScreen({ store, setStore, go, userId }) {
                   <span style={wtDrinkIconStyle(d.color || WT_DEFAULT_DRINK_COLOR)}><i className={`fa-solid ${d.icon || WT_DEFAULT_DRINK_ICON}`} style={{ fontSize: 15 }} /></span>
                   <div style={{ textAlign: 'left', minWidth: 0 }}>
                     <div style={wtDrinkName}>{d.name}</div>
-                    <div style={wtDrinkMeta}>{d.ml} ml</div>
+                    <div style={wtDrinkMeta}>{wtAmt(d.ml)} {wtUnit()}</div>
                   </div>
                 </button>
               ))}
@@ -696,7 +701,7 @@ function WaterScreen({ store, setStore, go, userId }) {
                 <div key={e.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6 }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
                     <span className="num" style={{ fontSize: 12, color: isLightCanvasActive() ? '#0369a1' : WT_BLUE }}>{e.time}</span>
-                    <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{e.amountMl} ml</span>
+                    <span className="num" style={{ fontSize: 14, fontWeight: 600, color: UI.ink }}>+{wtAmt(e.amountMl)} {wtUnit()}</span>
                     {e.name && <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{e.name}</span>}
                   </div>
                   <button onClick={() => deleteEntry(e)} aria-label="Delete" style={{ background: 'transparent', border: 'none', color: UI.inkFaint, cursor: 'pointer', padding: 6, WebkitTapHighlightColor: 'transparent' }}>
@@ -777,17 +782,17 @@ function WaterScreen({ store, setStore, go, userId }) {
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
               {coffeeSizes.map((s, i) => (
                 <button key={i} onClick={() => { setCoffeeSel(s); setCoffeeStep('milk'); }} style={wtPillOpt}>
-                  {s.label}<span style={{ fontSize: 10, color: UI.inkFaint, display: 'block', marginTop: 2 }}>{s.ml} ml</span>
+                  {s.label}<span style={{ fontSize: 10, color: UI.inkFaint, display: 'block', marginTop: 2 }}>{wtAmt(s.ml)} {wtUnit()}</span>
                 </button>
               ))}
             </div>
           )
         ) : (
           <div>
-            <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 14, fontFamily: UI.fontUi }}>Base {coffeeSel ? coffeeSel.ml : 0} ml. How much milk?</div>
+            <div style={{ fontSize: 12, color: UI.inkSoft, marginBottom: 14, fontFamily: UI.fontUi }}>Base {wtAmt(coffeeSel ? coffeeSel.ml : 0)} {wtUnit()}. How much milk?</div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginBottom: 12 }}>
-              {WT_MILK_OPTS.map(m => (
-                <button key={m} onClick={() => confirmCoffee(m)} style={wtPillOpt}>{m === 0 ? 'None' : `${m} ml`}</button>
+              {wtMilkOpts().map(m => (
+                <button key={m} onClick={() => confirmCoffee(m === 0 ? 0 : UI.waterEntryToMl(m))} style={wtPillOpt}>{m === 0 ? 'None' : `${m} ${wtUnit()}`}</button>
               ))}
             </div>
             <Btn kind="ghost" onClick={() => setCoffeeStep('size')} style={{ width: '100%' }}>Back</Btn>
@@ -873,7 +878,7 @@ function WaterGoalWindowBody({ settings, patchSettings, onClose }) {
 }
 // Sub-sheet body: the emptied-bottle counter and its size.
 function WaterBottleTrackerBody({ settings, patchSettings, onClose }) {
-  const [bottleMlDraft, setBottleMlDraft] = useStateW(String(settings.waterBottleMl || 1500));
+  const [bottleMlDraft, setBottleMlDraft] = useStateW(String(UI.waterToEntry(settings.waterBottleMl || 1500)));
   const bottleEnabled = settings.waterBottleEnabled !== false;
 
   const saveBottleMl = () => {
@@ -881,8 +886,9 @@ function WaterBottleTrackerBody({ settings, patchSettings, onClose }) {
     // write waterBottleMl:0 into synced settings the instant the field is
     // cleared to retype it (parseInt('') is NaN, || 0 -> 0).
     const parsed = parseInt(bottleMlDraft, 10);
-    const ml = parsed > 0 ? parsed : (settings.waterBottleMl || 1500);
-    setBottleMlDraft(String(ml));
+    // The field is typed in the viewer's unit; storage stays canonical ml.
+    const ml = parsed > 0 ? UI.waterEntryToMl(parsed) : (settings.waterBottleMl || 1500);
+    setBottleMlDraft(String(UI.waterToEntry(ml)));
     patchSettings({ waterBottleMl: ml });
   };
 
@@ -893,7 +899,7 @@ function WaterBottleTrackerBody({ settings, patchSettings, onClose }) {
         <Toggle on={bottleEnabled} onToggle={() => patchSettings({ waterBottleEnabled: !bottleEnabled })} label="Count emptied bottles" />
       </div>
       {bottleEnabled && (
-        <Field label="Bottle size (ml)" style={{ marginBottom: 20 }}>
+        <Field label={`Bottle size (${wtUnit()})`} style={{ marginBottom: 20 }}>
           <input value={bottleMlDraft} onChange={e => setBottleMlDraft(e.target.value.replace(/[^0-9]/g, ''))} onBlur={saveBottleMl} type="text" inputMode="numeric" style={wtInput} />
         </Field>
       )}
@@ -1157,7 +1163,7 @@ function WaterStatsBody({ store, goalMl }) {
         {statCard('Goal hit', `${s.rate}`, '%')}
         {statCard('Goal days', `${s.goalDays}`, 'days')}
         {statCard('Days logged', `${s.withData}`, 'days')}
-        {statCard('Avg / day', `${s.avg}`, 'ml')}
+        {statCard('Avg / day', wtAmt(s.avg), wtUnit())}
         {statCard('Top drink', s.fav || 'None', s.fav ? `${s.favN}x` : null)}
       </div>
       {(Object.keys(s.drinks).length > 0 || s.milk > 0) && (
@@ -1166,7 +1172,7 @@ function WaterStatsBody({ store, goalMl }) {
           {Object.entries(s.drinks).sort((a, b) => b[1].count - a[1].count).map(([name, g]) => (
             <WaterBreakdownRow key={name} icon={g.icon} name={name} value={`${g.count}x`} color={g.color} />
           ))}
-          {s.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${s.milk} ml`} />}
+          {s.milk > 0 && <WaterBreakdownRow icon="fa-cow" name="Milk" value={`${wtAmt(s.milk)} ${wtUnit()}`} />}
         </Card>
       )}
     </div>
