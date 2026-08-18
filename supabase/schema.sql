@@ -3868,15 +3868,8 @@ AS $function$
 DECLARE v_uid uuid := auth.uid();
 BEGIN
   IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
-  DELETE FROM storage.objects o
-  WHERE o.bucket_id = 'social-chat-attachments'
-    AND (o.name LIKE v_uid::text || '/%' OR EXISTS (
-      SELECT 1 FROM public.zane_social_message_attachments a
-      LEFT JOIN public.zane_social_messages m ON m.id = a.message_id
-      LEFT JOIN public.zane_social_groups g ON g.id = m.group_id
-      WHERE a.storage_path = o.name
-        AND (a.uploaded_by = v_uid OR m.sender_id = v_uid OR m.recipient_id = v_uid OR g.owner_id = v_uid)
-    ));
+  DELETE FROM public.zane_social_notification_deliveries WHERE recipient_id = v_uid;
+  DELETE FROM public.zane_social_notification_attempts WHERE caller_id = v_uid;
   DELETE FROM public.zane_social_reports
   WHERE reporter_id = v_uid OR (target_user_id = v_uid AND message_id IS NULL AND group_id IS NULL);
   UPDATE public.zane_social_reports SET target_user_id = NULL WHERE target_user_id = v_uid;

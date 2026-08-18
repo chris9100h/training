@@ -870,7 +870,57 @@ async function resetPassword(email, redirectTo) {
   if (error) throw error;
 }
 
+// Supabase Storage metadata is a Postgres table, but objects must be removed
+// through the Storage API. A direct DELETE on storage.objects is rejected by
+// the current Storage service (and would leave the underlying object behind
+// on older versions). Capture the user's own paths before the account tables
+// are wiped, then remove them in API-sized batches. If any lookup or removal
+// fails, abort before deleting database rows so a retry can still find the
+// paths and finish the purge.
+async function deleteOwnedStorageObjects(userId) {
+  if (!userId) throw new Error('Authentication required');
+
+  const [socialRes, coachingRes, notesRes] = await Promise.all([
+    _supabase.from('zane_social_message_attachments')
+      .select('storage_path').eq('uploaded_by', userId),
+    _supabase.from('zane_coaching_drive_photos')
+      .select('staging_path').eq('client_id', userId),
+    _supabase.from('zane_coaching_notes')
+      .select('attachments').eq('author_id', userId).not('attachments', 'is', null),
+  ]);
+  for (const result of [socialRes, coachingRes, notesRes]) {
+    if (result?.error) throw new Error(result.error.message || 'Could not prepare storage cleanup');
+  }
+
+  const uniquePaths = values => [...new Set((values || []).filter(v => typeof v === 'string' && v.length > 0))];
+  const socialPaths = uniquePaths((socialRes.data || []).map(row => row.storage_path));
+  const coachingPaths = uniquePaths((coachingRes.data || []).map(row => row.staging_path));
+  const chatPrefix = `${SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
+  const chatPaths = uniquePaths((notesRes.data || []).flatMap(row =>
+    (Array.isArray(row.attachments) ? row.attachments : [])
+      .map(file => {
+        if (typeof file?.url !== 'string' || !file.url.startsWith(chatPrefix)) return null;
+        const raw = file.url.slice(chatPrefix.length);
+        try { return decodeURIComponent(raw); } catch { return raw; }
+      })
+      .filter(path => path && path.split('/')[0] === String(userId))
+  ));
+
+  const removeInBatches = async (bucket, paths) => {
+    for (let offset = 0; offset < paths.length; offset += 1000) {
+      await unwrap(_supabase.storage.from(bucket).remove(paths.slice(offset, offset + 1000)));
+    }
+  };
+  await removeInBatches('social-chat-attachments', socialPaths);
+  await removeInBatches('coaching-drive-staging', coachingPaths);
+  await removeInBatches('chat-attachments', chatPaths);
+}
+
 async function deleteAllData(userId, { keepPush = false } = {}) {
+  // Backup restore deliberately keeps social/attachment data. The explicit
+  // account purge, however, must clear the user's Storage objects before the
+  // corresponding metadata rows disappear.
+  if (!keepPush) await deleteOwnedStorageObjects(userId);
   const ops = [
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
