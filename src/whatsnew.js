@@ -22,6 +22,18 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.839',
+    date: '2026-08-18',
+    title: 'Share your week, celebrate your progress ✨',
+    items: [
+      '📊 Weekly Recap turns your week into a shareable ZANE poster with nutrition, training, cardio, body metrics, daily progress and highlights.',
+      '📁 Coaching check-ins can now be archived in Google Sheets. Coaches and self-coaching users get an overview of their data, with optional photo attachments.',
+      '🎉 Lifetime Premium now comes with a one-time celebration when it is unlocked, including for existing members.',
+      '🔁 Flex plan versions now save correctly when you add days or choose a different starting day with “Start from today”.',
+      '✨ A broad reliability pass improves offline recovery, timed sets, AI summaries, reminders, macros, water logs, plan imports, social notifications, themes and mobile exports.'
+    ],
+  },
+  {
     id: 'v2.828',
     date: '2026-08-16',
     title: 'More control, clearer numbers, fewer surprises ✨',
