@@ -615,7 +615,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (isWeekday) return displayDays.find(d => d.weekday === todayWeekday)?.id ?? null;
         let pos;
         if (isFlex) {
-          pos = ((store.cycleIndex || 0) % sch.days.length + sch.days.length) % sch.days.length;
+          pos = LB.flexVersionPosition(store, selectedVersion, displayDays.length);
         } else if (versions) {
           pos = LB.getCyclePosForDate(sch, today);
         } else if (store.cycleStartDate) {
@@ -2179,16 +2179,39 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       const originalDays = original.days;
       // Find the original plan's start date for the snapshot's validFrom
       const isWd = LB.isWeekdayPlan(original);
-      const originalStart = isWd
-        ? (store.weekPlanStartDate || null)
-        : (store.cycleStartDate || null);
+      const originalStart = isFlex
+        ? (store.sessions || [])
+          .filter(s => s.scheduleId === original.id && s.date)
+          .map(s => String(s.date).slice(0, 10))
+          .filter(Boolean)
+          .sort()[0] || null
+        : isWd
+          ? (store.weekPlanStartDate || null)
+          : (store.cycleStartDate || null);
       const existingVersions = original.versions || [];
       const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
-      if (startDayIdx && startDayIdx > 0) newVersionEntry.cycleOffset = startDayIdx;
+      if (isFlex) {
+        // Flex rotation is driven by cycleIndex, not by calendar date. Store
+        // the selected start day relative to the current position so a
+        // version scheduled for today or a future date can both resume at the
+        // requested day without resetting the user's cycle count.
+        const len = Math.max(1, draft.days.length);
+        const requested = Number.isFinite(Number(startDayIdx)) ? Math.floor(Number(startDayIdx)) : 0;
+        newVersionEntry.flexCycleAnchor = Math.max(0, Math.floor(Number(store.cycleIndex) || 0));
+        newVersionEntry.flexStartIndex = ((requested % len) + len) % len;
+      } else if (startDayIdx && startDayIdx > 0) {
+        newVersionEntry.cycleOffset = startDayIdx;
+      }
       let versions;
       if (existingVersions.length === 0) {
         // First versioned change, anchor the original plan
-        const anchorDate = originalStart || LB.todayISO();
+        // The old snapshot must be strictly before the new effective date.
+        // Flex plans intentionally have no cycleStartDate, so using today here
+        // produced two same-date entries; dedupe then removed the old version
+        // and the plan stayed at V1.
+        const anchorDate = originalStart && originalStart < effectiveFrom
+          ? originalStart
+          : LB.shiftDate(effectiveFrom, -1);
         versions = [newVersionEntry, { validFrom: anchorDate, days: originalDays }];
       } else {
         // Already versioned, prepend new version, keep rest

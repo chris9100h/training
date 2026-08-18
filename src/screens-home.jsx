@@ -1291,9 +1291,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
   const hasPlans = (store.schedules?.length || 0) > 0;
   const day = today?.day;
   const dayIdx = today?.idx ?? 0;
-  const dayCount = sch?.days?.length || 0;
   const weekdayMode = sch ? LB.isWeekdayPlan(sch) : false;
   const isFlex = sch ? LB.isFlexPlan(sch) : false;
+  // A flex plan can have a version with a different number/order of days.
+  // Use the version active today for the rotation strip and skip arithmetic;
+  // sch.days is only the newest version and may be scheduled for later.
+  const flexDaysToday = isFlex && sch?.versions?.length
+    ? LB.getPlanDaysForDate(sch, LB.todayISO())
+    : null;
+  const dayCount = (flexDaysToday || sch?.days || []).length || 0;
   // Flex plans have no calendar week, the strip is the rotation itself, so the
   // Mon–Sun cycle-week overlay never applies.
   const cycleWeekView = !weekdayMode && !isFlex && (store.settings?.cycleWeekView ?? localStorage.getItem('logbook-cycle-week-view') === 'true');
@@ -1517,12 +1523,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         return { ...d, slotIdx: i, planPos: i, date, daysFromStart, isToday: weekOffset === 0 && i === todayStripIdx };
       });
     }
-    return sch.days.map((d, i) => {
+    const rotationDays = isFlex && sch.versions?.length
+      ? LB.getPlanDaysForDate(sch, LB.todayISO())
+      : sch.days;
+    return rotationDays.map((d, i) => {
       const daysFromToday = weekOffset * dayCount + i - dayIdx;
       const date = new Date(); date.setDate(date.getDate() + daysFromToday);
       return { ...d, slotIdx: i, date, isToday: weekOffset === 0 && i === dayIdx };
     });
-  }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, todayWd, weekOffset, store.cycleStartDate]);
+  }, [sch, dayIdx, todayStripIdx, dayCount, weekdayMode, cycleWeekView, isFlex, todayWd, weekOffset, store.cycleStartDate]);
 
   // Latest calendar day currently shown in the strip. Lets the autoregulate
   // badge tell whether it belongs on a browsed-back period: if the whole viewed

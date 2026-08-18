@@ -2834,6 +2834,40 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.nextDay(flexState(2)).day.id, 'd0'); // wraps
   });
 
+  test('versioned flex plans use the active version and its selected start day', () => {
+    const today = LB.todayISO();
+    const yesterday = LB.shiftDate(today, -1);
+    const versioned = {
+      ...flexSch,
+      days: [
+        { id: 'n0', name: 'PUSH', items: [{ exId: 'e1' }] },
+        { id: 'n1', name: 'PULL', items: [{ exId: 'e2' }] },
+        { id: 'n2', name: 'LEGS', items: [{ exId: 'e3' }] },
+        { id: 'n3', name: 'FULL', items: [{ exId: 'e4' }] },
+      ],
+      versions: [
+        { validFrom: today, days: [
+          { id: 'n0', name: 'PUSH', items: [{ exId: 'e1' }] },
+          { id: 'n1', name: 'PULL', items: [{ exId: 'e2' }] },
+          { id: 'n2', name: 'LEGS', items: [{ exId: 'e3' }] },
+          { id: 'n3', name: 'FULL', items: [{ exId: 'e4' }] },
+        ], flexCycleAnchor: 0, flexStartIndex: 2 },
+        { validFrom: yesterday, days: flexSch.days },
+      ],
+    };
+    const state = { activeScheduleId: 'fx', cycleIndex: 0, cycleStartDate: null, schedules: [versioned] };
+    assert.strictEqual(LB.todaysDay(state).day.id, 'n2');
+    assert.strictEqual(LB.todaysDay({ ...state, cycleIndex: 1 }).day.id, 'n3');
+    assert.strictEqual(LB.todaysDay({ ...state, cycleIndex: 2 }).day.id, 'n0');
+    assert.strictEqual(LB.nextDay(state).day.id, 'n3');
+  });
+
+  test('flex version position falls back to the legacy cycleOffset field', () => {
+    const state = { cycleIndex: 0 };
+    assert.strictEqual(LB.flexVersionPosition(state, { cycleOffset: 2 }, 3), 2);
+    assert.strictEqual(LB.flexVersionPosition({ cycleIndex: 1 }, { cycleOffset: 2 }, 3), 0);
+  });
+
   // ── weekPerformanceSignal ────────────────────────────────────────────────
   const wpSet = (kg, reps, done = true) => ({ kg, reps, done, warmup: false, skipped: false });
   const wpSession = (date, sets) => ({ id: date, ended: date + 'T18:00:00', date, dayId: 'd0',

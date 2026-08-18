@@ -197,8 +197,12 @@ function cyclePosFn(clientStore, date) {
   // is the action-advanced cycleIndex, independent of `date` (date extrapolation
   // is meaningless for flex and drifts when the client rests).
   if (LB.isFlexPlan(activeSch)) {
-    const cycleLen = activeSch.days?.length || 1;
-    return (((clientStore.cycleIndex || 0) % cycleLen) + cycleLen) % cycleLen;
+    const todayStr = LB.todayISO();
+    const activeVersion = activeSch.versions?.length
+      ? (activeSch.versions.find(v => v.validFrom <= todayStr) || activeSch.versions[activeSch.versions.length - 1])
+      : null;
+    const cycleLen = (activeVersion?.days || activeSch.days || []).length || 1;
+    return LB.flexVersionPosition(clientStore, activeVersion, cycleLen);
   }
   const d = new Date(date); d.setHours(12, 0, 0, 0);
   const dateStr = d.toISOString().slice(0, 10);
@@ -224,6 +228,7 @@ function getTodayDay(clientStore) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return null;
   const todayStr = LB.todayISO();
+  if (LB.isFlexPlan(activeSch)) return LB.todaysDay(clientStore)?.day || null;
   if (LB.isWeekdayPlan(activeSch)) {
     const todayWd = LB.isoWd(new Date());
     const vDays = LB.getPlanDaysForDate(activeSch, todayStr);
@@ -552,7 +557,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
     } else if (LB.isFlexPlan(activeSch)) {
       // Flex advances per action, so a date window drifts when the client rests.
       // Show the current rotation's worth: the most recent cycleLen sessions.
-      const cycleLen = activeSch.days?.length || 1;
+      const activeVersion = activeSch.versions?.length
+        ? (activeSch.versions.find(v => v.validFrom <= LB.todayISO()) || activeSch.versions[activeSch.versions.length - 1])
+        : null;
+      const cycleLen = (activeVersion?.days || activeSch.days || []).length || 1;
       return ended.slice(0, cycleLen);
     } else {
       // Start of the *current* cycle run = today minus today's position in the

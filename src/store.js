@@ -5775,6 +5775,23 @@ function withVersionedDays(schedule, versions) {
   return { ...schedule, versions, days: versions[0]?.days || schedule.days };
 }
 
+// Flex plans advance by completed sessions rather than by calendar date. A
+// version can still change the rotation, though, and may ask to start that
+// version on a particular day. Keep that choice relative to the cycleIndex at
+// which the version was created so the setting survives reloads and also works
+// when the version becomes active on a future date. Older versions only have
+// cycleOffset; that is treated as the historical equivalent of flexStartIndex.
+function flexVersionPosition(state, version, daysLen, cycleIndexOverride) {
+  const len = Math.max(1, Number(daysLen) || 0);
+  const currentRaw = cycleIndexOverride ?? state?.cycleIndex ?? 0;
+  const current = Number.isFinite(Number(currentRaw)) ? Math.floor(Number(currentRaw)) : 0;
+  const anchorRaw = version?.flexCycleAnchor ?? 0;
+  const anchor = Number.isFinite(Number(anchorRaw)) ? Math.floor(Number(anchorRaw)) : 0;
+  const startRaw = version?.flexStartIndex ?? version?.cycleOffset ?? 0;
+  const start = Number.isFinite(Number(startRaw)) ? Math.floor(Number(startRaw)) : 0;
+  return (((start + current - anchor) % len) + len) % len;
+}
+
 // Cycle position for a date-based (non-versioned, non-flex) plan, derived
 // from cycleStartDate, calendar days since start, wrapped to the plan's
 // length. Used to be duplicated within this same file (todaysDay/nextDay)
@@ -5872,9 +5889,14 @@ function todaysDay(state) {
   }
   // Flexible plan: position is the action-advanced cycleIndex, not date-derived.
   if (isFlexPlan(sch)) {
-    const len = sch.days.length;
-    const idx = (((state.cycleIndex || 0) % len) + len) % len;
-    return { schedule: sch, day: sch.days[idx], idx };
+    const activeVersion = sch.versions?.length
+      ? (sch.versions.find(v => v.validFrom <= todayStr) || sch.versions[sch.versions.length - 1])
+      : null;
+    const days = activeVersion?.days || sch.days;
+    const len = days.length;
+    if (!len) return null;
+    const idx = flexVersionPosition(state, activeVersion, len);
+    return { schedule: sch, day: days[idx], idx };
   }
   // When versions exist, derive today's position from the version active today
   const cyclePosToday = getCyclePosForDate(sch, todayStr);
@@ -5894,9 +5916,15 @@ function nextDay(state) {
   if (!sch || !sch.days.length) return null;
   // Flexible plan: the next day in sequence (cycleIndex + 1), no date math.
   if (isFlexPlan(sch)) {
-    const len = sch.days.length;
-    const idx = ((((state.cycleIndex || 0) + 1) % len) + len) % len;
-    return { schedule: sch, day: sch.days[idx], idx };
+    const todayStr = todayISO();
+    const activeVersion = sch.versions?.length
+      ? (sch.versions.find(v => v.validFrom <= todayStr) || sch.versions[sch.versions.length - 1])
+      : null;
+    const days = activeVersion?.days || sch.days;
+    const len = days.length;
+    if (!len) return null;
+    const idx = flexVersionPosition(state, activeVersion, len, (state.cycleIndex || 0) + 1);
+    return { schedule: sch, day: days[idx], idx };
   }
   if (sch.versions?.length) {
     const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -13261,7 +13289,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   resignSocialAttachment,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
