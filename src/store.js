@@ -8561,14 +8561,63 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   return id;
 }
 
-async function loadCheckins(coachingId) {
-  const { data, error } = await _supabase
-    .from('zane_checkins')
-    .select('*')
-    .eq('coaching_id', coachingId)
-    .order('week_start', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(r => {
+async function loadCheckins(coachingId, { includePhotos = true } = {}) {
+  const [checkinsRes, photosRes] = await Promise.all([
+    _supabase
+      .from('zane_checkins')
+      .select('*')
+      .eq('coaching_id', coachingId)
+      .order('week_start', { ascending: false }),
+    // Photos are kept as metadata after the Drive worker removes the private
+    // staging object.  Loading them here makes the coach dashboard aware of
+    // attachments without putting image bytes into check-in JSON.
+    (includePhotos ? _supabase
+      .from('zane_coaching_drive_photos')
+      .select('id, checkin_id, file_name, mime_type, byte_size, status, drive_file_id, staging_path, created_at, uploaded_at')
+      .eq('coaching_id', coachingId)
+      .in('status', ['staged', 'uploaded'])
+      .order('created_at', { ascending: true })
+      : Promise.resolve({ data: [], error: null })),
+  ]);
+  if (checkinsRes.error) throw checkinsRes.error;
+  // A deployment that has the check-in table but not the optional Drive photo
+  // migration must still be able to load the dashboard.  Treat that one
+  // auxiliary query as best-effort; the check-in itself remains authoritative.
+  const photoRows = photosRes.error ? [] : (photosRes.data || []);
+  const checkinIds = new Set((checkinsRes.data || []).map(r => r.id));
+  const photosByCheckin = new Map();
+  for (const p of photoRows) {
+    if (!checkinIds.has(p.checkin_id)) continue;
+    const list = photosByCheckin.get(p.checkin_id) || [];
+    list.push({
+      id: p.id,
+      checkinId: p.checkin_id,
+      fileName: p.file_name,
+      mimeType: p.mime_type,
+      byteSize: p.byte_size,
+      status: p.status,
+      driveFileId: p.drive_file_id || null,
+      driveUrl: p.drive_file_id ? `https://drive.google.com/file/d/${encodeURIComponent(p.drive_file_id)}/view` : null,
+      stagingPath: p.staging_path,
+      previewUrl: null,
+      createdAt: p.created_at,
+      uploadedAt: p.uploaded_at || null,
+    });
+    photosByCheckin.set(p.checkin_id, list);
+  }
+  // Staged objects are private and short-lived.  Sign only those rows; an
+  // uploaded row normally has already been removed from Storage and is
+  // represented by its coach-owned Drive link instead.
+  const staged = [...photosByCheckin.values()].flat().filter(p => p.status === 'staged' && p.stagingPath);
+  if (staged.length) {
+    await Promise.all(staged.map(async p => {
+      try {
+        const signed = await _supabase.storage.from('coaching-drive-staging').createSignedUrl(p.stagingPath, 300);
+        if (!signed.error && signed.data?.signedUrl) p.previewUrl = signed.data.signedUrl;
+      } catch (_) {}
+    }));
+  }
+  return (checkinsRes.data || []).map(r => {
     // Prefer the responses jsonb (written by new code); fall back to fixed columns
     // for rows that predate the migration and weren't backfilled.
     const resp = r.responses || {
@@ -8597,6 +8646,7 @@ async function loadCheckins(coachingId) {
       lifeStress: resp.life_stress, workStress: resp.work_stress, tiredness: resp.tiredness,
       issuesNotes: resp.issues_notes, generalNote: resp.general_note,
       aiOpinion: r.ai_opinion ?? null, aiOpinionGeneratedAt: r.ai_opinion_generated_at ?? null,
+      photos: photosByCheckin.get(r.id) || [],
     };
   });
 }

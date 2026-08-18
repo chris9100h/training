@@ -956,7 +956,12 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
           {has(wToday) && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {wToday} {wUnit}{has(wAvg) ? ` · avg ${wAvg} ${wUnit}` : ''}
+              {wToday} {wUnit}{has(wAvg) ? ` · avg ${wAvg} ${wUnit}` : ''}{ci.photos?.length ? ` · ${ci.photos.length} photo${ci.photos.length === 1 ? '' : 's'}` : ''}
+            </div>
+          )}
+          {!has(wToday) && ci.photos?.length > 0 && (
+            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
+              {ci.photos.length} photo{ci.photos.length === 1 ? '' : 's'} attached
             </div>
           )}
         </div>
@@ -1054,6 +1059,40 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ADDITIONAL</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {extraKeys.map(k => <StatPill key={k} label={k.replace(/_/g, ' ')} value={String(responses[k])} />)}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(ci.photos) && ci.photos.length > 0 && (
+            <div>
+              <div className="knurl" style={{ margin: '0 0 6px' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
+                PHOTOS · {ci.photos.length}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                {ci.photos.map(photo => (
+                  photo.previewUrl ? (
+                    <a key={photo.id} href={photo.previewUrl} target="_blank" rel="noreferrer"
+                      style={{ display: 'block', background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
+                      <img src={photo.previewUrl} alt={photo.fileName || 'Check-in photo'}
+                        style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'cover' }} />
+                    </a>
+                  ) : photo.driveUrl ? (
+                    <a key={photo.id} href={photo.driveUrl} target="_blank" rel="noreferrer"
+                      style={{ minWidth: 0, minHeight: 82, padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, color: UI.inkSoft, textDecoration: 'none', fontFamily: UI.fontUi, textAlign: 'center' }}>
+                      <i className="fa-brands fa-google-drive" style={{ color: 'var(--accent)', fontSize: 18 }} />
+                      <span style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>{photo.fileName || 'Photo'}</span>
+                      <span style={{ fontSize: 9, color: UI.inkFaint, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Open in Drive</span>
+                    </a>
+                  ) : (
+                    <div key={photo.id}
+                      style={{ minWidth: 0, minHeight: 82, padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>
+                      <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize: 17 }} />
+                      <span style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>{photo.fileName || 'Photo'}</span>
+                      <span style={{ fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Uploading</span>
+                    </div>
+                  )
+                ))}
               </div>
             </div>
           )}
