@@ -1,0 +1,191 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Privacy Policy · Zane</title>
+<meta name="application-name" content="Zane" />
+<meta name="description" content="How Zane handles account, training, nutrition, health, coaching, social and optional Google Drive data." />
+<meta name="theme-color" content="#141218" />
+<link rel="icon" href="icons/icon-192.png" />
+<link rel="apple-touch-icon" href="icons/icon-180.png" />
+<link rel="canonical" href="https://zane-wo.com/privacy.html" />
+<style>
+  :root{
+    color-scheme:light dark;
+    --bg:#141218;--panel:#1a1820;--raised:#252334;--ink:#ece4d0;
+    --ink-soft:rgba(236,228,208,.72);--ink-faint:rgba(236,228,208,.48);
+    --hair:rgba(236,228,208,.12);--hair-strong:rgba(236,228,208,.24);
+    --accent:#c9a961;--accent-light:#e5c97e;--accent-rgb:201,169,97;
+    --f-display:"Big Shoulders Display","Arial Narrow",sans-serif;
+    --f-body:"Inter",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    --f-mono:"JetBrains Mono",ui-monospace,Menlo,monospace;
+  }
+  @media(prefers-color-scheme:light){:root{--bg:#e8e1d4;--panel:#f2ede4;--raised:#eae3d6;--ink:#1f1b16;--ink-soft:rgba(31,27,22,.72);--ink-faint:rgba(31,27,22,.5);--hair:rgba(31,27,22,.14);--hair-strong:rgba(31,27,22,.28);--accent:#9a7b34;--accent-light:#b8933f;--accent-rgb:154,123,52}}
+  :root[data-theme="dark"]{--bg:#141218;--panel:#1a1820;--raised:#252334;--ink:#ece4d0;--ink-soft:rgba(236,228,208,.72);--ink-faint:rgba(236,228,208,.48);--hair:rgba(236,228,208,.12);--hair-strong:rgba(236,228,208,.24);--accent:#c9a961;--accent-light:#e5c97e;--accent-rgb:201,169,97}
+  :root[data-theme="light"]{--bg:#e8e1d4;--panel:#f2ede4;--raised:#eae3d6;--ink:#1f1b16;--ink-soft:rgba(31,27,22,.72);--ink-faint:rgba(31,27,22,.5);--hair:rgba(31,27,22,.14);--hair-strong:rgba(31,27,22,.28);--accent:#9a7b34;--accent-light:#b8933f;--accent-rgb:154,123,52}
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--f-body);line-height:1.6;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent-light)}
+  a:hover{color:var(--accent)}
+  .top{position:sticky;top:0;z-index:2;background:color-mix(in srgb,var(--bg) 90%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-bottom:1px solid var(--hair)}
+  .top-inner{max-width:1100px;margin:0 auto;padding:10px 24px;display:flex;align-items:center;gap:16px}
+  .brand{display:flex;align-items:center;gap:9px;color:var(--ink);text-decoration:none}
+  .brand img{width:26px;height:26px;border-radius:6px;border:1px solid var(--hair-strong)}
+  .brand span{font-family:var(--f-display);font-size:21px;font-weight:800;line-height:1;letter-spacing:.02em}
+  .brand .k{color:var(--accent)}
+  .nav{margin-left:auto;display:flex;align-items:center;gap:6px}
+  .nav a,.theme{color:var(--ink-soft);text-decoration:none;font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;padding:8px 10px;border-radius:5px}
+  .nav a:hover{color:var(--ink);background:rgba(var(--accent-rgb),.08)}
+  .theme{appearance:none;cursor:pointer;border:1px solid var(--hair-strong);background:var(--panel);color:var(--ink-soft);width:36px;height:36px;padding:0;font-size:14px}
+  .theme:hover{color:var(--accent);border-color:var(--accent)}
+  .wrap{max-width:900px;margin:0 auto;padding:0 24px}
+  .hero{padding:72px 0 46px;border-bottom:1px solid var(--hair);background-image:repeating-linear-gradient(45deg,rgba(var(--accent-rgb),.035) 0 1px,transparent 1px 7px),repeating-linear-gradient(-45deg,rgba(var(--accent-rgb),.035) 0 1px,transparent 1px 7px)}
+  .eyebrow{display:flex;align-items:center;gap:10px;color:var(--accent);font-family:var(--f-mono);font-size:10px;font-weight:600;letter-spacing:.18em;text-transform:uppercase}
+  .eyebrow:after{content:"";height:1px;flex:1;background:var(--hair-strong)}
+  h1{font-family:var(--f-display);font-size:clamp(48px,9vw,86px);font-weight:900;line-height:.9;letter-spacing:.01em;text-transform:uppercase;margin:22px 0 14px}
+  .lede{max-width:62ch;margin:0;color:var(--ink-soft);font-size:18px;line-height:1.55}
+  .effective{margin:22px 0 0;color:var(--ink-faint);font-family:var(--f-mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase}
+  .content{padding:46px 0 76px}
+  .toc{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 42px;padding:16px;border:1px solid var(--hair);border-radius:8px;background:rgba(var(--accent-rgb),.045)}
+  .toc a{font-family:var(--f-mono);font-size:10px;letter-spacing:.06em;text-transform:uppercase;text-decoration:none;padding:7px 9px;border:1px solid var(--hair-strong);border-radius:5px;color:var(--ink-soft)}
+  .toc a:hover{color:var(--accent);border-color:var(--accent)}
+  section{scroll-margin-top:78px;margin:0 0 42px;padding:26px 28px;border:1px solid var(--hair);border-left:3px solid var(--accent);border-radius:8px;background:var(--panel)}
+  h2{font-family:var(--f-display);font-size:28px;font-weight:800;line-height:1;text-transform:uppercase;letter-spacing:.01em;margin:0 0 14px;color:var(--accent)}
+  h3{font-size:16px;margin:22px 0 6px;color:var(--ink)}
+  p{margin:0 0 12px;color:var(--ink-soft);font-size:15px}
+  p:last-child{margin-bottom:0}
+  ul{margin:10px 0 0;padding-left:21px;color:var(--ink-soft);font-size:15px}
+  li{margin:7px 0}
+  strong{color:var(--ink);font-weight:700}
+  .callout{margin-top:18px;padding:14px 16px;border:1px solid rgba(var(--accent-rgb),.38);border-radius:6px;background:rgba(var(--accent-rgb),.07);color:var(--ink-soft);font-size:14px}
+  .updated{font-family:var(--f-mono);font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-faint)}
+  footer{border-top:1px solid var(--hair)}
+  .foot{max-width:900px;margin:0 auto;padding:28px 24px 48px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:18px;color:var(--ink-faint);font-size:12px}
+  .foot a{color:var(--ink-soft);text-decoration:none}.foot a:hover{color:var(--accent)}
+  @media(max-width:600px){.top-inner{padding:10px 16px}.brand span{display:none}.nav a{padding:8px 6px;font-size:9px}.nav a.hide-s{display:none}.hero{padding:52px 0 36px}.wrap{padding:0 18px}section{padding:22px 20px}.lede{font-size:16px}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+</style>
+</head>
+<body>
+<header class="top">
+  <div class="top-inner">
+    <a class="brand" href="welcome.html"><img src="icons/icon-192.png" alt="" /><span>ZA<span class="k">N</span>E</span></a>
+    <nav class="nav" aria-label="Primary">
+      <a class="hide-s" href="welcome.html">Welcome</a>
+      <a class="hide-s" href="features.html">Features</a>
+      <a href="index.html">Open app</a>
+      <button class="theme" id="themeBtn" type="button" title="Toggle light / dark theme" aria-label="Switch theme">◐</button>
+    </nav>
+  </div>
+</header>
+
+<main>
+  <div class="hero">
+    <div class="wrap">
+      <div class="eyebrow">Privacy &amp; data</div>
+      <h1>Privacy policy</h1>
+      <p class="lede">Zane is a training, nutrition, health, friends and coaching app. This policy explains what information the service handles, why it is needed, and the choices you have.</p>
+      <p class="effective">Effective 18 August 2026 · Last updated 18 August 2026</p>
+    </div>
+  </div>
+
+  <div class="content wrap">
+    <nav class="toc" aria-label="Privacy policy sections">
+      <a href="#controller">Who we are</a><a href="#data">Data we handle</a><a href="#use">How we use it</a><a href="#google">Google Drive</a><a href="#sharing">Sharing</a><a href="#choices">Your choices</a><a href="#contact">Contact</a>
+    </nav>
+
+    <section id="controller">
+      <h2>1. Who we are</h2>
+      <p>Zane is operated by the Zane team. For privacy questions, requests or complaints, contact <a href="mailto:office@btc-prime.biz">office@btc-prime.biz</a>.</p>
+      <p>This policy applies to the Zane website, the Zane browser app and the services that support them.</p>
+    </section>
+
+    <section id="data">
+      <h2>2. Information we handle</h2>
+      <p>We handle the information needed to provide the features you choose. Depending on how you use Zane, this can include:</p>
+      <ul>
+        <li><strong>Account information:</strong> email address, authentication identifiers, display name and optional profile details such as an X handle.</li>
+        <li><strong>Training data:</strong> plans, exercises, sessions, sets, weights, reps, rest timers, cardio logs, mesocycles and progress history.</li>
+        <li><strong>Nutrition and health data:</strong> food logs, recipes, meal plans, shopping and inventory data, macro targets, body weight, steps, water, sleep or stress entries, blood pressure, glucose, temperature and medication information that you decide to record.</li>
+        <li><strong>Coaching data:</strong> coaching relationships, check-in answers, notes, messages, targets and optional check-in photos.</li>
+        <li><strong>Friends and social data:</strong> friend relationships, groups, messages, comments, reactions, shares and the visibility settings you select.</li>
+        <li><strong>Device and service data:</strong> a bounded offline working copy and preferences in your browser, authentication/session data needed to keep you signed in, and push-notification subscription details when you opt in. The hosting and database services also process the technical request information needed to deliver and protect the service.</li>
+      </ul>
+      <p>We do not ask for health information that you do not want to record. Zane does not sell personal data or use it for advertising.</p>
+    </section>
+
+    <section id="use">
+      <h2>3. Why we use it</h2>
+      <ul>
+        <li>to create your account, authenticate you and keep your data associated with the right account;</li>
+        <li>to save, synchronise and restore the training, nutrition, health, coaching and social features you use, including offline edits that are synced when you are online;</li>
+        <li>to deliver optional push notifications, such as rest-timer, coaching, support and enabled Friends alerts;</li>
+        <li>to protect the service, prevent abuse, troubleshoot failures and respond to support requests; and</li>
+        <li>to comply with legal obligations where they apply.</li>
+      </ul>
+      <p>We do not use the contents of your logs to build advertising profiles.</p>
+    </section>
+
+    <section id="google">
+      <h2>4. Optional Google Drive archive</h2>
+      <p>Google Drive export is optional and is available to a coach or self-coaching workspace. When you connect it, Zane asks for the limited <strong>Google Drive file scope (<code>drive.file</code>)</strong> plus the basic OpenID/email scopes needed to identify the connected Google account.</p>
+      <ul>
+        <li>Zane creates Google folders and Google Sheets in the connected coach's own Drive for check-in archives.</li>
+        <li>When the archive is enabled, the selected check-in answers, summary metrics and optional attached photos are copied there.</li>
+        <li>Zane does not read or manage unrelated files in your Drive. The connected Google account email is used only to identify the connection.</li>
+        <li>The browser never receives the Google refresh token; it is encrypted and kept in the service-only connection store.</li>
+        <li>Disconnecting stops future exports and removes Zane's stored access token. Files already created in Google Drive remain under the Drive owner's control and can be deleted there.</li>
+      </ul>
+      <div class="callout">Zane's use and transfer of information received from Google APIs follows the <a href="https://developers.google.com/terms/api-services-user-data-policy" target="_blank" rel="noopener noreferrer">Google API Services User Data Policy</a>, including its Limited Use requirements.</div>
+    </section>
+
+    <section id="sharing">
+      <h2>5. Who can see it</h2>
+      <p>Zane uses access rules so that data is shown only to the account owner and the people or groups that the owner has authorised. For example, a coach can see the client data that the coaching relationship permits, and Friends visibility follows the metrics and sharing settings selected by the user.</p>
+      <p>To run Zane, information is processed by service providers such as Supabase (authentication, database, storage and server functions) and Cloudflare (website delivery). Optional Google Drive export is processed by Google for the connected account. Optional notification delivery uses the providers required by the notification method you enable. These providers process data only to provide their service to Zane and under their own terms and privacy policies.</p>
+    </section>
+
+    <section id="retention">
+      <h2>6. Storage and retention</h2>
+      <p>Your server-side app data is kept while your account and the relevant feature are active, or until you ask us to remove it. Zane keeps only a bounded offline working copy on a device; clearing that browser's site data removes the local copy but does not by itself delete the server copy.</p>
+      <p>Drive check-in photos are staged in a private temporary area while an export is processed and are cleaned up after export, expiry or a failed attempt. A Google Drive archive that has already been created is retained in the connected Drive until its owner removes it.</p>
+      <p>Backups you download are files on your device. Zane cannot delete copies you save outside the service.</p>
+    </section>
+
+    <section id="choices">
+      <h2>7. Your choices and rights</h2>
+      <ul>
+        <li><strong>Access and export:</strong> use Zane's backup export to download a copy of your app data.</li>
+        <li><strong>Correction:</strong> edit your profile and logged data in the app, or contact us if something cannot be corrected there.</li>
+        <li><strong>Deletion:</strong> use <em>Delete all data</em> in Settings to remove your Zane app data and owned staging objects. To request deletion of the authentication account or to ask about a copy that is not accessible in the app, contact us.</li>
+        <li><strong>Optional features:</strong> disable Friends, push notifications or Google Drive export at any time. Disconnecting Drive stops future exports; existing Drive files are controlled from Google Drive.</li>
+      </ul>
+      <p>Depending on where you live, you may also have rights to request access, correction, deletion, restriction, portability or objection. Contact us and we will handle the request under the laws that apply to you. We may need to verify that a request belongs to the account holder.</p>
+    </section>
+
+    <section id="security">
+      <h2>8. Security</h2>
+      <p>We use authenticated access rules, encrypted transport and encrypted storage for Google refresh tokens. No internet service can promise absolute security, so please use a unique password, keep your devices protected and contact us promptly if you suspect unauthorised access.</p>
+    </section>
+
+    <section id="changes">
+      <h2>9. Changes to this policy</h2>
+      <p>We may update this policy when the service or legal requirements change. The effective date at the top will change with a material update. Continued use after an update means the updated policy applies to future use.</p>
+    </section>
+
+    <section id="contact">
+      <h2>10. Contact</h2>
+      <p>Questions, privacy requests and data deletion requests: <a href="mailto:office@btc-prime.biz">office@btc-prime.biz</a>.</p>
+      <p class="updated">Policy version · 2026-08-18</p>
+    </section>
+  </div>
+</main>
+
+<footer>
+  <div class="foot"><span>© Zane</span><span><a href="welcome.html">Welcome</a> · <a href="index.html">Open the app</a> · <a href="mailto:office@btc-prime.biz">Contact</a></span></div>
+</footer>
+<script src="privacy.js?v=2.838" defer></script>
+</body>
+</html>

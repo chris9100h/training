@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 const staticFiles = [
   'index.html', 'sw.js', 'manifest.json', '.nojekyll',
-  'welcome.html', 'features.html', 'autoreg.html', 'CNAME',
+  'welcome.html', 'features.html', 'autoreg.html', 'privacy.html', 'privacy.js', 'CNAME',
 ];
 const staticDirectories = ['src', 'icons', 'Background', 'screenshots'];
 const plainScripts = [
