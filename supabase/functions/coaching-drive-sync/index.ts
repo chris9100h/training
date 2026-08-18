@@ -85,6 +85,22 @@ async function resolveUser(req: Request): Promise<string | null> {
   return (await res.json().catch(() => null))?.id ?? null;
 }
 
+// Drive belongs to the coach side of the coaching workspace. A user may set
+// that workspace up before accepting a single client (show_coaching_tab), or
+// may reach it through an active external/self-coaching relationship. Keep the
+// same gate on the server as in Settings; hiding the button alone would leave
+// the OAuth endpoint callable by every authenticated client.
+async function canUseCoachDrive(userId: string) {
+  const [settingsRes, coachRes] = await Promise.all([
+    db(`zane_user_settings?user_id=eq.${encodeURIComponent(userId)}&select=show_coaching_tab,be_your_own_coach&limit=1`),
+    db(`zane_coaching?coach_id=eq.${encodeURIComponent(userId)}&status=eq.active&select=id,client_id&limit=1`),
+  ]);
+  if (!settingsRes.ok || !coachRes.ok) throw new Error('coaching role lookup failed');
+  const settings = (await settingsRes.json().catch(() => []))[0] || {};
+  const relationships = await coachRes.json().catch(() => []);
+  return Boolean(settings.show_coaching_tab || settings.be_your_own_coach || (Array.isArray(relationships) && relationships[0]?.id));
+}
+
 function randomBytes(size: number) { const b = new Uint8Array(size); crypto.getRandomValues(b); return b; }
 function b64(bytes: Uint8Array) { let s = ''; for (const b of bytes) s += String.fromCharCode(b); return btoa(s); }
 function unb64(value: string) { const s = atob(value); return Uint8Array.from(s, c => c.charCodeAt(0)); }
@@ -466,10 +482,7 @@ async function syncOverview(coachId: string, connection: any, access: string, ov
 
 async function startOAuth(userId: string) {
   const { clientId, redirectUri } = googleClient();
-  const coachRes = await db(`zane_coaching?coach_id=eq.${encodeURIComponent(userId)}&client_id=neq.${encodeURIComponent(userId)}&status=eq.active&select=id&limit=1`);
-  if (!coachRes.ok) throw new Error('coaching relationship lookup failed');
-  const coachRows = await coachRes.json().catch(() => []);
-  if (!coachRows[0]) throw new Error('only active coaches can connect Google Drive');
+  if (!(await canUseCoachDrive(userId))) throw new Error('enable the Coaching tab or Self-Coaching before connecting Google Drive');
   const oldStateRes = await db(`zane_coaching_drive_oauth_states?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
   if (!oldStateRes.ok) throw new Error('could not rotate OAuth state');
   const state = b64(randomBytes(32)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -497,10 +510,11 @@ async function requeueReauthExports(coachId: string) {
 
 async function queueBackfill(coachId: string) {
   for (let offset = 0; offset < 10000; offset += 100) {
-    const coachingRes = await db(`zane_coaching?coach_id=eq.${encodeURIComponent(coachId)}&client_id=neq.${encodeURIComponent(coachId)}&status=eq.active&select=id,client_id&order=id&limit=100&offset=${offset}`);
+    const coachingRes = await db(`zane_coaching?coach_id=eq.${encodeURIComponent(coachId)}&status=eq.active&select=id,client_id&order=id&limit=100&offset=${offset}`);
     if (!coachingRes.ok) throw new Error('coaching backfill lookup failed');
-    const relationships = await coachingRes.json().catch(() => null);
-    if (!Array.isArray(relationships)) throw new Error('coaching backfill returned invalid data');
+    const relationshipRows = await coachingRes.json().catch(() => null);
+    if (!Array.isArray(relationshipRows)) throw new Error('coaching backfill returned invalid data');
+    const relationships = relationshipRows.filter(relation => !String(relation?.id || '').startsWith('support_'));
     const rows: any[] = [];
     for (const relation of relationships) {
       const checksRes = await db(`zane_checkins?coaching_id=eq.${encodeURIComponent(relation.id)}&select=id,week_start&order=week_start.desc&limit=12`);
@@ -525,6 +539,7 @@ async function callback(req: Request) {
   if (!stateRes.ok) return redirect(`${appOrigin()}?coachingDrive=expired`);
   const stateRow = (await stateRes.json().catch(() => []))[0];
   if (!stateRow) return redirect(`${appOrigin()}?coachingDrive=expired`);
+  if (!(await canUseCoachDrive(stateRow.coach_id))) return redirect(`${appOrigin()}?coachingDrive=not-authorized`);
   const { clientId, clientSecret, redirectUri } = googleClient();
   const token = await googleToken({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' });
   if (!token.refresh_token) return redirect(`${appOrigin()}?coachingDrive=error`);
@@ -748,11 +763,13 @@ Deno.serve(async (req) => {
     return json({ enabled: Boolean((await connectionRes.json().catch(() => []))[0]) });
   }
   if (body.action === 'status') {
+    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
     const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id,coach_id,google_account_email,root_folder_id,overview_spreadsheet_id,status,archive_enabled,include_photos,connected_at,last_sync_at,last_error`);
     if (!res.ok) return json({ error: 'Drive status unavailable' }, 502);
     return json((await res.json().catch(() => []))[0] || null);
   }
   if (body.action === 'disconnect') {
+    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
     const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ archive_enabled: false, include_photos: false, status: 'paused', last_error: 'Disconnected by coach', updated_at: new Date().toISOString() }) });
     if (!connectionRes.ok) return json({ error: 'Could not disconnect Google Drive' }, 502);
     const ownConnection = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id`);
@@ -767,6 +784,7 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
   if (body.action === 'configure') {
+    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
     const enabling = body.archiveEnabled !== false;
     const current = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id,status&limit=1`);
     if (!current.ok) return json({ error: 'Drive status unavailable' }, 502);
@@ -789,6 +807,7 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
   if (body.action === 'retry') {
+    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
     const res = await db(`zane_coaching_drive_exports?coach_id=eq.${encodeURIComponent(userId)}&status=in.(failed,needs_reauth)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'pending', next_attempt_at: new Date().toISOString(), last_error: null, locked_at: null, locked_by: null, updated_at: new Date().toISOString() }) });
     if (!res.ok) return json({ error: 'could not retry Drive exports' }, 502);
     return json({ ok: true });

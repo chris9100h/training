@@ -2382,7 +2382,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // something, and stop touching beYourOwnCoach here: turning self-coaching
   // off is toggleSelf's job, which also ends the relationship server-side.
   const coachingTabLocked = hasCoaching;
-  const isDriveCoach = (store.coaching?.asCoach || []).some(c => c.status === 'active' && c.coachId !== c.clientId);
+  // Drive setup is a coach-side capability, not a consequence of already
+  // having a client. An explicitly pinned Coaching tab means the user has
+  // opted into the coach workspace and must be able to prepare Drive before
+  // sending the first invite. Self-coaching is the same coach workspace with
+  // a self relationship, so it gets the identical archive experience.
+  const hasExternalCoachRole = (store.coaching?.asCoach || []).some(c => c.status === 'active' && c.coachId !== c.clientId);
+  const hasSelfCoachRole = selfOn && !!store.coaching?.asSelf;
+  const isDriveCoach = hasExternalCoachRole || hasSelfCoachRole || !!store.settings?.showCoachingTab;
   useEffectSet(() => {
     if (!coachingSheet || !isDriveCoach) return;
     let alive = true;
@@ -2649,7 +2656,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
               <div className="micro-gold" style={{ marginBottom: 7 }}>GOOGLE DRIVE ARCHIVE</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>
-                Save every client check-in as a Google Sheet in that client’s folder, plus one coach-wide overview sheet. Drive failures never block check-in submission.
+                Save your own and client check-ins as Google Sheets in Drive, plus one overview sheet. Drive failures never block check-in submission.
               </div>
               {!driveStatus && <Btn style={{ width: '100%' }} onClick={connectDrive} disabled={driveLoading}>{driveLoading ? 'Loading…' : 'Connect Google Drive'}</Btn>}
               {driveStatus && <>
@@ -2662,7 +2669,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <Row label="Archive check-ins">
                   <Toggle on={driveStatus.status === 'connected' && driveStatus.archive_enabled !== false} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled === false, includePhotos: driveStatus.include_photos === true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
                 </Row>
-                <Row label="Include client photos">
+                <Row label="Include check-in photos">
                   <Toggle on={driveStatus.status === 'connected' && driveStatus.include_photos === true} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled !== false, includePhotos: driveStatus.include_photos !== true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
                 </Row>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
