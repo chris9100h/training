@@ -122,6 +122,189 @@ function CoachingMultiView({ views, renderView, initialView }) {
   );
 }
 
+// ─── Coach review queue ──────────────────────────────────────────────────────
+// This stays inside My Clients rather than becoming another coaching role.
+// Check-in notifications already use a device-local seen marker; the queue
+// adds a small local dismissal map for due items so it remains useful without
+// introducing a new table before we know how coaches use it.
+const COACH_REVIEW_QUEUE_KEY = 'logbook-coach-review-queue';
+
+function readCoachReviewQueue() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COACH_REVIEW_QUEUE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) { return {}; }
+}
+
+function writeCoachReviewQueue(value) {
+  try {
+    const entries = Object.entries(value || {});
+    localStorage.setItem(COACH_REVIEW_QUEUE_KEY, JSON.stringify(Object.fromEntries(entries.slice(-200))));
+  } catch (_) {}
+}
+
+function CoachNeedsAttention({ clients, checkinMap, unreadNotes, go, onRequestCheckin }) {
+  const [dismissed, setDismissed] = useStateC(readCoachReviewQueue);
+  const [expanded, setExpanded] = useStateC(false);
+  const [requested, setRequested] = useStateC({});
+  const activeClients = (clients || []).filter(c => c.status === 'active');
+  const clientById = new Map(activeClients.map(c => [c.clientId, c]));
+  const weekStart = LB.checkinWeekStart?.() || new Date().toISOString().slice(0, 10);
+  const items = [];
+
+  const isDismissed = key => !!dismissed[key];
+  const clientLabel = c => c.clientName || c.clientEmail || 'Client';
+
+  activeClients.forEach(client => {
+    const checkinAt = Object.prototype.hasOwnProperty.call(checkinMap || {}, client.id)
+      ? checkinMap[client.id]
+      : undefined;
+    const submittedSeen = typeof checkinAt === 'string' && (() => {
+      try { return localStorage.getItem(`logbook-coach-ci-seen-${client.id}`) === checkinAt; } catch (_) { return false; }
+    })();
+    if (typeof checkinAt === 'string' && !submittedSeen) {
+      items.push({
+        key: `submitted:${client.id}:${checkinAt}`,
+        type: 'submitted',
+        icon: 'fa-clipboard-check',
+        label: 'CHECK-IN SUBMITTED',
+        detail: `${clientLabel(client)} sent a new weekly check-in`,
+        client,
+        checkinAt,
+        initialTab: 'checkins',
+      });
+    }
+
+    if (checkinAt === null && client.checkinEnabled !== false) {
+      const key = `due:${client.id}:${weekStart}`;
+      if (!isDismissed(key)) {
+        items.push({
+          key,
+          type: 'due',
+          icon: 'fa-bell',
+          label: 'CHECK-IN DUE',
+          detail: `${clientLabel(client)} has not submitted this week`,
+          client,
+          initialTab: 'checkins',
+        });
+      }
+    }
+  });
+
+  const notesByClient = new Map();
+  (unreadNotes || []).forEach(note => {
+    const client = clientById.get(note.authorId);
+    if (!client) return;
+    const list = notesByClient.get(client.clientId) || [];
+    list.push(note);
+    notesByClient.set(client.clientId, list);
+  });
+  notesByClient.forEach((notes, clientId) => {
+    const client = clientById.get(clientId);
+    const sorted = notes.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const visibleNotes = sorted.filter(note => !isDismissed(`note:${note.id}`));
+    if (!visibleNotes.length) return;
+    const latest = visibleNotes[0];
+    const count = visibleNotes.length;
+    items.push({
+      key: `notes:${client.id}:${latest.id}`,
+      type: 'notes',
+      icon: 'fa-comment',
+      label: count === 1 ? 'NEW MESSAGE' : `${count} NEW MESSAGES`,
+      detail: `${clientLabel(client)}${latest.body ? ` · ${String(latest.body).replace(/\s+/g, ' ').slice(0, 72)}` : ''}`,
+      client,
+      noteIds: visibleNotes.map(note => note.id),
+      initialTab: 'notes',
+    });
+  });
+
+  const priority = { submitted: 0, notes: 1, due: 2 };
+  items.sort((a, b) => (priority[a.type] - priority[b.type]) || String(a.detail).localeCompare(String(b.detail)));
+  const visibleItems = expanded ? items : items.slice(0, 3);
+
+  const dismiss = async item => {
+    if (item.type === 'submitted' && item.checkinAt) {
+      try { localStorage.setItem(`logbook-coach-ci-seen-${item.client.id}`, item.checkinAt); } catch (_) {}
+    }
+    if (item.type === 'notes' && item.noteIds?.length) {
+      try { await LB.markCoachingNotesRead(item.noteIds); }
+      catch (_) { UI.alert('Could not mark the message as reviewed.'); return false; }
+    }
+    const next = { ...dismissed, [item.key]: new Date().toISOString() };
+    setDismissed(next);
+    writeCoachReviewQueue(next);
+    return true;
+  };
+
+  const openItem = async item => {
+    if (item.type !== 'due') await dismiss(item);
+    go({
+      name: 'coaching-client',
+      coachingId: item.client.id,
+      clientId: item.client.clientId,
+      clientName: item.client.clientName,
+      initialTab: item.initialTab,
+      checkinAt: item.checkinAt,
+      backRoute: 'coaching',
+    });
+  };
+
+  const handleRemind = async (event, item) => {
+    event.stopPropagation();
+    if (requested[item.client.id]) return;
+    try {
+      await onRequestCheckin(item.client.id);
+      setRequested(current => ({ ...current, [item.client.id]: true }));
+      setTimeout(() => setRequested(current => ({ ...current, [item.client.id]: false })), 4000);
+    } catch (_) {
+      UI.alert('Could not send the reminder. Please try again.');
+    }
+  };
+
+  if (!activeClients.length) return null;
+
+  return (
+    <div style={{ margin: '4px 12px 4px', padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${items.length ? 'rgba(var(--accent-rgb),0.28)' : UI.hair}`, borderRadius: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: visibleItems.length ? 10 : 0 }}>
+        <i className="fa-solid fa-inbox" style={{ color: 'var(--accent)', fontSize: 13 }} />
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkSoft }}>NEEDS ATTENTION</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: items.length ? 'var(--accent)' : UI.inkFaint }}>{items.length ? items.length : 'ALL CLEAR'}</span>
+      </div>
+      {visibleItems.map(item => (
+        <div
+          key={item.key}
+          onClick={() => openItem(item)}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+        >
+          <i className={`fa-solid ${item.icon}`} style={{ width: 18, textAlign: 'center', color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>{item.detail}</div>
+            <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.07em', marginTop: 2 }}>{item.label}</div>
+          </div>
+          {item.type === 'due' && (
+            <button
+              onClick={event => handleRemind(event, item)}
+              style={{ background: requested[item.client.id] ? 'rgba(var(--accent-rgb),0.15)' : 'transparent', border: `var(--hair-width) solid ${requested[item.client.id] ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: requested[item.client.id] ? 'var(--accent)' : UI.inkFaint, borderRadius: 4, padding: '5px 7px', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', cursor: requested[item.client.id] ? 'default' : 'pointer', flexShrink: 0 }}
+            >{requested[item.client.id] ? 'SENT' : 'REMIND'}</button>
+          )}
+          <button
+            aria-label="Mark reviewed"
+            onClick={async event => { event.stopPropagation(); await dismiss(item); }}
+            style={{ background: 'transparent', border: 'none', color: UI.inkFaint, padding: '5px 3px', cursor: 'pointer', flexShrink: 0 }}
+          ><i className="fa-solid fa-check" style={{ fontSize: 12 }} /></button>
+          <ChevronRight />
+        </div>
+      ))}
+      {items.length > 3 && (
+        <button
+          onClick={() => setExpanded(value => !value)}
+          style={{ width: '100%', marginTop: 8, padding: '7px 0 2px', background: 'transparent', border: 'none', borderTop: `var(--hair-width) solid ${UI.hair}`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', cursor: 'pointer' }}
+        >{expanded ? 'SHOW LESS' : `VIEW ALL ${items.length}`}</button>
+      )}
+    </div>
+  );
+}
+
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
 
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
@@ -322,6 +505,14 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           })}
         </div>
       </Sheet>
+
+      <CoachNeedsAttention
+        clients={allClients}
+        checkinMap={checkinMap}
+        unreadNotes={unreadNotes.filter(n => !n.coachingId?.startsWith('support_'))}
+        go={go}
+        onRequestCheckin={handleRequestCheckin}
+      />
 
       {allClients.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
