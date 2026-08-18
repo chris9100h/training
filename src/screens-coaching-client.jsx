@@ -35,6 +35,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   const coachingEntry = store?.coaching?.asCoach?.find(c => c.id === coachingId);
   const [checkinEnabled, setCheckinEnabled] = useStateC(coachingEntry?.checkinEnabled ?? true);
   const [ciToggling, setCiToggling] = useStateC(false);
+  // The coach screen can remain open while another device changes the
+  // setting. Keep the switch derived from the live asCoach row instead of
+  // preserving the value that happened to exist at mount time.
+  useEffectC(() => {
+    if (coachingEntry?.checkinEnabled != null) setCheckinEnabled(!!coachingEntry.checkinEnabled);
+  }, [coachingEntry?.checkinEnabled]);
   const handleToggleCheckin = async () => {
     if (ciToggling) return;
     const next = !checkinEnabled;

@@ -2654,14 +2654,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               {!driveStatus && <Btn style={{ width: '100%' }} onClick={connectDrive} disabled={driveLoading}>{driveLoading ? 'Loading…' : 'Connect Google Drive'}</Btn>}
               {driveStatus && <>
                 <div style={{ padding: '9px 11px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 8 }}>
-                  <div style={{ color: 'var(--ok)', fontWeight: 700 }}>{driveStatus.status === 'needs_reauth' ? 'Reconnect required' : 'Connected'}</div>
+                  <div style={{ color: driveStatus.status === 'connected' ? 'var(--ok)' : UI.danger, fontWeight: 700 }}>
+                    {driveStatus.status === 'needs_reauth' ? 'Reconnect required' : driveStatus.status === 'connected' ? 'Connected' : 'Not connected'}
+                  </div>
                   {driveStatus.google_account_email && <div style={{ marginTop: 3 }}>{driveStatus.google_account_email}</div>}
                 </div>
                 <Row label="Archive check-ins">
-                  <Toggle on={driveStatus.archive_enabled !== false} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled === false, includePhotos: driveStatus.include_photos === true })} disabled={driveLoading} />
+                  <Toggle on={driveStatus.status === 'connected' && driveStatus.archive_enabled !== false} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled === false, includePhotos: driveStatus.include_photos === true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
                 </Row>
                 <Row label="Include client photos">
-                  <Toggle on={driveStatus.include_photos === true} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled !== false, includePhotos: driveStatus.include_photos !== true })} disabled={driveLoading} />
+                  <Toggle on={driveStatus.status === 'connected' && driveStatus.include_photos === true} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled !== false, includePhotos: driveStatus.include_photos !== true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
                 </Row>
                 <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
                   <Btn style={{ flex: 1 }} onClick={connectDrive} disabled={driveLoading}>Reconnect</Btn>

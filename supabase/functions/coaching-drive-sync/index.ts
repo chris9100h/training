@@ -173,7 +173,12 @@ async function sheets(path: string, access: string, options: RequestInit = {}) {
   return res;
 }
 
-function q(value: string) { return `'${String(value).replaceAll("'", "\\'")}'`; }
+function q(value: string) {
+  // Google Drive query literals require both backslashes and apostrophes to be
+  // escaped. Check-in IDs are client-created text, so neither is safe to pass
+  // through unchanged.
+  return `'${String(value).replaceAll('\\', '\\\\').replaceAll("'", "\\'")}'`;
+}
 
 async function findFile(access: string, name: string, mimeType: string, parent: string | null) {
   const clauses = [`name = ${q(name)}`, `mimeType = ${q(mimeType)}`, 'trashed = false'];
@@ -268,10 +273,10 @@ function storageObjectUrl(path: string) {
   return `${base()}/storage/v1/object/${encodeURIComponent(BUCKET)}/${encoded}`;
 }
 
-async function deleteStagingObject(path: string, tolerateMissing = true) {
+async function deleteStagingObject(path: string, tolerateMissing = true, timeoutMs = 10000) {
   const res = await timedFetch(storageObjectUrl(path), {
     method: 'DELETE', headers: { Authorization: `Bearer ${serviceKey()}`, apikey: serviceKey() },
-  }, 10000);
+  }, timeoutMs);
   if (res.ok || (tolerateMissing && res.status === 404)) return;
   const error = new Error(`staging photo delete ${res.status}`); (error as any).status = res.status;
   throw error;
@@ -337,10 +342,13 @@ async function listProfileNames(ids: string[]) {
 }
 
 async function syncExport(exp: any, connection: any, access: string) {
-  const checkRes = await db(`zane_checkins?id=eq.${encodeURIComponent(exp.checkin_id)}&select=id,client_id,week_start,checked_in_at,responses`);
+  const checkRes = await db(`zane_checkins?id=eq.${encodeURIComponent(exp.checkin_id)}&coaching_id=eq.${encodeURIComponent(exp.coaching_id)}&client_id=eq.${encodeURIComponent(exp.client_id)}&select=id,client_id,coaching_id,week_start,checked_in_at,responses`);
   if (!checkRes.ok) throw new Error('check-in lookup failed');
   const checkin = (await checkRes.json().catch(() => []))[0];
-  if (!checkin) throw new Error('check-in no longer exists');
+  if (!checkin) { const error = new Error('check-in relationship no longer exists'); (error as any).permanent = true; throw error; }
+  const relationRes = await db(`zane_coaching?id=eq.${encodeURIComponent(exp.coaching_id)}&coach_id=eq.${encodeURIComponent(exp.coach_id)}&client_id=eq.${encodeURIComponent(exp.client_id)}&status=eq.active&select=id`);
+  if (!relationRes.ok) throw new Error('coaching relationship lookup failed');
+  if (!((await relationRes.json().catch(() => []))[0])) { const error = new Error('coaching relationship is no longer active'); (error as any).permanent = true; throw error; }
   const profileRes = await db(`zane_profiles?id=eq.${encodeURIComponent(exp.client_id)}&select=name`);
   if (!profileRes.ok) throw new Error('client profile lookup failed');
   const profile = (await profileRes.json().catch(() => []))[0] || {};
@@ -349,6 +357,7 @@ async function syncExport(exp: any, connection: any, access: string) {
   if (!schemaRes.ok) throw new Error('check-in schema lookup failed');
   const schema = (await schemaRes.json().catch(() => []))[0]?.checkin_schema || [];
   const root = connection.root_folder_id || await ensureFolder(access, 'ZANE Coaching', null);
+  connection.root_folder_id = root;
   const clients = await ensureFolder(access, 'Clients', root);
   // Names are presentation only.  Stable Drive appProperties prevent two
   // clients named the same (or two check-ins in one week) from sharing and
@@ -387,8 +396,16 @@ async function syncExport(exp: any, connection: any, access: string) {
           if (status === 401 || status === 403) photoNeedsReauth = true;
           await db(`zane_coaching_drive_photos?id=eq.${encodeURIComponent(photo.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ last_error: String((error as any)?.message || 'Photo export failed').slice(0, 500) }) });
         } else {
-          const failRes = await db(`zane_coaching_drive_photos?id=eq.${encodeURIComponent(photo.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', last_error: String((error as any)?.message || 'Photo export failed').slice(0, 500) }) });
+          // A terminal provider/storage 4xx must not strand the private
+          // staging object. Keep the row retryable until the delete succeeds;
+          // the janitor can then finish the cleanup if this request dies.
+          let removed = false;
+          try { await deleteStagingObject(photo.staging_path); removed = true; } catch (_) { /* keep staged for janitor */ }
+          const failRes = await db(`zane_coaching_drive_photos?id=eq.${encodeURIComponent(photo.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(removed
+            ? { status: 'failed', staging_cleaned_at: new Date().toISOString(), last_error: String((error as any)?.message || 'Photo export failed').slice(0, 500) }
+            : { status: 'staged', last_error: `Photo cleanup pending: ${String((error as any)?.message || 'Photo export failed').slice(0, 440)}` }) });
           if (!failRes.ok) retryablePhotoFailure = true;
+          if (!removed) retryablePhotoFailure = true;
         }
       }
     }
@@ -404,27 +421,6 @@ async function syncExport(exp: any, connection: any, access: string) {
     }
   }
   await replaceSheet(access, sheet, [...flattenResponses(checkin.responses || {}, checkin, schema), ['', ''], ...photoRows]);
-  const overviewId = connection.overview_spreadsheet_id || await ensureSheet(access, 'Check-in Overview', root, { key: 'zaneOverviewCoachId', value: String(exp.coach_id) });
-  const all = await listCoachExports(exp.coach_id);
-  const clientIds = [...new Set(all.map(row => row.client_id).filter(Boolean))];
-  const names = await listProfileNames(clientIds);
-  const overview: string[][] = [['Client', 'Week starting', 'Status', 'Weight', 'Days trained', 'Steps', 'Cardio minutes', 'Macro adherence', 'Detail sheet', 'Photos']];
-  for (const row of all) {
-    const values = row.checkin?.responses || {};
-    overview.push([
-      names.get(row.client_id) || row.client_id,
-      row.checkin_id === exp.checkin_id ? row.week_start : row.week_start,
-      row.checkin_id === exp.checkin_id ? 'succeeded' : row.status,
-      String(values.weight_today ?? values.weight_avg_last_week ?? ''), String(values.days_trained ?? ''),
-      String(values.steps ?? ''), String(values.cardio_minutes ?? ''), String(values.macro_adherence ?? ''),
-      row.checkin_id === exp.checkin_id
-        ? `https://docs.google.com/spreadsheets/d/${sheet}`
-        : row.spreadsheet_id ? `https://docs.google.com/spreadsheets/d/${row.spreadsheet_id}` : '',
-      String(row.checkin_id === exp.checkin_id ? photoRows.length - 1 : (row.photo_count ?? 0)),
-    ]);
-  }
-  await appendOverview(access, overviewId, overview);
-  if (!connection.root_folder_id || !connection.overview_spreadsheet_id) await updateConnection(connection.id, { root_folder_id: root, overview_spreadsheet_id: overviewId });
   if (photoNeedsReauth) {
     const error = new Error('Google authorization is required to export photos');
     (error as any).status = 401;
@@ -433,6 +429,39 @@ async function syncExport(exp: any, connection: any, access: string) {
   }
   if (retryablePhotoFailure) throw new Error('one or more photos need another Drive export attempt');
   return { spreadsheetId: sheet, clientFolderId: clientFolder, photoCount: photoRows.length - 1 };
+}
+
+async function syncOverview(coachId: string, connection: any, access: string, overrides: Map<string, any>) {
+  const hadRoot = Boolean(connection.root_folder_id);
+  const hadOverview = Boolean(connection.overview_spreadsheet_id);
+  const root = connection.root_folder_id || await ensureFolder(access, 'ZANE Coaching', null);
+  connection.root_folder_id = root;
+  const overviewId = connection.overview_spreadsheet_id || await ensureSheet(access, 'Check-in Overview', root, { key: 'zaneOverviewCoachId', value: String(coachId) });
+  connection.overview_spreadsheet_id = overviewId;
+  const all = await listCoachExports(coachId);
+  const clientIds = [...new Set(all.map(row => row.client_id).filter(Boolean))];
+  const names = await listProfileNames(clientIds);
+  const overview: string[][] = [['Client', 'Week starting', 'Status', 'Weight', 'Days trained', 'Steps', 'Cardio minutes', 'Macro adherence', 'Detail sheet', 'Photos']];
+  for (const row of all) {
+    const values = row.checkin?.responses || {};
+    const override = overrides.get(String(row.checkin_id));
+    const status = override?.status || row.status;
+    const spreadsheetId = override?.spreadsheetId || row.spreadsheet_id;
+    const photoCount = override?.photoCount ?? row.photo_count ?? 0;
+    overview.push([
+      names.get(row.client_id) || row.client_id,
+      row.week_start,
+      status,
+      String(values.weight_today ?? values.weight_avg_last_week ?? ''), String(values.days_trained ?? ''),
+      String(values.steps ?? ''), String(values.cardio_minutes ?? ''), String(values.macro_adherence ?? ''),
+      spreadsheetId ? `https://docs.google.com/spreadsheets/d/${spreadsheetId}` : '',
+      String(photoCount),
+    ]);
+  }
+  await appendOverview(access, overviewId, overview);
+  if (!hadRoot || !hadOverview) {
+    await updateConnection(connection.id, { root_folder_id: root, overview_spreadsheet_id: overviewId });
+  }
 }
 
 async function startOAuth(userId: string) {
@@ -446,7 +475,7 @@ async function startOAuth(userId: string) {
   const state = b64(randomBytes(32)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
   const stateRes = await db('zane_coaching_drive_oauth_states', { method: 'POST', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ state, coach_id: userId, expires_at: new Date(Date.now() + 10 * 60 * 1000).toISOString() }) });
   if (!stateRes.ok) throw new Error('could not create OAuth state');
-  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent', scope: 'https://www.googleapis.com/auth/drive.file', state });
+  const params = new URLSearchParams({ client_id: clientId, redirect_uri: redirectUri, response_type: 'code', access_type: 'offline', prompt: 'consent', scope: 'openid email https://www.googleapis.com/auth/drive.file', state });
   return `https://accounts.google.com/o/oauth2/v2/auth?${params}`;
 }
 
@@ -478,7 +507,7 @@ async function queueBackfill(coachId: string) {
       if (!checksRes.ok) throw new Error('check-in backfill lookup failed');
       const checks = await checksRes.json().catch(() => null);
       if (!Array.isArray(checks)) throw new Error('check-in backfill returned invalid data');
-      checks.forEach(checkin => rows.push({ coach_id: coachId, client_id: relation.client_id, coaching_id: relation.id, checkin_id: checkin.id, week_start: checkin.week_start }));
+      checks.forEach(checkin => rows.push({ coach_id: coachId, client_id: relation.client_id, coaching_id: relation.id, checkin_id: checkin.id, week_start: checkin.week_start, status: 'pending', next_attempt_at: new Date().toISOString(), last_error: null, locked_at: null, locked_by: null }));
     }
     for (let i = 0; i < rows.length; i += 200) {
       const res = await db('zane_coaching_drive_exports?on_conflict=coach_id,checkin_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify(rows.slice(i, i + 200)) });
@@ -490,6 +519,7 @@ async function queueBackfill(coachId: string) {
 
 async function callback(req: Request) {
   const url = new URL(req.url); const state = url.searchParams.get('state') || ''; const code = url.searchParams.get('code');
+  if (url.searchParams.get('error')) return redirect(`${appOrigin()}?coachingDrive=cancelled`);
   if (!state || !code) return redirect(`${appOrigin()}?coachingDrive=error`);
   const stateRes = await db(`zane_coaching_drive_oauth_states?state=eq.${encodeURIComponent(state)}&consumed_at=is.null&expires_at=gt.${encodeURIComponent(new Date().toISOString())}&select=state,coach_id`, { method: 'PATCH', headers: { Prefer: 'return=representation' }, body: JSON.stringify({ consumed_at: new Date().toISOString() }) });
   if (!stateRes.ok) return redirect(`${appOrigin()}?coachingDrive=expired`);
@@ -520,16 +550,26 @@ async function callback(req: Request) {
   return redirect(`${appOrigin()}?coachingDrive=connected`);
 }
 
-async function cleanupStalePhotos() {
-  const cutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
-  const res = await db(`zane_coaching_drive_photos?status=eq.staged&created_at=lt.${encodeURIComponent(cutoff)}&select=id,staging_path&order=created_at&limit=100`);
-  if (!res.ok) throw new Error('stale photo lookup failed');
-  const rows = await res.json().catch(() => []);
-  if (!Array.isArray(rows)) throw new Error('stale photo lookup returned invalid data');
+async function cleanupStalePhotos(limit = 20, budgetMs = 6000) {
+  const stagedCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const failedCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const rows: any[] = [];
+  for (const query of [
+    `zane_coaching_drive_photos?status=eq.staged&staging_cleaned_at=is.null&created_at=lt.${encodeURIComponent(stagedCutoff)}&select=id,staging_path&order=created_at&limit=${limit}`,
+    `zane_coaching_drive_photos?status=eq.failed&staging_cleaned_at=is.null&created_at=lt.${encodeURIComponent(failedCutoff)}&select=id,staging_path&order=created_at&limit=${limit}`,
+  ]) {
+    const res = await db(query);
+    if (!res.ok) throw new Error('stale photo lookup failed');
+    const page = await res.json().catch(() => []);
+    if (!Array.isArray(page)) throw new Error('stale photo lookup returned invalid data');
+    rows.push(...page);
+  }
+  const deadline = Date.now() + budgetMs;
   for (const row of rows) {
+    if (Date.now() >= deadline) break;
     try {
-      await deleteStagingObject(row.staging_path);
-      const patchRes = await db(`zane_coaching_drive_photos?id=eq.${encodeURIComponent(row.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', last_error: 'Staging photo expired after 30 days' }) });
+      await deleteStagingObject(row.staging_path, true, 2500);
+      const patchRes = await db(`zane_coaching_drive_photos?id=eq.${encodeURIComponent(row.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', staging_cleaned_at: new Date().toISOString(), last_error: 'Staging photo expired and was cleaned up' }) });
       if (!patchRes.ok) console.error('[coaching-drive] stale photo metadata update failed', row.id, patchRes.status);
     } catch (error) {
       console.error('[coaching-drive] stale photo cleanup failed', row.id, error);
@@ -537,14 +577,16 @@ async function cleanupStalePhotos() {
   }
 }
 
-async function cleanupExpiredPhotoReservations() {
-  const res = await db(`zane_coaching_drive_photo_reservations?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&select=staging_path&order=expires_at&limit=100`);
+async function cleanupExpiredPhotoReservations(limit = 20, budgetMs = 6000) {
+  const res = await db(`zane_coaching_drive_photo_reservations?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&select=staging_path&order=expires_at&limit=${limit}`);
   if (!res.ok) throw new Error('expired photo reservation lookup failed');
   const rows = await res.json().catch(() => []);
   if (!Array.isArray(rows)) throw new Error('expired photo reservation returned invalid data');
+  const deadline = Date.now() + budgetMs;
   for (const row of rows) {
+    if (Date.now() >= deadline) break;
     try {
-      await deleteStagingObject(row.staging_path);
+      await deleteStagingObject(row.staging_path, true, 2500);
       const deleteRes = await db(`zane_coaching_drive_photo_reservations?staging_path=eq.${encodeURIComponent(row.staging_path)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
       if (!deleteRes.ok) console.error('[coaching-drive] expired reservation delete failed', row.staging_path, deleteRes.status);
     } catch (error) {
@@ -553,61 +595,137 @@ async function cleanupExpiredPhotoReservations() {
   }
 }
 
+async function cleanupPhotoTombstones(limit = 20, budgetMs = 6000) {
+  const res = await db(`zane_coaching_drive_photo_cleanup?select=staging_path&order=created_at&limit=${limit}`);
+  if (!res.ok) throw new Error('photo cleanup tombstone lookup failed');
+  const rows = await res.json().catch(() => []);
+  if (!Array.isArray(rows)) throw new Error('photo cleanup tombstone returned invalid data');
+  const deadline = Date.now() + budgetMs;
+  for (const row of rows) {
+    if (Date.now() >= deadline) break;
+    try {
+      await deleteStagingObject(row.staging_path, true, 2500);
+      const deleteRes = await db(`zane_coaching_drive_photo_cleanup?staging_path=eq.${encodeURIComponent(row.staging_path)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      if (!deleteRes.ok) console.error('[coaching-drive] photo cleanup tombstone delete failed', row.staging_path, deleteRes.status);
+    } catch (error) {
+      console.error('[coaching-drive] photo cleanup tombstone failed', row.staging_path, error);
+    }
+  }
+}
+
+async function runPhotoJanitors() {
+  // Janitors are bounded, best-effort maintenance. They must never delay or
+  // prevent the core Drive outbox from being claimed when Storage is slow.
+  for (const [name, job] of [
+    ['expired-reservations', cleanupExpiredPhotoReservations],
+    ['deleted-checkins', cleanupPhotoTombstones],
+    ['stale-photos', cleanupStalePhotos],
+  ] as const) {
+    try { await job(20, 6000); }
+    catch (error) { console.error(`[coaching-drive] ${name} janitor`, error); }
+  }
+}
+
+async function claimPhotoJanitor(worker: string) {
+  const res = await db('rpc/claim_coaching_drive_janitor', {
+    method: 'POST', body: JSON.stringify({ p_worker: worker }),
+  });
+  if (!res.ok) {
+    console.error('[coaching-drive] janitor lease lookup failed', res.status);
+    return false;
+  }
+  const body = await res.json().catch(() => null);
+  return body === true
+    || (Array.isArray(body) && (body[0] === true || body[0]?.claim_coaching_drive_janitor === true))
+    || body?.claim_coaching_drive_janitor === true;
+}
+
 async function markDriveIdsStale(coachId: string) {
   const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(coachId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ root_folder_id: null, overview_spreadsheet_id: null, last_error: 'Drive folders were missing and will be recreated', updated_at: new Date().toISOString() }) });
   if (!res.ok) throw new Error(`Drive folder reset failed (${res.status})`);
   await resetExportIds(coachId);
 }
 
+async function releaseCoachLease(coachId: string, worker: string) {
+  const res = await db('rpc/release_coaching_drive_worker_lease', {
+    method: 'POST', body: JSON.stringify({ p_coach_id: coachId, p_worker: worker }),
+  });
+  if (!res.ok) console.error('[coaching-drive] coach lease release failed', coachId, res.status);
+}
+
 async function runSync() {
   const worker = `drive-${crypto.randomUUID()}`;
-  await cleanupExpiredPhotoReservations();
-  await cleanupStalePhotos();
   const claimRes = await db('rpc/claim_coaching_drive_exports', { method: 'POST', body: JSON.stringify({ p_limit: 5, p_worker: worker }) });
   if (!claimRes.ok) throw new Error('export claim failed');
   const claimed = await claimRes.json().catch(() => null);
   if (!Array.isArray(claimed)) throw new Error('export claim returned invalid data');
+  const coaches = [...new Set(claimed.map(exp => String(exp.coach_id)).filter(Boolean))];
+  const connections = new Map<string, any>();
+  const accesses = new Map<string, string>();
+  const overviewOverrides = new Map<string, Map<string, any>>();
   let succeeded = 0, failed = 0;
-  for (const exp of claimed) {
-    try {
-      const conRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(exp.coach_id)}&status=eq.connected&archive_enabled=eq.true&select=*`);
-      const connection = (await conRes.json().catch(() => []))[0]; if (!connection) throw new Error('Drive connection is not active');
-      const access = await accessToken(connection.id);
-      const result = await syncExport(exp, connection, access);
-      const finishRes = await db('rpc/finish_coaching_drive_export', { method: 'POST', body: JSON.stringify({ p_export_id: exp.id, p_worker: worker, p_status: 'succeeded', p_spreadsheet_id: result.spreadsheetId, p_client_folder_id: result.clientFolderId, p_photo_count: result.photoCount }) });
-      if (!finishRes.ok) throw new Error(`export finish failed (${finishRes.status})`);
-      const finishBody = await finishRes.json().catch(() => null);
-      const finishAcknowledged = finishBody === true
-        || (Array.isArray(finishBody) && (finishBody[0] === true || finishBody[0]?.finish_coaching_drive_export === true))
-        || finishBody?.finish_coaching_drive_export === true;
-      if (!finishAcknowledged) throw new Error('export finish was not acknowledged');
-      await updateConnection(connection.id, { last_sync_at: new Date().toISOString(), last_error: null });
-      succeeded++;
-    } catch (error) {
-      const status = (error as any)?.status;
-      const needs = status === 401 || (status === 400 && (error as any)?.googleAuthCode === 'invalid_grant');
-      const retryAt = new Date(Date.now() + Math.min(60, 2 ** Math.min(5, Number(exp.attempts || 1))) * 60 * 1000).toISOString();
-      if (status === 404) {
-        try { await markDriveIdsStale(exp.coach_id); } catch (resetError) { console.error('[coaching-drive] stale folder reset', resetError); }
+  try {
+    for (const exp of claimed) {
+      try {
+        const coachId = String(exp.coach_id);
+        let connection = connections.get(coachId);
+        if (!connection) {
+          const conRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(coachId)}&status=eq.connected&archive_enabled=eq.true&select=*`);
+          if (!conRes.ok) throw new Error(`Drive connection lookup failed (${conRes.status})`);
+          connection = (await conRes.json().catch(() => []))[0]; if (!connection) throw new Error('Drive connection is not active');
+          connections.set(coachId, connection);
+        }
+        let access = accesses.get(coachId);
+        if (!access) { access = await accessToken(connection.id); accesses.set(coachId, access); }
+        const result = await syncExport(exp, connection, access);
+        const finishRes = await db('rpc/finish_coaching_drive_export', { method: 'POST', body: JSON.stringify({ p_export_id: exp.id, p_worker: worker, p_status: 'succeeded', p_spreadsheet_id: result.spreadsheetId, p_client_folder_id: result.clientFolderId, p_photo_count: result.photoCount }) });
+        if (!finishRes.ok) throw new Error(`export finish failed (${finishRes.status})`);
+        const finishBody = await finishRes.json().catch(() => null);
+        const finishAcknowledged = finishBody === true
+          || (Array.isArray(finishBody) && (finishBody[0] === true || finishBody[0]?.finish_coaching_drive_export === true))
+          || finishBody?.finish_coaching_drive_export === true;
+        if (!finishAcknowledged) throw new Error('export finish was not acknowledged');
+        await updateConnection(connection.id, { last_sync_at: new Date().toISOString(), last_error: null });
+        if (!overviewOverrides.has(coachId)) overviewOverrides.set(coachId, new Map());
+        overviewOverrides.get(coachId)!.set(String(exp.checkin_id), { status: 'succeeded', spreadsheetId: result.spreadsheetId, photoCount: result.photoCount });
+        succeeded++;
+      } catch (error) {
+        const status = (error as any)?.status;
+        const permanent = (error as any)?.permanent === true;
+        const needs = status === 401 || (status === 400 && (error as any)?.googleAuthCode === 'invalid_grant');
+        const retryAt = new Date(Date.now() + Math.min(60, 2 ** Math.min(5, Number(exp.attempts || 1))) * 60 * 1000).toISOString();
+        if (status === 404) {
+          try { await markDriveIdsStale(exp.coach_id); } catch (resetError) { console.error('[coaching-drive] stale folder reset', resetError); }
+        }
+        const finishRes = await db('rpc/finish_coaching_drive_export', { method: 'POST', body: JSON.stringify({ p_export_id: exp.id, p_worker: worker, p_status: needs ? 'needs_reauth' : 'failed', p_error: String((error as any)?.message || 'Drive export failed').slice(0, 500), p_next_attempt_at: permanent ? '9999-12-31T00:00:00Z' : retryAt }) });
+        if (!finishRes.ok) console.error('[coaching-drive] export failure acknowledgement failed', exp.id, finishRes.status);
+        if (needs) {
+          const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(exp.coach_id)}&select=id`);
+          if (!connectionRes.ok) throw new Error('Drive reauth connection lookup failed');
+          const connection = (await connectionRes.json().catch(() => []))[0];
+          if (connection?.id) await updateConnection(connection.id, { status: 'needs_reauth', last_error: String((error as any)?.message || 'Google authorization expired').slice(0, 500) });
+        }
+        failed++;
       }
-      const finishRes = await db('rpc/finish_coaching_drive_export', { method: 'POST', body: JSON.stringify({ p_export_id: exp.id, p_worker: worker, p_status: needs ? 'needs_reauth' : 'failed', p_error: String((error as any)?.message || 'Drive export failed').slice(0, 500), p_next_attempt_at: retryAt }) });
-      if (!finishRes.ok) console.error('[coaching-drive] export failure acknowledgement failed', exp.id, finishRes.status);
-      if (needs) {
-        const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(exp.coach_id)}&select=id`);
-        if (!connectionRes.ok) throw new Error('Drive reauth connection lookup failed');
-        const connection = (await connectionRes.json().catch(() => []))[0];
-        if (connection?.id) await updateConnection(connection.id, { status: 'needs_reauth', last_error: String((error as any)?.message || 'Google authorization expired').slice(0, 500) });
-      }
-      failed++;
     }
+    for (const coachId of coaches) {
+      const connection = connections.get(coachId);
+      const access = accesses.get(coachId);
+      if (!connection || !access) continue;
+      try { await syncOverview(coachId, connection, access, overviewOverrides.get(coachId) || new Map()); }
+      catch (error) { console.error('[coaching-drive] overview update failed', coachId, error); }
+    }
+  } finally {
+    for (const coachId of coaches) await releaseCoachLease(coachId, worker);
   }
+  if (await claimPhotoJanitor(worker)) await runPhotoJanitors();
   return { claimed: claimed.length, succeeded, failed };
 }
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
   const url = new URL(req.url);
-  if (req.method === 'GET' && url.searchParams.has('code')) {
+  if (req.method === 'GET' && (url.searchParams.has('code') || url.searchParams.has('error') || url.searchParams.has('state'))) {
     try { return await callback(req); } catch (error) { console.error('[coaching-drive] callback', error); return redirect(`${appOrigin()}?coachingDrive=error`); }
   }
   const body = await req.json().catch(() => ({}));
@@ -649,11 +767,25 @@ Deno.serve(async (req) => {
     return json({ ok: true });
   }
   if (body.action === 'configure') {
-    const current = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id&limit=1`);
+    const enabling = body.archiveEnabled !== false;
+    const current = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id,status&limit=1`);
     if (!current.ok) return json({ error: 'Drive status unavailable' }, 502);
-    if (!((await current.json().catch(() => []))[0])) return json({ error: 'Google Drive is not connected' }, 409);
-    const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ archive_enabled: body.archiveEnabled !== false, include_photos: body.includePhotos === true, status: body.archiveEnabled === false ? 'paused' : 'connected' }) });
+    const connection = (await current.json().catch(() => []))[0];
+    if (!connection) return json({ error: 'Google Drive is not connected' }, 409);
+    if (enabling) {
+      if (connection.status !== 'connected') return json({ error: 'Reconnect Google Drive before enabling the archive' }, 409);
+      const tokenRes = await db(`zane_coaching_drive_tokens?connection_id=eq.${encodeURIComponent(connection.id)}&select=connection_id&limit=1`);
+      if (!tokenRes.ok) return json({ error: 'Drive token status unavailable' }, 502);
+      if (!((await tokenRes.json().catch(() => []))[0])) return json({ error: 'Reconnect Google Drive before enabling the archive' }, 409);
+    }
+    const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ archive_enabled: enabling, include_photos: enabling && body.includePhotos === true, status: enabling ? 'connected' : 'paused', updated_at: new Date().toISOString() }) });
     if (!res.ok) return json({ error: 'could not update Drive settings' }, 502);
+    if (!enabling) {
+      const pauseRes = await db(`zane_coaching_drive_exports?coach_id=eq.${encodeURIComponent(userId)}&status=in.(pending,processing,failed,needs_reauth)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', next_attempt_at: '9999-12-31T00:00:00Z', last_error: 'Drive archive disabled', locked_at: null, locked_by: null, updated_at: new Date().toISOString() }) });
+      if (!pauseRes.ok) return json({ error: 'could not pause Drive exports' }, 502);
+    } else {
+      try { await queueBackfill(userId); } catch (error) { return json({ error: String((error as any)?.message || 'could not resume Drive exports') }, 502); }
+    }
     return json({ ok: true });
   }
   if (body.action === 'retry') {

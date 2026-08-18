@@ -1400,14 +1400,14 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
           <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Photos for your coach</span>
         </div>
         <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.45, marginBottom: 9 }}>Optional. Up to 8 JPG, PNG or WebP images, 8 MB each.</div>
-        <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e => {
+        <input type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={saving} onChange={e => {
           const next = Array.from(e.target.files || []).slice(0, Math.max(0, 8 - photos.length));
           setPhotos(prev => [...prev, ...next]); e.target.value = '';
         }} style={{ width: '100%', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }} />
         {photos.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
           {photos.map((file, i) => <div key={`${file.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
             <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
-            <button type="button" onClick={() => setPhotos(prev => prev.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', color: UI.inkFaint, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+            <button type="button" disabled={saving} onClick={() => setPhotos(prev => prev.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', color: UI.inkFaint, opacity: saving ? 0.45 : 1, cursor: saving ? 'default' : 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
           </div>)}
         </div>}
       </div>}

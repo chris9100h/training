@@ -95,6 +95,9 @@ const EXCLUDED = {
   zane_coaching_drive_exports: 'rebuildable Drive export outbox and links; check-in source data remains in zane_checkins',
   zane_coaching_drive_photos: 'temporary Drive staging metadata and paths; image bytes are external archive material',
   zane_coaching_drive_photo_reservations: 'short-lived upload reservations; expired rows and staged objects are janitored, never backup data',
+  zane_coaching_drive_photo_cleanup: 'service-only staging cleanup tombstones; operational rows rebuilt by the Drive janitor',
+  zane_coaching_drive_worker_leases: 'short-lived service-only Drive worker leases; operational coordination state, never user content',
+  zane_coaching_drive_maintenance: 'short-lived service-only Drive janitor lease; operational coordination state, never user content',
 };
 
 // Columns that legitimately never round-trip.

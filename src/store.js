@@ -8389,12 +8389,15 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   const weekStart = weekStartArg || checkinWeekStart();
   let id = (typeof existingRef === 'string' && existingRef) ? existingRef : null;
   if (!id) {
-    // A failed lookup falls through to a fresh id, which is the behaviour this
-    // whole block replaces: no worse than before, and never a reason to refuse
-    // a check-in the user has already filled in.
+    // Never invent a new primary key when the lookup is ambiguous. An existing
+    // export/outbox row may already reference the week's check-in; allowing an
+    // upsert with a random id would turn a transient SELECT failure into a
+    // foreign-key conflict (or a detached Drive export).
     const { data: prior, error: priorErr } = await _supabase.from('zane_checkins')
       .select('id').eq('coaching_id', coachingId).eq('week_start', weekStart).maybeSingle();
-    if (priorErr && priorErr.code !== 'PGRST116') console.error('submitCheckin: existing-row lookup failed', priorErr);
+    if (priorErr && priorErr.code !== 'PGRST116') {
+      throw new Error('Could not verify the existing check-in. Please try again.');
+    }
     id = prior?.id || ('ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
   }
   const row = {

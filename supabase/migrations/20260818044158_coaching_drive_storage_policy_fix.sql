@@ -136,11 +136,26 @@ BEGIN
   SELECT count(*) INTO v_count FROM public.zane_coaching_drive_photos
   WHERE checkin_id = NEW.checkin_id AND status <> 'failed';
   IF v_count >= 8 THEN RAISE EXCEPTION 'a check-in can contain at most eight photos'; END IF;
-  DELETE FROM public.zane_coaching_drive_photo_reservations WHERE staging_path = NEW.staging_path;
   RETURN NEW;
 END;
 $function$;
 REVOKE ALL ON FUNCTION public.coaching_drive_photo_guard() FROM PUBLIC, anon, authenticated;
+
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_consume_reservation()
+RETURNS trigger LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+BEGIN
+  DELETE FROM public.zane_coaching_drive_photo_reservations
+  WHERE staging_path = NEW.staging_path;
+  RETURN NEW;
+END;
+$function$;
+REVOKE ALL ON FUNCTION public.coaching_drive_photo_consume_reservation() FROM PUBLIC, anon, authenticated;
+
+DROP TRIGGER IF EXISTS coaching_drive_photo_consume_reservation ON public.zane_coaching_drive_photos;
+CREATE TRIGGER coaching_drive_photo_consume_reservation
+  AFTER INSERT ON public.zane_coaching_drive_photos
+  FOR EACH ROW EXECUTE FUNCTION public.coaching_drive_photo_consume_reservation();
 
 DROP POLICY IF EXISTS coaching_drive_photo_insert ON public.zane_coaching_drive_photos;
 CREATE POLICY coaching_drive_photo_insert ON public.zane_coaching_drive_photos

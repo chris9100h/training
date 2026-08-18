@@ -7750,6 +7750,7 @@ CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photos (
   status text NOT NULL DEFAULT 'staged',
   last_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
+  staging_cleaned_at timestamptz,
   uploaded_at timestamptz
 );
 CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photo_reservations (
@@ -7763,6 +7764,23 @@ CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photo_reservations (
   expires_at timestamptz NOT NULL DEFAULT (now() + interval '15 minutes'),
   created_at timestamptz NOT NULL DEFAULT now()
 );
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photo_cleanup (
+  staging_path text PRIMARY KEY,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_worker_leases (
+  coach_id uuid PRIMARY KEY,
+  worker text NOT NULL,
+  locked_at timestamptz NOT NULL DEFAULT now(),
+  expires_at timestamptz NOT NULL,
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_maintenance (
+  id boolean PRIMARY KEY DEFAULT true,
+  worker text NOT NULL DEFAULT '',
+  locked_until timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE OR REPLACE FUNCTION public.claim_coaching_drive_exports(integer, text) RETURNS SETOF public.zane_coaching_drive_exports
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN; END; $function$;
@@ -7772,6 +7790,12 @@ CREATE OR REPLACE FUNCTION public.enqueue_coaching_drive_export() RETURNS trigge
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
 CREATE OR REPLACE FUNCTION public.enqueue_coaching_drive_photo_export() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_consume_reservation() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
+CREATE OR REPLACE FUNCTION public.capture_coaching_drive_photo_cleanup() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN OLD; END; $function$;
+CREATE OR REPLACE FUNCTION public.capture_coaching_drive_photo_row_cleanup() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN OLD; END; $function$;
 CREATE OR REPLACE FUNCTION public.coaching_drive_photo_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
 CREATE OR REPLACE FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) RETURNS boolean
@@ -7782,6 +7806,10 @@ CREATE OR REPLACE FUNCTION public.reserve_coaching_drive_photo(text, text, text,
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NULL; END; $function$;
 CREATE OR REPLACE FUNCTION public.release_coaching_drive_photo_reservation(text) RETURNS boolean
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+CREATE OR REPLACE FUNCTION public.release_coaching_drive_worker_lease(uuid, text) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+CREATE OR REPLACE FUNCTION public.claim_coaching_drive_janitor(text) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
 REVOKE ALL ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) TO authenticated;
 REVOKE ALL ON FUNCTION public.coaching_drive_photo_reservation_allowed(text, uuid) FROM PUBLIC, anon;
@@ -7790,3 +7818,7 @@ REVOKE ALL ON FUNCTION public.reserve_coaching_drive_photo(text, text, text, tex
 GRANT EXECUTE ON FUNCTION public.reserve_coaching_drive_photo(text, text, text, text, integer) TO authenticated;
 REVOKE ALL ON FUNCTION public.release_coaching_drive_photo_reservation(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.release_coaching_drive_photo_reservation(text) TO authenticated;
+REVOKE ALL ON FUNCTION public.release_coaching_drive_worker_lease(uuid, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.release_coaching_drive_worker_lease(uuid, text) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_coaching_drive_janitor(text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_coaching_drive_janitor(text) TO service_role;
