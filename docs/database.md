@@ -891,3 +891,42 @@ Web-Push-Registrierungen werden ausschließlich über `register_web_push_subscri
 `pg_net.ttl` ist eine SIGHUP-level Supabase-Betriebseinstellung und wird deshalb nicht innerhalb der transaktionalen Schema-Migration geändert. Der Rollout setzt sie über `supabase postgres-config` auf eine Stunde und verifiziert anschließend `SHOW "pg_net.ttl"`; die Migration entfernt nur den redundant benannten Cleanup-Cron-Job.
 
 Migration 0279 also adds `zane_coaching_notes_guard_insert`, which forces coaching-note `created_at` to server time, and `social_profile_touch_friendships`, which touches accepted friendship rows after profile changes so subscribed clients refresh shared metric data. Both are SECURITY DEFINER triggers with no direct client EXECUTE grant.
+
+### `zane_coaching_drive_connections`
+
+- `id` (uuid, primary key), `coach_id` (uuid, unique coach owner)
+- `google_account_email`, `root_folder_id`, `overview_spreadsheet_id` (text, nullable)
+- `status` (`connected`, `needs_reauth`, `paused` or `error`), `archive_enabled`, `include_photos`
+- `connected_at`, `last_sync_at`, `last_error`, `created_at`, `updated_at`
+
+### `zane_coaching_drive_tokens`
+
+- `connection_id` (uuid, primary key), `refresh_token_ciphertext`, `refresh_token_iv` (encrypted service-only token)
+- `key_version` (integer), `created_at`, `updated_at`
+
+### `zane_coaching_drive_oauth_states`
+
+- `state` (text, one-time primary key), `coach_id` (uuid), `expires_at`, `consumed_at`, `created_at`
+
+### `zane_coaching_drive_exports`
+
+- `id` (uuid, primary key), `coach_id`, `client_id` (uuid), `coaching_id`, `checkin_id` (text references)
+- `week_start` (date), `status`, `spreadsheet_id`, `drive_file_id`, `client_folder_id`
+- `photo_count`, `attempts`, `next_attempt_at`, `locked_at`, `locked_by`, `last_error`, `exported_at`, `created_at`, `updated_at`
+
+### `zane_coaching_drive_photos`
+
+- `id` (uuid, primary key), `coaching_id`, `checkin_id` (text), `client_id` (uuid)
+- `staging_path`, `drive_file_id`, `file_name`, `mime_type`, `byte_size`, `status`, `last_error`, `created_at`, `uploaded_at`
+
+### Coaching Drive / Google Sheets archive
+
+`zane_coaching_drive_connections` stores only a coach's Drive connection status and the IDs of the coach-owned `ZANE Coaching`, `Clients` and overview files. The OAuth refresh token is encrypted inside the service-only `zane_coaching_drive_tokens` table and is never exposed to the browser, a normal authenticated role or a user backup. `zane_coaching_drive_oauth_states` is a short-lived, one-use OAuth CSRF record.
+
+Each submitted `zane_checkins` row is queued by the `zane_checkins_drive_export` trigger in `zane_coaching_drive_exports` when that coach has enabled the archive. The service-only `claim_coaching_drive_exports` and `finish_coaching_drive_export` functions lease small batches and make retries idempotent. The Edge worker writes one Google Sheet per check-in into the client's Drive folder and rewrites one coach-wide `Check-in Overview` Sheet containing one row per client/check-in plus a link to the detail Sheet. Drive/API failures change export status only and cannot roll back a saved check-in.
+
+Optional check-in photos are staged briefly in the private `coaching-drive-staging` bucket (JPG/PNG/WebP, maximum 8 MB each and eight per check-in). After a successful Drive upload the worker deletes the staging object. This avoids permanent Supabase image storage but still provides a retryable source when Google is temporarily unavailable; Google Drive quota and API limits still apply.
+
+The `coaching-drive-sync` Edge Function owns OAuth start/callback, encrypted token exchange, status/settings, and the cron-triggered export worker. It requires `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REDIRECT_URI`, `GOOGLE_TOKEN_ENCRYPTION_KEY`, and a cron/worker secret in Edge secrets. Its `verify_jwt = false` setting is versioned in `supabase/config.toml` because Google's callback and the cron worker authenticate with the one-time OAuth state and worker secret respectively; browser actions still resolve and validate the caller's Supabase JWT inside the handler. Use the narrow `drive.file` scope; publish/verify the Google OAuth app before production because Google OAuth refresh tokens in an unverified Testing app expire after seven days. The one-minute production cron is configured separately with that environment's function URL and the Vault-backed `cron_shared_secret`; it is intentionally not hardcoded into a migration that is replayed on preview branches. Migrations `20260818033825_coaching_drive_sheets`, `20260818040652_coaching_drive_hardening` and `20260818041839_coaching_drive_indexes`. The trigger function `enqueue_coaching_drive_export()` is service-only and only writes a queue row.
+
+`coaching_drive_photo_guard()` is a service-only trigger helper. It verifies that the staged photo's check-in, coaching relationship, client UUID, private object path and existing staging object are the same row and serializes the eight-photo limit per check-in. A second trigger, `enqueue_coaching_drive_photo_export()`, requeues an export when a photo arrives after the check-in itself, so a slow mobile upload cannot be missed. Staging uploads are allowed only for an active, connected coach archive with photo inclusion enabled; a bounded 30-day janitor handles abandoned private objects. Migrations `20260818034317_coaching_drive_photo_guards`, `20260818034519_coaching_drive_acl` and `20260818040652_coaching_drive_hardening` keep all queue/trigger helpers inaccessible to app roles.

@@ -1,0 +1,5 @@
+# The coaching Drive function has two non-JWT entry points: Google's OAuth
+# callback and the pg_cron worker. The handler performs its own strict checks:
+# resolveUser for browser actions and CRON_SECRET/DRIVE_WORKER_SECRET for sync.
+[functions.coaching-drive-sync]
+verify_jwt = false

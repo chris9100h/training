@@ -7685,3 +7685,81 @@ REVOKE EXECUTE ON FUNCTION public.is_allowed_web_push_endpoint(text) FROM PUBLIC
 GRANT EXECUTE ON FUNCTION public.is_allowed_web_push_endpoint(text) TO service_role;
 REVOKE EXECUTE ON FUNCTION public.register_web_push_subscription(text, text, text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.register_web_push_subscription(text, text, text) TO authenticated;
+-- ── Coaching Drive / Google Sheets archive ───────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_connections (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL,
+  google_account_email text,
+  root_folder_id text,
+  overview_spreadsheet_id text,
+  status text NOT NULL DEFAULT 'connected',
+  archive_enabled boolean NOT NULL DEFAULT true,
+  include_photos boolean NOT NULL DEFAULT false,
+  connected_at timestamptz NOT NULL DEFAULT now(),
+  last_sync_at timestamptz,
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_tokens (
+  connection_id uuid PRIMARY KEY,
+  refresh_token_ciphertext text NOT NULL,
+  refresh_token_iv text NOT NULL,
+  key_version integer NOT NULL DEFAULT 1,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_oauth_states (
+  state text PRIMARY KEY,
+  coach_id uuid NOT NULL,
+  expires_at timestamptz NOT NULL,
+  consumed_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_exports (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coach_id uuid NOT NULL,
+  client_id uuid NOT NULL,
+  coaching_id text NOT NULL,
+  checkin_id text NOT NULL,
+  week_start date NOT NULL,
+  status text NOT NULL DEFAULT 'pending',
+  spreadsheet_id text,
+  drive_file_id text,
+  client_folder_id text,
+  photo_count integer NOT NULL DEFAULT 0,
+  attempts integer NOT NULL DEFAULT 0,
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  locked_at timestamptz,
+  locked_by text,
+  last_error text,
+  exported_at timestamptz,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  coaching_id text NOT NULL,
+  checkin_id text NOT NULL,
+  client_id uuid NOT NULL,
+  staging_path text NOT NULL,
+  drive_file_id text,
+  file_name text NOT NULL,
+  mime_type text NOT NULL,
+  byte_size integer NOT NULL,
+  status text NOT NULL DEFAULT 'staged',
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  uploaded_at timestamptz
+);
+
+CREATE OR REPLACE FUNCTION public.claim_coaching_drive_exports(integer, text) RETURNS SETOF public.zane_coaching_drive_exports
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN; END; $function$;
+CREATE OR REPLACE FUNCTION public.finish_coaching_drive_export(uuid, text, text, text, text, text, integer, text, timestamptz) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+CREATE OR REPLACE FUNCTION public.enqueue_coaching_drive_export() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
+CREATE OR REPLACE FUNCTION public.enqueue_coaching_drive_photo_export() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_guard() RETURNS trigger
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;

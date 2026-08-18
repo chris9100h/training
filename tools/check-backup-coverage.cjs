@@ -89,6 +89,11 @@ const EXCLUDED = {
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
   zane_meal_reminder_deliveries: 'server-side reminder delivery ledger, derived provider state rather than user content',
+  zane_coaching_drive_connections: 'optional external Google Drive connection metadata; files remain in the coach-owned Drive archive',
+  zane_coaching_drive_tokens: 'encrypted OAuth refresh tokens; deliberately never exported to a user backup',
+  zane_coaching_drive_oauth_states: 'short-lived one-time OAuth CSRF state; regenerated and never exported',
+  zane_coaching_drive_exports: 'rebuildable Drive export outbox and links; check-in source data remains in zane_checkins',
+  zane_coaching_drive_photos: 'temporary Drive staging metadata and paths; image bytes are external archive material',
 };
 
 // Columns that legitimately never round-trip.

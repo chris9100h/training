@@ -10,6 +10,7 @@ const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cC
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+const COACHING_DRIVE_URL    = `${SUPABASE_URL}/functions/v1/coaching-drive-sync`;
 const SOCIAL_NOTIFY_URL     = `${SUPABASE_URL}/functions/v1/zane_social-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
@@ -8473,6 +8474,10 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
     await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
   } catch (e) { console.error('Failed to send check-in note', e); }
+  // The database trigger has already queued the optional Drive export. Return
+  // the stable check-in id so the form can attach staged photos without
+  // coupling the check-in write to Google/Drive availability.
+  return id;
 }
 
 async function loadCheckins(coachingId) {
@@ -8816,6 +8821,70 @@ function macroAdherence(actual, target) {
   if (totalKcal <= 0) return null;
   const weighted = entries.reduce((s, e) => s + e.score * (e.kcal / totalKcal), 0);
   return Math.round(weighted * 100);
+}
+
+// Google Drive is an optional coach-side archive. The browser only receives
+// short-lived status/authorization URLs; refresh tokens stay inside the Edge
+// Function and its service-only encrypted table.
+async function coachingDriveRequest(action, extra = {}) {
+  const res = await fnFetch(COACHING_DRIVE_URL, { action, ...extra });
+  if (!res) throw new Error('Drive request unavailable');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Drive request failed (${res.status})`);
+  return body;
+}
+
+async function getCoachingDriveStatus() {
+  return coachingDriveRequest('status');
+}
+
+async function startCoachingDriveOAuth() {
+  const result = await coachingDriveRequest('start');
+  if (!result?.url) throw new Error('Google authorization URL missing');
+  return result.url;
+}
+
+async function disconnectCoachingDrive() {
+  return coachingDriveRequest('disconnect');
+}
+
+async function retryCoachingDriveExports() {
+  return coachingDriveRequest('retry');
+}
+
+async function getCoachingDrivePhotoStatus(coachingId) {
+  return coachingDriveRequest('photo-status', { coachingId });
+}
+
+async function configureCoachingDrive(values) {
+  return coachingDriveRequest('configure', {
+    archiveEnabled: values?.archiveEnabled !== false,
+    includePhotos: values?.includePhotos === true,
+  });
+}
+
+// Photos are deliberately staged in a private, short-lived bucket. This is
+// not the permanent archive: the Drive worker deletes each object after a
+// successful upload. A failed Drive/API call therefore has a retryable binary
+// source without putting image data into the check-in JSON itself.
+async function stageCoachingCheckinPhoto(file, coachingId, checkinId, userId) {
+  if (!file || !coachingId || !checkinId || !userId) throw new Error('Photo upload is incomplete');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Use a JPG, PNG or WebP image');
+  if (file.size <= 0 || file.size > 8 * 1024 * 1024) throw new Error('Each photo must be 8 MB or smaller');
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+  const safe = String(file.name || `photo.${ext}`).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80) || `photo.${ext}`;
+  const path = `${userId}/${checkinId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${safe}`;
+  const uploaded = await _supabase.storage.from('coaching-drive-staging').upload(path, file, { contentType: file.type, upsert: false });
+  if (uploaded.error) throw uploaded.error;
+  const { error } = await _supabase.from('zane_coaching_drive_photos').insert({
+    coaching_id: coachingId, checkin_id: checkinId, client_id: userId,
+    staging_path: path, file_name: safe, mime_type: file.type, byte_size: file.size,
+  });
+  if (error) {
+    await _supabase.storage.from('coaching-drive-staging').remove([path]).catch(() => {});
+    throw error;
+  }
+  return path;
 }
 
 // A closed historical food day keeps the target captured when it was closed,
@@ -13121,7 +13190,7 @@ window.LB = {
   supabase: _supabase,
   PLANNABLE_TECHNIQUES, plannedTechniqueLabel, plannedTechniqueShort,
   clearPrecompileCaches, clearCachesAndReload,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
@@ -13143,6 +13212,7 @@ window.LB = {
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,

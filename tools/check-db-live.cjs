@@ -146,6 +146,11 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
   'social_can_notify_finished_comment(uuid, uuid)',
   'social_can_notify_friend_started(text, uuid)',
   'social_can_notify_friend_request(uuid, uuid)',
+  'claim_coaching_drive_exports(integer, text)',
+  'finish_coaching_drive_export(uuid, text, text, text, text, text, integer, text, timestamp with time zone)',
+  'enqueue_coaching_drive_export()',
+  'enqueue_coaching_drive_photo_export()',
+  'coaching_drive_photo_guard()',
 ]);
 
 // ── Config ───────────────────────────────────────────────────────────────────

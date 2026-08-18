@@ -1264,7 +1264,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema, photosEnabled = false }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
@@ -1297,6 +1297,7 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   const [saving, setSaving] = useStateC(false);
   const [error, setError] = useStateC('');
+  const [photos, setPhotos] = useStateC([]);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -1331,7 +1332,19 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
       }
       // existing?.id, not !!existing: re-saving a check-in must keep the row's
       // primary key, see the comment on submitCheckin.
-      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, existing?.id, sections);
+      const checkinId = await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, existing?.id, sections);
+      if (photos.length) {
+        // Keep staging inside the app's write-pressure budget. The database
+        // trigger still serializes the eight-photo cap, but sequential uploads
+        // avoid eight concurrent Storage + metadata writes on mobile.
+        const results = [];
+        for (const file of photos) {
+          try { await LB.stageCoachingCheckinPhoto(file, coachingId, checkinId, userId); results.push({ status: 'fulfilled' }); }
+          catch (reason) { results.push({ status: 'rejected', reason }); }
+        }
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if (failed) setTimeout(() => UI.alert(`Check-in saved. ${failed} photo${failed === 1 ? '' : 's'} could not be staged and can be added again later.`), 0);
+      }
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -1381,6 +1394,23 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
           </div>
         );
       })}
+      {photosEnabled && <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 7, padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+          <i className="fa-solid fa-camera" style={{ color: 'var(--accent)', fontSize: 13 }} />
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Photos for your coach</span>
+        </div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.45, marginBottom: 9 }}>Optional. Up to 8 JPG, PNG or WebP images, 8 MB each.</div>
+        <input type="file" accept="image/jpeg,image/png,image/webp" multiple onChange={e => {
+          const next = Array.from(e.target.files || []).slice(0, Math.max(0, 8 - photos.length));
+          setPhotos(prev => [...prev, ...next]); e.target.value = '';
+        }} style={{ width: '100%', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }} />
+        {photos.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
+          {photos.map((file, i) => <div key={`${file.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <button type="button" onClick={() => setPhotos(prev => prev.filter((_, j) => j !== i))} style={{ border: 'none', background: 'none', color: UI.inkFaint, cursor: 'pointer', fontSize: 16, lineHeight: 1 }}>×</button>
+          </div>)}
+        </div>}
+      </div>}
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
       <Btn onClick={handleSubmit} disabled={saving}>
         {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
@@ -1425,6 +1455,16 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     return LB.fmtISO(m);
   })();
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
+  const [photosEnabled, setPhotosEnabled] = useStateC(false);
+  useEffectC(() => {
+    let alive = true;
+    setPhotosEnabled(false);
+    if (isSelf) return () => { alive = false; };
+    LB.getCoachingDrivePhotoStatus(coachingId)
+      .then(result => { if (alive) setPhotosEnabled(result?.enabled === true); })
+      .catch(() => { if (alive) setPhotosEnabled(false); });
+    return () => { alive = false; };
+  }, [coachingId, isSelf, userId]);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
@@ -1520,7 +1560,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           perfPrefill={!target ? LB.weekPerformanceSignal(store, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
-        />
+          photosEnabled={photosEnabled}
+         />
       </div>
     );
   }
