@@ -29,5 +29,8 @@ assert(/c\.status\s*=\s*'active'/i.test(exportFn) && /c\.status\s*=\s*'active'/i
 assert(/canUseCoachDrive/.test(edge) && /show_coaching_tab/.test(edge) && /be_your_own_coach/.test(edge), 'Edge role gate must allow the explicit coach workspace and self-coaching');
 assert(/queueBackfill[\s\S]*?zane_coaching\?coach_id=eq\.[\s\S]*?status=eq\.active&select=id,client_id/.test(edge), 'Drive backfill must include self-coaching rows');
 assert(/hasSelfCoachRole/.test(settings) && /showCoachingTab/.test(settings), 'Settings must expose Drive for self-coaching and pre-client coach mode');
+assert(!edge.includes('values/Sheet1:clear'), 'Sheets clear calls must use an A1 range');
+assert((edge.match(/Sheet1!A1:ZZZ/g) || []).length >= 2, 'detail and overview sheets must clear a valid range');
+assert(!/values\/Sheet1!A1:ZZZ:clear[\s\S]*?body:\s*\{\}/.test(edge), 'Sheets clear requests must have an empty body');
 
 console.log('test-coaching-drive-self OK');

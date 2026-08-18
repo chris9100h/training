@@ -265,7 +265,11 @@ function flattenResponses(responses: Record<string, unknown>, checkin: any, sche
 }
 
 async function replaceSheet(access: string, spreadsheetId: string, rows: string[][]) {
-  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/Sheet1:clear`, access, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  // The Sheets values.clear endpoint requires an A1/R1C1 range and an empty
+  // request body. `Sheet1:clear` is a malformed range and leaves newly-created
+  // sheets empty with a Google Sheets 400 before the subsequent PUT runs.
+  const clearRange = encodeURIComponent('Sheet1!A1:ZZZ');
+  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${clearRange}:clear`, access, { method: 'POST' });
   const end = String.fromCharCode(65 + Math.min(25, Math.max(1, rows.reduce((m, r) => Math.max(m, r.length), 1)) - 1)) + rows.length;
   const encoded = encodeURIComponent(`Sheet1!A1:${end}`);
   await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encoded}?valueInputOption=RAW`, access, {
@@ -274,7 +278,8 @@ async function replaceSheet(access: string, spreadsheetId: string, rows: string[
 }
 
 async function appendOverview(access: string, spreadsheetId: string, rows: string[][]) {
-  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/Sheet1:clear`, access, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+  const clearRange = encodeURIComponent('Sheet1!A1:ZZZ');
+  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${clearRange}:clear`, access, { method: 'POST' });
   const end = String.fromCharCode(65 + rows[0].length - 1) + rows.length;
   await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`Sheet1!A1:${end}`)}?valueInputOption=RAW`, access, {
     method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ range: `Sheet1!A1:${end}`, majorDimension: 'ROWS', values: rows }),
