@@ -79,8 +79,12 @@ const ASSETS = [
 const BASE_PATH = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '');
 const PUBLIC_PAGES = [
   BASE_PATH + '/welcome.html',
+  BASE_PATH + '/cloud.html',
   BASE_PATH + '/features.html',
   BASE_PATH + '/autoreg.html',
+  BASE_PATH + '/privacy.html',
+  BASE_PATH + '/cloud.js',
+  BASE_PATH + '/privacy.js',
   BASE_PATH + '/src/autoreg-guide-page.js',
 ];
 
