@@ -26,13 +26,31 @@ CREATE TRIGGER coaching_drive_photo_guard
   BEFORE INSERT ON public.zane_coaching_drive_photos
   FOR EACH ROW EXECUTE FUNCTION public.coaching_drive_photo_guard();
 
+-- RLS policies run as the client. The coach's Drive connection is deliberately
+-- not readable by clients, so expose only this boolean eligibility check via a
+-- narrowly scoped SECURITY DEFINER helper.
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_upload_allowed(
+  p_coaching_id text, p_checkin_id text, p_client_id uuid
+)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public'
+AS $function$
+  SELECT auth.uid() IS NOT NULL AND auth.uid() = p_client_id AND EXISTS (
+    SELECT 1
+    FROM public.zane_checkins ci
+    JOIN public.zane_coaching c ON c.id = ci.coaching_id AND c.client_id = ci.client_id
+    JOIN public.zane_coaching_drive_connections dc ON dc.coach_id = c.coach_id
+    WHERE ci.id = p_checkin_id AND ci.client_id = p_client_id
+      AND (p_coaching_id IS NULL OR c.id = p_coaching_id)
+      AND c.status = 'active' AND c.id NOT LIKE 'support_%'
+      AND dc.status = 'connected' AND dc.archive_enabled = true AND dc.include_photos = true
+  );
+$function$;
+
+REVOKE ALL ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) TO authenticated;
 DROP POLICY IF EXISTS coaching_drive_photo_insert ON public.zane_coaching_drive_photos;
 CREATE POLICY coaching_drive_photo_insert ON public.zane_coaching_drive_photos
   FOR INSERT TO authenticated WITH CHECK (
-    client_id = (select auth.uid()) AND EXISTS (
-      SELECT 1 FROM public.zane_coaching c
-      JOIN public.zane_checkins ci ON ci.coaching_id = c.id
-      WHERE c.id = coaching_id AND ci.id = checkin_id AND ci.client_id = (select auth.uid())
-        AND c.client_id = (select auth.uid()) AND c.status = 'active' AND c.id NOT LIKE 'support_%'
-    )
+    client_id = (select auth.uid())
+    AND public.coaching_drive_photo_upload_allowed(coaching_id, checkin_id, client_id)
   );

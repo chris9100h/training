@@ -94,6 +94,7 @@ const EXCLUDED = {
   zane_coaching_drive_oauth_states: 'short-lived one-time OAuth CSRF state; regenerated and never exported',
   zane_coaching_drive_exports: 'rebuildable Drive export outbox and links; check-in source data remains in zane_checkins',
   zane_coaching_drive_photos: 'temporary Drive staging metadata and paths; image bytes are external archive material',
+  zane_coaching_drive_photo_reservations: 'short-lived upload reservations; expired rows and staged objects are janitored, never backup data',
 };
 
 // Columns that legitimately never round-trip.

@@ -183,19 +183,36 @@ async function findFile(access: string, name: string, mimeType: string, parent: 
   return body.files?.[0] ?? null;
 }
 
-async function ensureFolder(access: string, name: string, parent: string | null) {
-  const found = await findFile(access, name, DRIVE_FILE, parent);
+async function findFileByProperty(access: string, key: string, value: string, mimeType: string, parent: string | null) {
+  const clauses = [`appProperties has { key = ${q(key)} and value = ${q(value)} }`, `mimeType = ${q(mimeType)}`, 'trashed = false'];
+  if (parent) clauses.push(`${q(parent)} in parents`);
+  const params = new URLSearchParams({ q: clauses.join(' and '), spaces: 'drive', fields: 'files(id,name,appProperties)', pageSize: '1' });
+  const body = await (await drive(`files?${params}`, access)).json();
+  return body.files?.[0] ?? null;
+}
+
+type DriveIdentity = { key: string; value: string };
+
+async function ensureFolder(access: string, name: string, parent: string | null, identity: DriveIdentity | null = null) {
+  const found = identity
+    ? await findFileByProperty(access, identity.key, identity.value, DRIVE_FILE, parent)
+    : await findFile(access, name, DRIVE_FILE, parent);
   if (found) return found.id as string;
   const body: Record<string, unknown> = { name, mimeType: DRIVE_FILE };
   if (parent) body.parents = [parent];
+  if (identity) body.appProperties = { [identity.key]: identity.value };
   const res = await drive('files', access, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return (await res.json()).id as string;
 }
 
-async function ensureSheet(access: string, name: string, parent: string) {
-  const found = await findFile(access, name, SHEET_FILE, parent);
+async function ensureSheet(access: string, name: string, parent: string, identity: DriveIdentity | null = null) {
+  const found = identity
+    ? await findFileByProperty(access, identity.key, identity.value, SHEET_FILE, parent)
+    : await findFile(access, name, SHEET_FILE, parent);
   if (found) return found.id as string;
-  const res = await drive('files', access, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, mimeType: SHEET_FILE, parents: [parent] }) });
+  const body: Record<string, unknown> = { name, mimeType: SHEET_FILE, parents: [parent] };
+  if (identity) body.appProperties = { [identity.key]: identity.value };
+  const res = await drive('files', access, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   return (await res.json()).id as string;
 }
 
@@ -333,8 +350,11 @@ async function syncExport(exp: any, connection: any, access: string) {
   const schema = (await schemaRes.json().catch(() => []))[0]?.checkin_schema || [];
   const root = connection.root_folder_id || await ensureFolder(access, 'ZANE Coaching', null);
   const clients = await ensureFolder(access, 'Clients', root);
-  const clientFolder = exp.client_folder_id || await ensureFolder(access, String(checkin.client_name || exp.client_id), clients);
-  const sheet = exp.spreadsheet_id || await ensureSheet(access, `Check-in ${checkin.week_start}`, clientFolder);
+  // Names are presentation only.  Stable Drive appProperties prevent two
+  // clients named the same (or two check-ins in one week) from sharing and
+  // overwriting one another's files; profile renames also keep history intact.
+  const clientFolder = exp.client_folder_id || await ensureFolder(access, String(checkin.client_name || exp.client_id), clients, { key: 'zaneClientId', value: String(exp.client_id) });
+  const sheet = exp.spreadsheet_id || await ensureSheet(access, `Check-in ${checkin.week_start}`, clientFolder, { key: 'zaneCheckinId', value: String(exp.checkin_id) });
   const photosRes = await db(`zane_coaching_drive_photos?checkin_id=eq.${encodeURIComponent(exp.checkin_id)}&status=in.(staged,uploaded)&select=*`);
   if (!photosRes.ok) throw new Error('check-in photo lookup failed');
   const photos = (await photosRes.json().catch(() => null));
@@ -384,7 +404,7 @@ async function syncExport(exp: any, connection: any, access: string) {
     }
   }
   await replaceSheet(access, sheet, [...flattenResponses(checkin.responses || {}, checkin, schema), ['', ''], ...photoRows]);
-  const overviewId = connection.overview_spreadsheet_id || await ensureSheet(access, 'Check-in Overview', root);
+  const overviewId = connection.overview_spreadsheet_id || await ensureSheet(access, 'Check-in Overview', root, { key: 'zaneOverviewCoachId', value: String(exp.coach_id) });
   const all = await listCoachExports(exp.coach_id);
   const clientIds = [...new Set(all.map(row => row.client_id).filter(Boolean))];
   const names = await listProfileNames(clientIds);
@@ -517,6 +537,22 @@ async function cleanupStalePhotos() {
   }
 }
 
+async function cleanupExpiredPhotoReservations() {
+  const res = await db(`zane_coaching_drive_photo_reservations?expires_at=lt.${encodeURIComponent(new Date().toISOString())}&select=staging_path&order=expires_at&limit=100`);
+  if (!res.ok) throw new Error('expired photo reservation lookup failed');
+  const rows = await res.json().catch(() => []);
+  if (!Array.isArray(rows)) throw new Error('expired photo reservation returned invalid data');
+  for (const row of rows) {
+    try {
+      await deleteStagingObject(row.staging_path);
+      const deleteRes = await db(`zane_coaching_drive_photo_reservations?staging_path=eq.${encodeURIComponent(row.staging_path)}`, { method: 'DELETE', headers: { Prefer: 'return=minimal' } });
+      if (!deleteRes.ok) console.error('[coaching-drive] expired reservation delete failed', row.staging_path, deleteRes.status);
+    } catch (error) {
+      console.error('[coaching-drive] expired reservation cleanup failed', row.staging_path, error);
+    }
+  }
+}
+
 async function markDriveIdsStale(coachId: string) {
   const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(coachId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ root_folder_id: null, overview_spreadsheet_id: null, last_error: 'Drive folders were missing and will be recreated', updated_at: new Date().toISOString() }) });
   if (!res.ok) throw new Error(`Drive folder reset failed (${res.status})`);
@@ -525,6 +561,7 @@ async function markDriveIdsStale(coachId: string) {
 
 async function runSync() {
   const worker = `drive-${crypto.randomUUID()}`;
+  await cleanupExpiredPhotoReservations();
   await cleanupStalePhotos();
   const claimRes = await db('rpc/claim_coaching_drive_exports', { method: 'POST', body: JSON.stringify({ p_limit: 5, p_worker: worker }) });
   if (!claimRes.ok) throw new Error('export claim failed');

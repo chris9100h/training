@@ -167,14 +167,7 @@ DROP POLICY IF EXISTS coaching_drive_photo_insert ON public.zane_coaching_drive_
 CREATE POLICY coaching_drive_photo_insert ON public.zane_coaching_drive_photos
   FOR INSERT TO authenticated WITH CHECK (
     client_id = (select auth.uid()) AND status = 'staged' AND drive_file_id IS NULL AND uploaded_at IS NULL
-    AND EXISTS (
-      SELECT 1 FROM public.zane_coaching c
-      JOIN public.zane_checkins ci ON ci.coaching_id = c.id AND ci.client_id = c.client_id
-      JOIN public.zane_coaching_drive_connections dc ON dc.coach_id = c.coach_id
-      WHERE c.id = coaching_id AND ci.id = checkin_id AND ci.client_id = (select auth.uid())
-        AND c.status = 'active' AND c.id NOT LIKE 'support_%'
-        AND dc.status = 'connected' AND dc.archive_enabled = true AND dc.include_photos = true
-    )
+    AND public.coaching_drive_photo_upload_allowed(coaching_id, checkin_id, client_id)
   );
 
 DROP POLICY IF EXISTS coaching_drive_stage_insert ON storage.objects;
@@ -182,22 +175,12 @@ CREATE POLICY coaching_drive_stage_insert ON storage.objects FOR INSERT TO authe
   WITH CHECK (
     bucket_id = 'coaching-drive-staging'
     AND (storage.foldername(name))[1] = (select auth.uid())::text
-    AND array_length(storage.foldername(name), 1) = 3
-    AND (storage.foldername(name))[3] ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$'
+    -- storage.foldername() excludes the file name.  The app path is
+    -- <client>/<check-in>/<opaque-file>, so there are exactly two folders.
+    AND array_length(storage.foldername(name), 1) = 2
+    AND storage.filename(name) ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,119}$'
     AND position('..' in name) = 0
-    AND EXISTS (
-      SELECT 1
-      FROM public.zane_checkins ci
-      JOIN public.zane_coaching c ON c.id = ci.coaching_id AND c.client_id = ci.client_id
-      JOIN public.zane_coaching_drive_connections dc ON dc.coach_id = c.coach_id
-      WHERE ci.id = (storage.foldername(name))[2]
-        AND ci.client_id = (select auth.uid()) AND c.status = 'active' AND c.id NOT LIKE 'support_%'
-        AND dc.status = 'connected' AND dc.archive_enabled = true AND dc.include_photos = true
-    )
-    AND (SELECT count(*) FROM storage.objects old
-         WHERE old.bucket_id = 'coaching-drive-staging'
-           AND (storage.foldername(old.name))[1] = (select auth.uid())::text
-           AND (storage.foldername(old.name))[2] = (storage.foldername(name))[2]) < 8
+    AND public.coaching_drive_photo_upload_allowed(NULL, (storage.foldername(name))[2], (select auth.uid()))
   );
 
 DROP POLICY IF EXISTS coaching_drive_stage_read ON storage.objects;

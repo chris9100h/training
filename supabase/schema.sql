@@ -7752,6 +7752,17 @@ CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photos (
   created_at timestamptz NOT NULL DEFAULT now(),
   uploaded_at timestamptz
 );
+CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_photo_reservations (
+  staging_path text PRIMARY KEY,
+  coaching_id text NOT NULL,
+  checkin_id text NOT NULL,
+  client_id uuid NOT NULL,
+  file_name text NOT NULL,
+  mime_type text NOT NULL,
+  byte_size integer NOT NULL,
+  expires_at timestamptz NOT NULL DEFAULT (now() + interval '15 minutes'),
+  created_at timestamptz NOT NULL DEFAULT now()
+);
 
 CREATE OR REPLACE FUNCTION public.claim_coaching_drive_exports(integer, text) RETURNS SETOF public.zane_coaching_drive_exports
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN; END; $function$;
@@ -7763,3 +7774,19 @@ CREATE OR REPLACE FUNCTION public.enqueue_coaching_drive_photo_export() RETURNS 
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
 CREATE OR REPLACE FUNCTION public.coaching_drive_photo_guard() RETURNS trigger
 LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NEW; END; $function$;
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $function$ SELECT false; $function$;
+CREATE OR REPLACE FUNCTION public.coaching_drive_photo_reservation_allowed(text, uuid) RETURNS boolean
+LANGUAGE sql STABLE SECURITY DEFINER SET search_path TO 'public' AS $function$ SELECT false; $function$;
+CREATE OR REPLACE FUNCTION public.reserve_coaching_drive_photo(text, text, text, text, integer) RETURNS text
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN NULL; END; $function$;
+CREATE OR REPLACE FUNCTION public.release_coaching_drive_photo_reservation(text) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+REVOKE ALL ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.coaching_drive_photo_upload_allowed(text, text, uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.coaching_drive_photo_reservation_allowed(text, uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.coaching_drive_photo_reservation_allowed(text, uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.reserve_coaching_drive_photo(text, text, text, text, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.reserve_coaching_drive_photo(text, text, text, text, integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.release_coaching_drive_photo_reservation(text) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.release_coaching_drive_photo_reservation(text) TO authenticated;

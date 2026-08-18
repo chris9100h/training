@@ -8872,19 +8872,30 @@ async function stageCoachingCheckinPhoto(file, coachingId, checkinId, userId) {
   if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Use a JPG, PNG or WebP image');
   if (file.size <= 0 || file.size > 8 * 1024 * 1024) throw new Error('Each photo must be 8 MB or smaller');
   const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
-  const safe = String(file.name || `photo.${ext}`).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80) || `photo.${ext}`;
-  const path = `${userId}/${checkinId}/${Date.now()}-${Math.random().toString(36).slice(2)}-${safe}`;
-  const uploaded = await _supabase.storage.from('coaching-drive-staging').upload(path, file, { contentType: file.type, upsert: false });
-  if (uploaded.error) throw uploaded.error;
-  const { error } = await _supabase.from('zane_coaching_drive_photos').insert({
-    coaching_id: coachingId, checkin_id: checkinId, client_id: userId,
-    staging_path: path, file_name: safe, mime_type: file.type, byte_size: file.size,
+  const rawName = String(file.name || `photo.${ext}`).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80) || `photo.${ext}`;
+  const safe = (/^[A-Za-z0-9]/.test(rawName) ? rawName : `photo-${rawName}`).slice(0, 80) || `photo.${ext}`;
+  const reservation = await _supabase.rpc('reserve_coaching_drive_photo', {
+    p_coaching_id: coachingId, p_checkin_id: checkinId, p_file_name: safe,
+    p_mime_type: file.type, p_byte_size: file.size,
   });
-  if (error) {
+  if (reservation.error || !reservation.data) throw (reservation.error || new Error('Photo reservation failed'));
+  const path = String(reservation.data);
+  try {
+    const uploaded = await _supabase.storage.from('coaching-drive-staging').upload(path, file, { contentType: file.type, upsert: false });
+    if (uploaded.error) throw uploaded.error;
+    const { error } = await _supabase.from('zane_coaching_drive_photos').insert({
+      coaching_id: coachingId, checkin_id: checkinId, client_id: userId,
+      staging_path: path, file_name: safe, mime_type: file.type, byte_size: file.size,
+    });
+    if (error) throw error;
+    return path;
+  } catch (error) {
+    // The reservation remains until the worker janitor sees it.  This makes a
+    // failed client-side cleanup safe: no untracked object can live forever.
+    await _supabase.rpc('release_coaching_drive_photo_reservation', { p_staging_path: path }).catch(() => {});
     await _supabase.storage.from('coaching-drive-staging').remove([path]).catch(() => {});
     throw error;
   }
-  return path;
 }
 
 // A closed historical food day keeps the target captured when it was closed,
