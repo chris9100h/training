@@ -183,7 +183,9 @@ async function sheets(path: string, access: string, options: RequestInit = {}) {
     ...options, headers: { Authorization: `Bearer ${access}`, ...(options.headers ?? {}) },
   }, 20000);
   if (!res.ok) {
-    const err = new Error(`Google Sheets ${res.status}`); (err as any).status = res.status;
+    const detail = await res.text().catch(() => '');
+    const compact = detail.replace(/\s+/g, ' ').trim().slice(0, 800);
+    const err = new Error(`Google Sheets ${res.status}${compact ? `: ${compact}` : ''}`); (err as any).status = res.status;
     throw err;
   }
   return res;
@@ -264,25 +266,43 @@ function flattenResponses(responses: Record<string, unknown>, checkin: any, sche
   return rows;
 }
 
+async function firstSheetTitle(access: string, spreadsheetId: string) {
+  const params = new URLSearchParams({ fields: 'sheets(properties(title))' });
+  const res = await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}?${params}`, access);
+  const body = await res.json().catch(() => null);
+  const title = body?.sheets?.[0]?.properties?.title;
+  if (!title || typeof title !== 'string') throw new Error('Google Sheets has no writable sheet');
+  return title;
+}
+
+function sheetRange(title: string, range: string) {
+  // Quoting the title also handles a coach renaming the default tab to a name
+  // containing spaces, apostrophes, or punctuation.
+  return `'${String(title).replaceAll("'", "''")}'!${range}`;
+}
+
 async function replaceSheet(access: string, spreadsheetId: string, rows: string[][]) {
-  // The Sheets values.clear endpoint requires an A1/R1C1 range and an empty
-  // request body. `Sheet1:clear` is a malformed range and leaves newly-created
-  // sheets empty with a Google Sheets 400 before the subsequent PUT runs.
-  const clearRange = encodeURIComponent('Sheet1!A1:ZZZ');
+  // Use the actual first tab title. A1 ranges must use a complete column range
+  // (`A:ZZZ`); the mixed `A1:ZZZ` form is rejected by Sheets with HTTP 400.
+  const title = await firstSheetTitle(access, spreadsheetId);
+  const clearRange = encodeURIComponent(sheetRange(title, 'A:ZZZ'));
   await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${clearRange}:clear`, access, { method: 'POST' });
   const end = String.fromCharCode(65 + Math.min(25, Math.max(1, rows.reduce((m, r) => Math.max(m, r.length), 1)) - 1)) + rows.length;
-  const encoded = encodeURIComponent(`Sheet1!A1:${end}`);
+  const range = sheetRange(title, `A1:${end}`);
+  const encoded = encodeURIComponent(range);
   await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encoded}?valueInputOption=RAW`, access, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ range: `Sheet1!A1:${end}`, majorDimension: 'ROWS', values: rows }),
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ range, majorDimension: 'ROWS', values: rows }),
   });
 }
 
 async function appendOverview(access: string, spreadsheetId: string, rows: string[][]) {
-  const clearRange = encodeURIComponent('Sheet1!A1:ZZZ');
+  const title = await firstSheetTitle(access, spreadsheetId);
+  const clearRange = encodeURIComponent(sheetRange(title, 'A:ZZZ'));
   await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${clearRange}:clear`, access, { method: 'POST' });
   const end = String.fromCharCode(65 + rows[0].length - 1) + rows.length;
-  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(`Sheet1!A1:${end}`)}?valueInputOption=RAW`, access, {
-    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ range: `Sheet1!A1:${end}`, majorDimension: 'ROWS', values: rows }),
+  const range = sheetRange(title, `A1:${end}`);
+  await sheets(`spreadsheets/${encodeURIComponent(spreadsheetId)}/values/${encodeURIComponent(range)}?valueInputOption=RAW`, access, {
+    method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ range, majorDimension: 'ROWS', values: rows }),
   });
 }
 

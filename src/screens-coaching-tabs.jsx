@@ -1459,7 +1459,9 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   useEffectC(() => {
     let alive = true;
     setPhotosEnabled(false);
-    if (isSelf) return () => { alive = false; };
+    // Self-coaching uses the same Drive archive as a coached client. The
+    // earlier self guard made the photo picker unreachable even when the user
+    // had enabled both archive switches for their own Drive.
     LB.getCoachingDrivePhotoStatus(coachingId)
       .then(result => { if (alive) setPhotosEnabled(result?.enabled === true); })
       .catch(() => { if (alive) setPhotosEnabled(false); });

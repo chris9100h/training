@@ -1470,8 +1470,11 @@ function useConfirm(zIndex = 100) {
   // user out on mobile. Strips straight and curly apostrophes on both sides.
   const normConfirmText = (s) => (s || '').trim().toLowerCase().replace(/[‘’ʼ']/g, '');
   const okLocked = !!state?.requireText && normConfirmText(typed) !== normConfirmText(state.requireText);
-  // Portal into document.body so the confirm sheet always sits above any other
-  // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
+  // Portal into the app shell so iOS Chrome's local absolute viewport and the
+  // painted dialog share the same coordinate system. A body-level portal can
+  // be one visual-viewport correction away from the shell after keyboard use,
+  // which makes the visible buttons and their hit targets disagree. The zIndex
+  // still keeps the confirm sheet above ordinary sheets.
   const el = state && ReactDOM.createPortal(
     <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)} zIndex={zIndex}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
@@ -1495,7 +1498,7 @@ function useConfirm(zIndex = 100) {
         }}>{state.ok}</Btn>
       </div>
     </Sheet>,
-    document.body
+    document.getElementById('root') || document.body
   );
   return [el, confirm];
 }
@@ -1834,7 +1837,10 @@ UI.formatMass = (g) => LB.formatMassG(g, UI.massInOz());
 // Returns a Promise that resolves when it's dismissed.
 UI.alert = (message, { title = null, ok = 'OK' } = {}) => new Promise(resolve => {
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)';
+  const local = localViewportLayerPosition() === 'absolute';
+  wrap.style.cssText = local
+    ? 'position:absolute;top:var(--app-viewport-top,0px);left:0;right:0;height:var(--app-viewport-height,100dvh);z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)'
+    : 'position:fixed;inset:0;z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)';
   const box = document.createElement('div');
   box.style.cssText = `max-width:340px;width:100%;background:${UI.bg};border:1px solid ${UI.hairStrong};border-radius:8px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.45)`;
   if (title) {

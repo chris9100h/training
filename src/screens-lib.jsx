@@ -1368,6 +1368,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
   bwMode, setBwMode }) {
+  const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -1424,7 +1425,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
 
   let body;
   if (step === 'name') {
-    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />;
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus={!iosChrome} />;
   } else if (step === 'muscle') {
     body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
       {MUSCLES.map(m => {
@@ -1483,7 +1484,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
       : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
-      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: iosChrome ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
