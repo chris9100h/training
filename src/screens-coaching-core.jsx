@@ -478,7 +478,7 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) { e.preventDefault(); saveEditedNote(n); } }}
                       style={{ width: '100%', minHeight: 68, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4, padding: '7px 8px', fontFamily: UI.fontUi, fontSize: 12, color: UI.ink, outline: 'none' }} />
                     <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 5 }}>
-                      <button onClick={cancelEditNote} disabled={noteActionBusy} style={{ background: 'transparent', border: 'none', color: isMe ? 'rgba(0,0,0,0.65)' : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={cancelEditNote} disabled={noteActionBusy} style={{ background: 'transparent', border: 'none', color: isMe ? 'var(--accent-ink)' : UI.inkFaint, opacity: isMe ? 0.7 : 1, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
                       <button onClick={() => saveEditedNote(n)} disabled={noteActionBusy || !editingNoteBody.trim()} style={{ background: isMe ? 'rgba(0,0,0,0.18)' : 'var(--accent)', border: 'none', borderRadius: 4, padding: '4px 8px', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>{noteActionBusy ? '...' : 'Save'}</button>
                     </div>
                   </div>

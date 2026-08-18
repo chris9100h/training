@@ -182,6 +182,110 @@ function computeHealthWeekStats({ logs, sessions, cardioLogs, planningState, tf,
   };
 }
 
+// Build the data behind the shareable Weekly Recap.  This deliberately uses
+// the same 1W calculator as the This Week card instead of introducing a second
+// set of nutrition/adherence rules.  Everything is derived from the local
+// store, so opening or sharing a recap never writes to the database.
+function buildWeeklyRecapSnapshot({ store, targets, anchor, today }) {
+  const state = store || {};
+  const logs = state.dailyLogs || [];
+  const sessions = (state.sessions || []).filter(s => !!s.ended);
+  const cardioLogs = state.cardioLogs || [];
+  const weekAnchor = anchor || today || LB.todayISO();
+  const { start: from, end: to } = healthMondayWeekBounds(weekAnchor);
+  const days = Array.from({ length: 7 }, (_, i) => LB.shiftDate(from, i));
+  const inRange = (date) => date >= from && date <= to;
+  const dateOfSession = s => {
+    if (!s) return null;
+    if (typeof s.date === 'string' && s.date) return s.date.slice(0, 10);
+    if (s.date) return new Date(s.date).toISOString().slice(0, 10);
+    return s.ended ? new Date(s.ended).toISOString().slice(0, 10) : null;
+  };
+  const sessionsInWeek = sessions.filter(s => inRange(dateOfSession(s)));
+  const cardioInWeek = cardioLogs.filter(l => inRange(l.date));
+  const logsInWeek = logs.filter(l => inRange(l.date));
+  const stats = computeHealthWeekStats({
+    logs, sessions, cardioLogs, planningState: state, tf: '1W', today: today || LB.todayISO(), selectedDate: weekAnchor,
+  });
+  const durationOf = s => {
+    if (s?.durationMinutes != null && Number.isFinite(Number(s.durationMinutes))) return Number(s.durationMinutes);
+    if (s?.duration_minutes != null && Number.isFinite(Number(s.duration_minutes))) return Number(s.duration_minutes);
+    if (s?.startedAt && s?.ended) {
+      const mins = (new Date(s.ended).getTime() - new Date(s.startedAt).getTime()) / 60000;
+      return Number.isFinite(mins) && mins > 0 ? Math.round(mins) : null;
+    }
+    return null;
+  };
+  const durationMinutes = sessionsInWeek.reduce((sum, s) => sum + (durationOf(s) || 0), 0);
+  const sets = sessionsInWeek.reduce((sum, s) => sum + (LB.doneSetCount(s) || 0), 0);
+  const volume = sessionsInWeek.reduce((sum, s) => sum + (LB.totalVolume(s, state.exercises, logs) || 0), 0);
+  const exerciseIds = new Set();
+  sessionsInWeek.forEach(s => (s.entries || []).forEach(e => { if (e.exId) exerciseIds.add(e.exId); }));
+  const progressionWins = sessionsInWeek.reduce((sum, s) => {
+    if (s.isDeload || s.isCleanup) return sum;
+    const bumps = Object.values(s.progressionBumps || {}).filter(b => b && !b.declined && Number(b.nextKg) > Number(b.currentKg));
+    const gains = (s.mesoRecap?.gains || []).filter(g => g && Number(g.weightDelta) > 0 && !g.declined);
+    return sum + bumps.length + gains.length;
+  }, 0);
+  const cardioPrLogs = cardioInWeek.filter(log => {
+    const pr = LB.detectCardioPRs(log, cardioLogs);
+    return !!(pr && pr.items && pr.items.length);
+  });
+  const weightPoints = logsInWeek.filter(l => l.weight != null).sort((a, b) => a.date.localeCompare(b.date));
+  const weightStart = weightPoints.length ? weightPoints[0].weight : null;
+  const weightEnd = weightPoints.length ? weightPoints[weightPoints.length - 1].weight : null;
+  const weightChange = weightStart != null && weightEnd != null ? Math.round((weightEnd - weightStart) * 10) / 10 : null;
+  const dayRows = days.map(date => {
+    const log = logs.find(l => l.date === date) || null;
+    const mode = LB.statusModeForDate(state, date);
+    const foodClosed = LB.foodDayIsClosed(logs, date);
+    const daySessions = sessionsInWeek.filter(s => dateOfSession(s) === date);
+    const dayCardio = cardioInWeek.filter(l => l.date === date);
+    const planned = !!LB.plannedTrainingDay(state, date);
+    const provisional = date === (today || LB.todayISO()) && !foodClosed;
+    const adherence = provisional || LB.isNutritionUnscoredMode(mode) ? null : (log?.adherence ?? null);
+    return {
+      date,
+      label: LB.fmtDayLabel(date, { weekday: 'short', day: 'numeric' }),
+      mode,
+      planned,
+      trained: daySessions.length > 0,
+      cardio: dayCardio.length > 0,
+      foodClosed,
+      provisional,
+      adherence,
+      mealOfChoice: !!log?.mealOfChoice,
+    };
+  });
+  const longestSession = sessionsInWeek.reduce((best, s) => !best || (durationOf(s) || 0) > (durationOf(best) || 0) ? s : best, null);
+  const longestDuration = longestSession ? durationOf(longestSession) : null;
+  const highestVolumeSession = sessionsInWeek.reduce((best, s) => {
+    if (!best) return s;
+    return LB.totalVolume(s, state.exercises, logs) > LB.totalVolume(best, state.exercises, logs) ? s : best;
+  }, null);
+  const tDays = stats.trainingDaysInPeriod || 0;
+  const rDays = Math.max(0, stats.periodDays - tDays);
+  const planTarget = (trainingKey, restKey) => targets
+    ? Math.round(((targets[trainingKey] || 0) * tDays + (targets[restKey] || 0) * rDays) / (stats.periodDays || 7))
+    : null;
+  const target = {
+    calories: planTarget('caloriesTraining', 'caloriesRest'),
+    protein: planTarget('proteinTraining', 'proteinRest'),
+    carbs: planTarget('carbsTraining', 'carbsRest'),
+    fat: planTarget('fatTraining', 'fatRest'),
+  };
+  const hasData = !!(logsInWeek.some(hlHasLogContent) || sessionsInWeek.length || cardioInWeek.length);
+  return {
+    from, to, days: dayRows, stats, target, hasData,
+    loggedDays: logsInWeek.filter(hlHasLogContent).length,
+    closedFoodDays: dayRows.filter(d => d.foodClosed).length,
+    sessions: sessionsInWeek.length, durationMinutes, sets,
+    volume, exerciseCount: exerciseIds.size, progressionWins,
+    cardioPrs: cardioPrLogs.length, cardioMinutes: stats.cardioMinutes || 0, cardioSessions: stats.cardioSessions || 0,
+    weightStart, weightEnd, weightChange, longestSession, longestDuration, highestVolumeSession,
+  };
+}
+
 // Adherence → traffic-light colour (green ≥90, amber 75–89, red <75).
 function adherenceColor(a) {
   if (a == null) return UI.inkFaint;
@@ -1480,6 +1584,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       const v = toResponse(f, coachForm[f.key]);
       if (v != null) savedCoachFields[f.key] = v;
     });
+    const waterEntry = healthNum(form.water);
+    const convertedWaterMl = waterEntry != null ? UI.waterEntryToMl(waterEntry) : null;
+    const savedWaterMl = waterLocked
+      ? (existing?.waterMl ?? null)
+      : LB.positiveNumberOrNull(convertedWaterMl);
     const log = {
       id: existing?.id || LB.uid(),
       date,
@@ -1497,7 +1606,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       // (see the HYDRATION section below), but save() itself never trusts
       // form.water while locked either, so nothing can persist an override
       // the user never confirmed through requestWaterUnlock.
-      waterMl: waterLocked ? (existing?.waterMl ?? null) : (healthInt(form.water) != null ? UI.waterEntryToMl(healthInt(form.water)) : null),
+      waterMl: savedWaterMl,
       note: form.note.trim() || null,
       adherence, targetsSnap,
       offPlanNote: form.offPlanNote.trim() || null,
@@ -1509,6 +1618,14 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       mealOfChoice: !!existing?.mealOfChoice,
       mealOfChoiceHour: existing?.mealOfChoiceHour ?? null,
       foodDayClosed: !!existing?.foodDayClosed,
+      // Same reasoning as the three lines above, these were the pair that got
+      // missed. Both are server-authored by ai-daily-summary and sit outside
+      // the sync RPC's column list, so the server keeps them regardless, but
+      // this object is rebuilt from scratch: omitting them made the summary
+      // card disappear from the Health tab the moment the user saved the form
+      // for that day, and it only came back on the next full load.
+      aiSummary: existing?.aiSummary ?? null,
+      aiSummaryGeneratedAt: existing?.aiSummaryGeneratedAt ?? null,
       coachFields: Object.keys(savedCoachFields).length ? savedCoachFields : null,
       updatedAt: new Date().toISOString(),
       createdAt: existing?.createdAt || new Date().toISOString(),
@@ -1517,25 +1634,40 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     // toggled it this session. Otherwise merely opening and saving an old day
     // whose fiber value inferred net mode would silently flip the global default.
     const userToggledMode = !!(initialSnap.current && netCarbs !== initialSnap.current.net);
-    setStore(s => ({
-      ...s,
-      // Remember the carb mode globally so the next day defaults to it.
-      settings: (userToggledMode && s.settings?.netCarbs !== netCarbs) ? { ...s.settings, netCarbs } : s.settings,
-      dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
-    }));
+    setStore(s => {
+      const waterLogs = waterLocked
+        ? (s.waterLogs || [])
+        : LB.reconcileManualWaterLogs(s.waterLogs, date, savedWaterMl);
+      return {
+        ...s,
+        // Remember the carb mode globally so the next day defaults to it.
+        settings: (userToggledMode && s.settings?.netCarbs !== netCarbs) ? { ...s.settings, netCarbs } : s.settings,
+        dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== date)],
+        waterLogs,
+      };
+    });
     onClose();
   };
 
   const del = async () => {
     if (!existing) return;
     if (!await confirm("Delete this day's log? Weight, macros, steps and water for this day are removed.", { title: 'Delete day?', ok: 'Delete', danger: true })) return;
-    setStore(s => ({ ...s, dailyLogs: (s.dailyLogs || []).filter(l => l.id !== existing.id) }));
+    // The water entries go too, or the confirm above lies. waterMl in the
+    // daily log is only a mirror of the tracker's own rows: dropping the log
+    // alone left them behind, so the Water card's 1D view (which sums
+    // waterLogs) still showed the day's intake while Today and 1W (which read
+    // dailyLogs.waterMl) showed nothing.
+    setStore(s => ({
+      ...s,
+      dailyLogs: (s.dailyLogs || []).filter(l => l.id !== existing.id),
+      waterLogs: (s.waterLogs || []).filter(l => l.date !== date),
+    }));
     onClose();
   };
 
   const requestWaterUnlock = async () => {
     const ok = await confirm(
-      "This day already has entries in the Water Tracker. Editing it here will be overwritten the next time you log a drink there.",
+      "This day already has entries in the Water Tracker. Editing it here will replace those entries with one manual total.",
       { title: 'Overwrite water tracker?', ok: 'Continue', cancel: 'Cancel' }
     );
     if (ok) setWaterUnlocked(true);
@@ -1763,7 +1895,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           {UI.waterQuickAdds().map(inc => waterLocked ? (
             <div key={inc} style={waterQuickAddTileStyle}>+{inc}</div>
           ) : (
-            <button key={inc} onClick={() => set('water', String((healthInt(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
+            <button key={inc} onClick={() => set('water', String((healthNum(form.water) || 0) + inc))} style={{ ...waterQuickAddTileStyle, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}>+{inc}</button>
           ))}
         </div>
         {waterLocked && (
@@ -3053,8 +3185,38 @@ function MacroTargetSheet({ open, onClose, store, setStore, coachingMacros }) {
 // one thing. Deliberately kept visually quiet in every automation state
 // except "due": that row is the one thing in the lower box that must never
 // lose a fight for attention against the coach-info / SET-EDIT clutter.
-function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
+function MacroSourceCard({ store, setStore, userId, dragHandle, tf, setTf, coachHasMacros, fromCoach, selfCoachedMacros, hasTargets, onSetTarget, onOpenCheckin, onOpenHistory, onOpenSettings, children }) {
   const calc = store.settings?.macroCalc || {};
+  const [confirmEl, confirm] = useConfirm();
+  const [legacyHistory, setLegacyHistory] = useStateH(null);
+  const [legacyHistoryStatus, setLegacyHistoryStatus] = useStateH('idle');
+  const hasPreviousSnapshot = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets');
+  const needsLegacyHistory = !!userId && !!calc.lastAppliedAt && calc.lastAppliedTargets != null && !hasPreviousSnapshot;
+  useEffectH(() => {
+    if (!needsLegacyHistory || !userId) {
+      setLegacyHistoryStatus('idle');
+      return;
+    }
+    const existing = store.adaptiveTdeeHistory || [];
+    if (existing.length) {
+      setLegacyHistory(existing);
+      setLegacyHistoryStatus('ready');
+      return;
+    }
+    let cancelled = false;
+    setLegacyHistoryStatus('loading');
+    LB.loadAdaptiveTdeeHistory(userId).then(rows => {
+      if (cancelled) return;
+      setLegacyHistory(rows || []);
+      setLegacyHistoryStatus('ready');
+    }).catch(error => {
+      if (cancelled) return;
+      console.warn('legacy adaptive TDEE rollback history load failed:', error);
+      setLegacyHistory([]);
+      setLegacyHistoryStatus('error');
+    });
+    return () => { cancelled = true; };
+  }, [needsLegacyHistory, userId, store.adaptiveTdeeHistory]);
   const sourceLabel = !fromCoach ? 'Personal targets' : selfCoachedMacros ? 'Self-coached' : 'From your coach';
   // Offered while coached too now: a coach's numbers still always win (see
   // effectiveMacroTargets, unchanged), Apply below only ever touches the
@@ -3125,6 +3287,23 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
   // taken over since, or automation could since be off), "I did tap Apply on
   // this date" stays true, and that's the thing to confirm here.
   const appliedDaysAgo = calc.lastAppliedAt ? healthDayDiff(calc.lastAppliedAt, LB.todayISO()) : null;
+  const rollbackHistory = [...(store.adaptiveTdeeHistory || []), ...(legacyHistory || [])];
+  const rollbackInfo = LB.macroApplyRollbackInfo(store.settings, rollbackHistory);
+  const canUndoLastApply = rollbackInfo.available;
+  const undoLastApply = async () => {
+    // Re-check at click time: a background sync may have changed the active
+    // targets since this render. Never replace a newer/manual value.
+    if (!LB.canUndoMacroApply(store.settings, rollbackHistory)) {
+      await confirm('The active targets changed after that Apply, so restoring the older values is no longer safe.', {
+        title: 'Cannot undo', ok: 'OK', cancel: null,
+      });
+      return;
+    }
+    if (!await confirm('Restore the personal macro targets that were active before this Apply?', {
+      title: 'Undo last Apply?', ok: 'Restore targets', cancel: 'Keep them',
+    })) return;
+    setStore(s => ({ ...s, settings: LB.rollbackMacroApply(s.settings, rollbackHistory) }));
+  };
 
   return (
     <>
@@ -3194,7 +3373,9 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
           <span className="micro" style={{ color: UI.inkFaint, flex: 1 }}>ALGORITHM ESTIMATE</span>
           {appliedDaysAgo != null && (
             <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
-              {appliedDaysAgo <= 0 ? 'applied today' : appliedDaysAgo === 1 ? 'applied yesterday' : `applied ${appliedDaysAgo}d ago`}
+              {calc.lastApplyRolledBackAt
+                ? 'applied, then rolled back'
+                : appliedDaysAgo <= 0 ? 'applied today' : appliedDaysAgo === 1 ? 'applied yesterday' : `applied ${appliedDaysAgo}d ago`}
             </span>
           )}
         </div>
@@ -3238,6 +3419,35 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
             </div>
           );
         })()}
+
+        {canUndoLastApply && (
+          <button data-reorder-ignore="true" onClick={undoLastApply} style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+            width: '100%', marginTop: 10, padding: '8px 10px',
+            background: 'transparent', border: `var(--hair-width) solid ${UI.hairStrong}`,
+            borderRadius: 5, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10,
+            fontWeight: 700, letterSpacing: '0.05em', cursor: 'pointer',
+            WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+          }}>
+            <i className="fa-solid fa-rotate-left" style={{ fontSize: 10, color: 'var(--accent)' }} />
+            Undo last Apply
+          </button>
+        )}
+        {needsLegacyHistory && legacyHistoryStatus === 'loading' && !canUndoLastApply && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Looking for the previous target snapshot…
+          </div>
+        )}
+        {!canUndoLastApply && rollbackInfo.reason === 'targets_changed' && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Undo unavailable because the active targets changed after that Apply.
+          </div>
+        )}
+        {!canUndoLastApply && needsLegacyHistory && legacyHistoryStatus === 'ready' && rollbackInfo.reason === 'previous_missing' && (
+          <div style={{ fontSize: 10, color: UI.inkGhost, fontFamily: UI.fontUi, lineHeight: '14px', marginTop: 9 }}>
+            Undo unavailable because no earlier target snapshot was saved.
+          </div>
+        )}
 
         {status === 'insufficient' && (
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginTop: 10 }}>
@@ -3306,6 +3516,7 @@ function MacroSourceCard({ store, setStore, dragHandle, tf, setTf, coachHasMacro
         )}
       </div>
     </HealthChartCard>
+    {confirmEl}
     {/* Only reached when gain/cut is picked with no rate on file yet, see
         setGoal above: asks once, up front, rather than silently defaulting
         a number the user never chose. */}
@@ -3357,7 +3568,7 @@ function AdaptiveTdeeChart({ history }) {
       .map(p => xOf(p.asOfDate).toFixed(1) + ',' + yOf(Number(p[key])).toFixed(1)).join(' ');
     const grid = [0, 1, 2, 3].map(i => domainMin + (domainMax - domainMin) * i / 3);
     const hasTarget = points.some(p => Number.isFinite(p.targetCalories));
-    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+    const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'kept' ? 'Kept as is' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
     const displayWeight = kg => {
       const value = isLbs ? Number(kg) / LBS_TO_KG : Number(kg);
       return Number.isFinite(value) ? Math.round(value * 10) / 10 : null;
@@ -3448,7 +3659,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
     () => history.slice().reverse().map(row => ({ date: row.asOfDate, value: displayWeight(row.weightEndKg) })).filter(p => p.value != null),
     [history, isLbs]
   );
-  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
+  const statusLabel = row => row.decision === 'applied' ? 'Applied' : row.decision === 'kept' ? 'Kept as is' : row.decision === 'skipped' ? 'Skipped' : 'Rebuilt from logs';
   const loading = loadStatus === 'loading' && !history.length;
   const loadError = loadStatus === 'error' && !history.length;
   return (
@@ -3502,7 +3713,7 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
                 <div key={row.asOfDate} style={{ background: UI.bgInset, border: 'var(--hair-width) solid ' + UI.hair, borderRadius: 6, padding: '9px 11px' }}>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 7, marginBottom: 5 }}>
                     <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, color: UI.ink }}>{LB.fmtDayLabel(row.asOfDate, { weekday: 'short', day: 'numeric', month: 'short' })}</span>
-                    <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: row.decision === 'applied' ? 'var(--accent)' : UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{statusLabel(row)}</span>
+                    <span style={{ fontFamily: UI.fontUi, fontSize: 9, color: row.decision === 'applied' ? 'var(--accent)' : row.decision === 'kept' ? UI.gold : UI.inkFaint, textTransform: 'uppercase', letterSpacing: '0.06em' }}>{statusLabel(row)}</span>
                   </div>
                   <div style={{ display: 'flex', alignItems: 'baseline', gap: 9 }}>
                     <span className="num" style={{ fontSize: 20, color: 'var(--accent)' }}>{row.tdee}<span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>kcal</span></span>
@@ -3532,11 +3743,12 @@ function AdaptiveTdeeHistorySheet({ open, onClose, store, loadStatus = 'ready', 
 
 // The sheet the "Weekly check-in ready" CTA opens. A read-only report (window
 // average calories, weight trend, the freshly solved maintenance figure) plus
-// the one real decision: apply the recalibrated targets or skip this week.
-// Skipping still counts as "handled", same as Apply: lastCheckinAt moves to
-// today either way, that is what stops the nag, not whether the numbers
-// actually changed. Never applies anything on its own; see MacroEstimatorSheet
-// for the same "estimate is a prefill, not a save" philosophy this mirrors.
+// three explicit decisions: skip the result for now, record the check-in while
+// keeping the current macros, or apply the recalibrated targets. Skip and Keep
+// both count as handled: lastCheckinAt moves to today either way, that is what
+// stops the nag. Only Apply touches macroTargets. Never applies anything on its
+// own; see MacroEstimatorSheet for the same "estimate is a prefill, not a save"
+// philosophy this mirrors.
 function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMacros, coachingMacros, onOpenSettings }) {
   const calc = store.settings?.macroCalc || {};
   const isLbs = UI.unit() === 'lbs';
@@ -3608,13 +3820,14 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     ? LB.weeklyAverageCalories(coachingMacros.caloriesTraining, coachingMacros.caloriesRest, calc.trainingDays)
     : null;
 
-  // Both actions count as "handled this week": only Apply also touches
-  // macroTargets, lastCheckinAt moves to today either way. lastAppliedAt is
-  // separate and only ever set on an actual Apply, a plain historical marker
-  // ("the algorithm's numbers were last accepted on this date") for
-  // MacroSourceCard to surface, not something a later Skip should touch or
-  // clear.
-  const finish = (applyTargets) => {
+  // Apply and Leave as is count as handled for this week. Skip deliberately
+  // does not: it dismisses this report without moving lastCheckinAt, so the
+  // check-in remains available and is offered again on the next render.
+  // lastAppliedAt is separate and only ever set on an actual Apply; Keep
+  // records the new suggestion in history without pretending it became active,
+  // and leaves the previous applied snapshot untouched.
+  const finish = (decision) => {
+    const applyTargets = decision === 'applied';
     const asOfDate = LB.todayISO();
     const previousRows = LB.reconstructAdaptiveTdeeHistory(store, userId, [
       calc.lastCheckinAt,
@@ -3622,7 +3835,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
     ]);
     const currentRow = adaptive?.ok
       ? LB.adaptiveTdeeHistoryRow(store, userId, asOfDate, {
-        decision: applyTargets && newTargets ? 'applied' : 'skipped',
+        decision: applyTargets && newTargets ? 'applied' : decision,
         source: 'live',
         targetsSnapshot: targetSnapshot,
       })
@@ -3648,12 +3861,20 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
         ...(applyTargets && newTargets ? { macroTargets: newTargets } : {}),
         macroCalc: {
           ...s.settings.macroCalc,
-          lastCheckinAt: LB.todayISO(),
+          ...(decision !== 'skipped' ? { lastCheckinAt: asOfDate } : {}),
           // A snapshot, not a pointer at macroTargets: the point is showing
           // what the algorithm actually said next to whatever is active NOW,
           // and macroTargets can drift away from this (a hand-edit, a coach
           // taking over) without this record changing to match it.
-          ...(applyTargets && newTargets ? { lastAppliedAt: LB.todayISO(), lastAppliedTargets: newTargets } : {}),
+          ...(applyTargets && newTargets ? {
+            lastAppliedAt: LB.todayISO(),
+            lastAppliedTargets: newTargets,
+            // Keep the exact personal targets that Apply replaced so an
+            // accidental tap can be reversed once. A null snapshot means the
+            // user had no personal targets before this first Apply.
+            lastApplyPreviousTargets: s.settings.macroTargets ?? null,
+            lastApplyRolledBackAt: null,
+          } : {}),
         },
       },
     }));
@@ -3817,9 +4038,12 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
                 <i className="fa-solid fa-sliders" style={{ fontSize: 10, color: 'var(--accent)', flexShrink: 0, marginTop: 2 }} />
                 <span>You can adjust how the algorithm splits these macros anytime in settings.</span>
               </button>
-              <div style={{ display: 'flex', gap: 8, marginTop: 18 }}>
-                <Btn kind="ghost" onClick={() => finish(false)} style={{ flex: 1 }}>Skip for now</Btn>
-                <Btn onClick={() => finish(true)} style={{ flex: 1 }}>Apply</Btn>
+              <div style={{ marginTop: 18 }}>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <Btn kind="ghost" onClick={() => finish('skipped')}>Skip</Btn>
+                  <Btn kind="ghost" onClick={() => finish('kept')}>Leave as is</Btn>
+                </div>
+                <Btn onClick={() => finish('applied')} style={{ width: '100%', marginTop: 8 }}>Apply</Btn>
               </div>
             </>
           ) : (
@@ -3827,7 +4051,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 14 }}>
                 Log a bodyweight to see the recalibrated targets.
               </div>
-              <Btn kind="ghost" onClick={() => finish(false)} style={{ width: '100%' }}>Skip for now</Btn>
+              <Btn kind="ghost" onClick={() => finish('skipped')} style={{ width: '100%' }}>Skip</Btn>
             </>
           )}
         </>
@@ -4094,7 +4318,7 @@ function AiSummaryCard({ dragHandle, store, setStore, userId, selectedDate, read
 
 // ─── This-week overview card (Mon–Sun averages + verdict) ─────────────────────
 
-function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
+function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit, onOpenRecap }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const { from, to, periodDays, daysLogged, mealOfChoice: mealOfChoiceDays, trainingsDone, trainingsPlanned, trainingDaysInPeriod, cardioMinutes, cardioSessions,
@@ -4161,6 +4385,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
           {dragHandle}
           <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
+          {onOpenRecap && <button data-reorder-ignore="true" onClick={onOpenRecap} aria-label="Share weekly recap" title="Share weekly recap" style={{ background: 'transparent', border: 'none', padding: 3, color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-share-nodes" style={{ fontSize: 11 }} /></button>}
           {tfToggle}  {/* toggle on right even in empty state */}
         </div>
         <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi }}>Nothing logged yet.</div>
@@ -4174,6 +4399,7 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
         {dragHandle}
         <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{periodLabel}</span>
         <span style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>{range}</span>
+        {onOpenRecap && <button data-reorder-ignore="true" onClick={onOpenRecap} aria-label="Share weekly recap" title="Share weekly recap" style={{ background: 'transparent', border: 'none', padding: 3, color: UI.inkFaint, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-share-nodes" style={{ fontSize: 11 }} /></button>}
         {tfToggle}
       </div>
 
@@ -4214,19 +4440,19 @@ function HealthWeekCard({ stats, dragHandle, targets, tf, setTf, weightUnit }) {
           </span>
         </div>
       )}
-      {tgtCal != null && (
-        <>
-          <div style={{ height: 'var(--hair-width)', background: UI.hairStrong, margin: '6px 0' }} />
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '0 8px' }}>
-            {[{v: tgtCal, u: 'kcal'}, {v: tgtProt, u: 'g'}, {v: tgtCarb, u: 'g'}, {v: tgtFat, u: 'g'}].map(({v, u}, i) => (
-              <div key={i} style={{ textAlign: 'center' }}>
-                <span className="num" style={{ fontSize: 10, color: UI.inkGhost }}>
-                  {v != null ? v : '—'}<span style={{ fontSize: 8 }}>{u}</span>
-                </span>
-              </div>
-            ))}
-          </div>
-        </>
+      {(tgtProt != null || tgtCarb != null || tgtFat != null) && (
+        // Keep the target strip visually identical to Today: the calorie goal
+        // remains part of the computed weekly stats, but this compact strip is
+        // intentionally the three macro targets only in both cards.
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0 12px', marginTop: 6, paddingTop: 6, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
+          {[tgtProt, tgtCarb, tgtFat].map((v, i) => (
+            <div key={i} style={{ textAlign: 'center' }}>
+              <span className="num" style={{ fontSize: 10, color: UI.inkFaint }}>
+                {v != null ? v : '—'}<span style={{ fontSize: 8 }}>g</span>
+              </span>
+            </div>
+          ))}
+        </div>
       )}
     </Card>
   );
@@ -4811,6 +5037,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         calc.lastCheckinAt ?? null,
         calc.lastAppliedAt ?? null,
         calc.lastAppliedTargets ?? null,
+        calc.lastApplyPreviousTargets ?? null,
+        calc.lastApplyRolledBackAt ?? null,
         calc.trainingDays ?? null,
         calc.goal ?? null,
         calc.rateKgPerWeek ?? null,
@@ -4909,6 +5137,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   const [tf, setTf] = useStateH('1W');
   const [capturing, setCapturing] = useStateH(false);
   const [exportOpen, setExportOpen] = useStateH(false);
+  const [weeklyRecapOpen, setWeeklyRecapOpen] = useStateH(false);
   // Which card is blown up in the expand sheet (id into expandableCards below),
   // null when closed. Only charts squeezed by the 2-col grid offer this.
   const [expandedCardId, setExpandedCardId] = useStateH(null);
@@ -5502,7 +5731,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // the others (an adherence trend with no targets to compare against isn't
   // useful alone).
   const macroSourceCard = (
-    <MacroSourceCard store={store} setStore={setStore} dragHandle={handle} tf={tf} setTf={setTf}
+    <MacroSourceCard store={store} setStore={setStore} userId={userId} dragHandle={handle} tf={tf} setTf={setTf}
       coachHasMacros={coachHasMacros} fromCoach={fromCoach} selfCoachedMacros={selfCoachedMacros}
       hasTargets={!!effectiveTargets} onSetTarget={() => setTargetOpen(true)} onOpenCheckin={() => setCheckinOpen(true)}
       onOpenHistory={() => setTdeeHistoryOpen(true)}
@@ -5524,7 +5753,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   );
 
   const cardEls = {
-    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} />,
+    week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} onOpenRecap={() => setWeeklyRecapOpen(true)} />,
     today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
       foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
@@ -5713,7 +5942,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
         <MacroEstimatorSheet open={true} onClose={() => setAutomationSettingsOpen(false)} store={store} setStore={setStore} standalone
           onApply={t => setStore(s => ({ ...s, settings: { ...s.settings, macroTargets: t } }))} />
       )}
-      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} />
+      <ExportSheet open={exportOpen} onClose={() => setExportOpen(false)} store={store} userId={userId} onOpenWeeklyRecap={() => setWeeklyRecapOpen(true)} />
+      <WeeklyRecapSheet open={weeklyRecapOpen} onClose={() => setWeeklyRecapOpen(false)} store={store} userId={userId} targets={effectiveTargets} initialDate={selectedDate} />
     </Screen>
   );
 }
@@ -5996,7 +6226,7 @@ function HealthClientLogs({ clientStore }) {
 
 // ─── Export sheet ─────────────────────────────────────────────────────────────
 
-function ExportSheet({ open, onClose, store, userId }) {
+function ExportSheet({ open, onClose, store, userId, onOpenWeeklyRecap }) {
   const today = LB.todayISO();
   const [from, setFrom] = useStateH(() => LB.shiftDate(today, -29));
   const [to, setTo] = useStateH(today);
@@ -6335,6 +6565,20 @@ function ExportSheet({ open, onClose, store, userId }) {
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {onOpenWeeklyRecap && (
+            <button onClick={() => { onClose(); onOpenWeeklyRecap(); }} disabled={!!exporting} style={{
+              width: '100%', padding: '13px 0', borderRadius: 6, border: 'none',
+              background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
+              boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)',
+              color: 'var(--accent-ink)', textShadow: 'none',
+              fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: exporting ? 'default' : 'pointer',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+              WebkitTapHighlightColor: 'transparent', opacity: exporting ? 0.6 : 1,
+            }}>
+              <i className="fa-solid fa-share-nodes" style={{ fontSize: 13 }} />
+              Share weekly recap
+            </button>
+          )}
           <button onClick={doExportCSV} disabled={!!exporting} style={{
             width: '100%', padding: '13px 0', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`,
             background: UI.bgInset, color: exporting ? UI.inkGhost : UI.ink,
@@ -6377,6 +6621,340 @@ function ExportSheet({ open, onClose, store, userId }) {
           </button>
         </div>
 
+      </div>
+    </Sheet>
+  );
+}
+
+// ─── Weekly recap share sheet ──────────────────────────────────────────────
+
+function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }) {
+  const today = LB.todayISO();
+  const [weekDate, setWeekDate] = useStateH(initialDate || today);
+  const [capturing, setCapturing] = useStateH(false);
+  const recapRef = useRefH(null);
+
+  useEffectH(() => {
+    if (open) setWeekDate(initialDate || today);
+  }, [open, initialDate]);
+
+  const snapshot = useMemoH(() => buildWeeklyRecapSnapshot({
+    store, targets, anchor: weekDate, today,
+  }), [store, targets, weekDate, today]);
+
+  const dateRange = `${LB.fmtDayLabel(snapshot.from, { day: 'numeric', month: 'short' })} - ${LB.fmtDayLabel(snapshot.to, { day: 'numeric', month: 'short', year: 'numeric' })}`;
+  const adherence = snapshot.stats.adherence != null ? Math.round(snapshot.stats.adherence) : null;
+  const verdict = adherence == null ? null : adherence >= 97 ? 'PERFECT' : adherence >= 90 ? 'STRONG' : adherence >= 75 ? 'ON TRACK' : 'OFF TRACK';
+  const weightUnit = UI.unit();
+  // Exported posters use the same watermark treatment as plan/session sharing:
+  // VIPs get their selected background, everyone else gets the ZANE mark.
+  // The logo only exists in capture mode, so the normal sheet stays compact.
+  const shotLogo = store.settings?.vipBackground || 'icons/zane-logo.png';
+  const shotIsCustom = shotLogo !== 'icons/zane-logo.png';
+  const shotIsLight = ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark');
+  const shotLogoStyle = shotIsCustom
+    ? { width: '72%', maxWidth: 700, opacity: 0.13, objectFit: 'contain' }
+    : { width: '68%', maxWidth: 660, opacity: shotIsLight ? 0.10 : 0.06, filter: shotIsLight ? 'grayscale(1)' : 'grayscale(1) brightness(3)', objectFit: 'contain' };
+  const fmt = (value, digits = 0) => {
+    if (value == null || !Number.isFinite(Number(value))) return '—';
+    return Number(value).toLocaleString('en-US', { maximumFractionDigits: digits });
+  };
+  const fmtDuration = minutes => minutes == null || !minutes ? '—' : `${Math.round(minutes)} min`;
+  const fmtVolume = value => value == null || !value ? '—' : `${Math.round(value).toLocaleString('en-US')} ${weightUnit}`;
+  const metric = (label, value, unit = '') => (
+    <div style={{ minWidth: 0, textAlign: 'center' }}>
+      <div className="num" style={{ fontSize: 20, color: value == null ? UI.inkGhost : UI.ink, fontWeight: 300, whiteSpace: 'nowrap' }}>
+        {value == null ? '—' : value}{value != null && unit ? <span style={{ fontSize: 9, color: UI.inkFaint, marginLeft: 2 }}>{unit}</span> : ''}
+      </div>
+      <div style={{ fontSize: 8, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase', marginTop: 3 }}>{label}</div>
+    </div>
+  );
+  const section = (title, children, note = null, wide = false) => (
+    <Card style={{ padding: capturing ? 18 : 14, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 1 } : {}), ...(capturing && wide ? { gridColumn: '1 / -1' } : {}) }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>{title}</span>
+        {note && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{note}</span>}
+      </div>
+      {children}
+    </Card>
+  );
+  const modeLabel = mode => mode === 'sick' ? 'SICK' : mode === 'vacation' ? 'AWAY' : mode === 'deload' ? 'DELOAD' : null;
+  const dayState = day => {
+    const mode = modeLabel(day.mode);
+    if (mode) return { label: mode, color: UI.warn, icon: day.mode === 'sick' ? 'fa-bed-pulse' : day.mode === 'vacation' ? 'fa-umbrella-beach' : 'fa-battery-quarter' };
+    if (day.trained && day.cardio) return {
+      label: 'TRAINED + CARDIO', color: 'var(--accent)',
+      icons: [
+        { icon: 'fa-dumbbell', color: 'var(--accent)' },
+        { icon: 'fa-person-running', color: UI.ok },
+      ],
+    };
+    if (day.trained) return { label: 'TRAINED', color: 'var(--accent)', icon: 'fa-dumbbell' };
+    if (day.cardio) return { label: 'CARDIO', color: UI.ok, icon: 'fa-person-running' };
+    if (day.foodClosed) return { label: 'CLOSED', color: UI.inkSoft, icon: 'fa-check' };
+    if (day.planned) return { label: 'PLANNED', color: UI.inkFaint, icon: 'fa-calendar-day' };
+    return { label: 'REST', color: UI.inkFaint, icon: 'fa-minus' };
+  };
+
+  const shareRecap = async () => {
+    if (!recapRef.current || capturing) return;
+    const html2canvas = await window.__ensureHtml2Canvas?.().catch(() => null);
+    if (!html2canvas) {
+      UI.alert('Could not prepare the recap image. Please try again.');
+      return;
+    }
+    setCapturing(true);
+    const parent = recapRef.current.parentElement;
+    const saved = parent ? { overflow: parent.style.overflow, height: parent.style.height, minHeight: parent.style.minHeight } : null;
+    let captureHost = null;
+    if (parent) {
+      parent.style.overflow = 'visible';
+      parent.style.height = 'auto';
+      parent.style.minHeight = 'auto';
+    }
+    await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    try {
+      await Promise.all([
+        document.fonts?.load('600 64px "Inter"'),
+        document.fonts?.load('300 64px "JetBrains Mono"'),
+        document.fonts?.load('700 64px "Big Shoulders Display"'),
+      ].filter(Boolean));
+    } catch (_) {}
+    if (document.fonts?.ready) await document.fonts.ready.catch(() => {});
+    try {
+      // The recap normally lives inside the animated Sheet. On mobile Safari,
+      // html2canvas can measure that ancestor at a different animation frame
+      // than the child and bake its translateY into the output. Capture a
+      // cloned poster under body instead, where no Sheet transform or scroll
+      // container can influence the coordinates.
+      const source = recapRef.current;
+      if (!source) return;
+      captureHost = document.createElement('div');
+      captureHost.setAttribute('data-weekly-recap-capture', '');
+      captureHost.style.position = 'fixed';
+      captureHost.style.inset = '0';
+      captureHost.style.zIndex = '1000';
+      captureHost.style.overflow = 'auto';
+      captureHost.style.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820';
+      captureHost.style.pointerEvents = 'none';
+      const element = source.cloneNode(true);
+      element.style.margin = '0 auto';
+      element.style.transform = 'none';
+      captureHost.appendChild(element);
+      document.body.appendChild(captureHost);
+      await new Promise(resolve => requestAnimationFrame(resolve));
+      const logo = element.querySelector('img[data-shot-avatar]');
+      if (logo && !logo.complete) {
+        await new Promise(resolve => {
+          logo.addEventListener('load', resolve, { once: true });
+          logo.addEventListener('error', resolve, { once: true });
+        });
+        await new Promise(resolve => requestAnimationFrame(resolve));
+      }
+      const canvas = await html2canvas(element, {
+        backgroundColor: getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820',
+        scale: 2, useCORS: true, logging: false,
+        scrollX: 0, scrollY: 0,
+        width: element.scrollWidth, windowWidth: element.scrollWidth,
+        height: element.scrollHeight, windowHeight: element.scrollHeight,
+        onclone: clonedDoc => {
+          const style = clonedDoc.createElement('style');
+          style.textContent = '*,*::before,*::after{animation:none !important;transition:none !important;}';
+          (clonedDoc.head || clonedDoc.documentElement).appendChild(style);
+        },
+      });
+      const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+      if (!blob) return;
+      const filename = `weekly-recap-${snapshot.from}-${snapshot.to}.png`;
+      const file = new File([blob], filename, { type: 'image/png' });
+      const isMobile = /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
+      if (isMobile && navigator.share && navigator.canShare?.({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: `Weekly recap ${dateRange}` }); } catch (_) {}
+      } else {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = filename; document.body.appendChild(a); a.click();
+        document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    } finally {
+      if (captureHost) captureHost.remove();
+      if (parent && saved) {
+        parent.style.overflow = saved.overflow;
+        parent.style.height = saved.height;
+        parent.style.minHeight = saved.minHeight;
+      }
+      setCapturing(false);
+    }
+  };
+
+  const previousWeek = () => setWeekDate(LB.shiftDate(snapshot.from, -7));
+  const nextWeek = () => {
+    const next = LB.shiftDate(snapshot.from, 7);
+    if (next <= today) setWeekDate(next);
+  };
+  const target = snapshot.target;
+  const stats = snapshot.stats;
+  const heaviestSessionVolume = snapshot.highestVolumeSession
+    ? LB.totalVolume(snapshot.highestVolumeSession, store?.exercises || [], store?.dailyLogs || [])
+    : 0;
+  const longestActivityStreak = snapshot.days.reduce((best, day) => {
+    const active = day.trained || day.cardio;
+    const current = active ? (best.current + 1) : 0;
+    return { current, longest: Math.max(best.longest, current) };
+  }, { current: 0, longest: 0 }).longest;
+  const highlights = [];
+  if (snapshot.longestSession && snapshot.longestDuration) highlights.push(`Longest session: ${fmtDuration(snapshot.longestDuration)}`);
+  if (heaviestSessionVolume > 0) highlights.push(`Heaviest session: ${fmtVolume(heaviestSessionVolume)}`);
+  if (snapshot.volume > 0) highlights.push(`Total volume: ${fmtVolume(snapshot.volume)}`);
+  if (snapshot.progressionWins) highlights.push(`${snapshot.progressionWins} personal best${snapshot.progressionWins === 1 ? '' : 's'}`);
+  highlights.push(`${snapshot.cardioPrs || 0} cardio best${snapshot.cardioPrs === 1 ? '' : 's'}`);
+  if (longestActivityStreak > 0) highlights.push(`Longest streak: ${longestActivityStreak} day${longestActivityStreak === 1 ? '' : 's'}`);
+
+  if (!open) return null;
+  return (
+    <Sheet open={open} onClose={onClose} title="Weekly recap" accent>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!capturing && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <button onClick={previousWeek} aria-label="Previous week" style={{ width: 38, height: 36, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.inkSoft, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-chevron-left" style={{ fontSize: 11 }} /></button>
+            <input type="date" value={snapshot.from} max={today} aria-label="Choose a date in the week" onChange={e => e.target.value && setWeekDate(e.target.value)} style={{ flex: 1, minWidth: 0, boxSizing: 'border-box', colorScheme: ['light', 'paper'].includes(store.settings?.darkMode ?? 'dark') ? 'light' : 'dark', padding: '8px 10px', borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: UI.ink, fontFamily: UI.fontNum, fontSize: 13, outline: 'none' }} />
+            <button onClick={nextWeek} disabled={LB.shiftDate(snapshot.from, 7) > today} aria-label="Next week" style={{ width: 38, height: 36, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: UI.bgInset, color: LB.shiftDate(snapshot.from, 7) > today ? UI.inkGhost : UI.inkSoft, cursor: LB.shiftDate(snapshot.from, 7) > today ? 'default' : 'pointer', WebkitTapHighlightColor: 'transparent' }}><i className="fa-solid fa-chevron-right" style={{ fontSize: 11 }} /></button>
+          </div>
+        )}
+
+        <div ref={recapRef} style={{
+          display: capturing ? 'grid' : 'flex',
+          flexDirection: capturing ? undefined : 'column',
+          gridTemplateColumns: capturing ? '1fr' : undefined,
+          gap: capturing ? 20 : 14,
+          padding: capturing ? '28px 30px 32px' : 2,
+          width: capturing ? 640 : 'auto',
+          maxWidth: capturing ? 'none' : '100%',
+          boxSizing: 'border-box',
+          position: 'relative',
+          background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
+        }}>
+          {capturing && <img
+            data-shot-avatar
+            src={shotLogo}
+            alt=""
+            aria-hidden="true"
+            crossOrigin="anonymous"
+            style={{
+              position: 'absolute', left: '50%', top: '50%', transform: 'translate(-50%, -50%)',
+              maxHeight: '70%', pointerEvents: 'none', zIndex: 0, display: 'block',
+              ...shotLogoStyle,
+            }}
+          />}
+          {capturing && <div style={{ gridColumn: '1 / -1', position: 'relative', zIndex: 1 }}>
+            <div style={{ height: 'var(--hair-width)', background: UI.gold, marginBottom: 14 }} />
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <div className="display" style={{ fontSize: 28, color: UI.gold, lineHeight: 1.1 }}>WEEKLY RECAP</div>
+                <div className="micro" style={{ color: UI.inkFaint, marginTop: 4 }}>{dateRange.toUpperCase()}</div>
+              </div>
+              <div className="micro-gold" style={{ letterSpacing: '0.18em', marginTop: 2 }}>ZANE</div>
+            </div>
+          </div>}
+          <Card accent style={{ padding: 18, borderLeft: `3px solid ${UI.gold}`, minWidth: 0, ...(capturing ? { display: 'flex', flexDirection: 'column', justifyContent: 'center', position: 'relative', zIndex: 1 } : {}) }}>
+            {!capturing && <>
+              <div style={{ display: 'flex', alignItems: 'baseline', gap: 8 }}>
+                <span style={{ fontFamily: UI.fontDisplay, fontSize: 27, letterSpacing: '0.08em', color: 'var(--accent)', lineHeight: 1 }}>WEEKLY RECAP</span>
+                <span style={{ flex: 1 }} />
+                <i className="fa-solid fa-chart-line" style={{ color: UI.gold, fontSize: 15 }} />
+              </div>
+              <div className="num" style={{ color: UI.inkSoft, fontSize: 12, marginTop: 8 }}>{dateRange}</div>
+            </>}
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, marginBottom: 12 }}>
+              <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>NUTRITION OVERVIEW</span>
+              {target.calories != null && <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi }}>{target.calories} kcal target</span>}
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 18 }}>
+              {adherence != null ? (
+                <>
+                  <span className="num" style={{ fontSize: 34, fontWeight: 300, color: adherenceColor(adherence), lineHeight: 1 }}>{adherence}%</span>
+                  <span style={{ fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.08em', color: adherenceColor(adherence), fontSize: 12 }}>{verdict}</span>
+                </>
+              ) : <span style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12 }}>No nutrition score for this week yet</span>}
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 9, color: UI.inkFaint, fontFamily: UI.fontUi, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Macro adherence</span>
+            </div>
+            <div style={{ height: 6, borderRadius: 4, background: UI.bgInset, overflow: 'hidden', marginTop: 5 }}><div style={{ height: '100%', width: `${adherence == null ? 0 : Math.min(100, adherence)}%`, background: adherenceColor(adherence) }} /></div>
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, minmax(0, 1fr))' : 'repeat(2, minmax(0, 1fr))', gap: '14px 10px', marginTop: 18 }}>
+              {metric('Calories / day', stats.calories != null ? fmt(stats.calories) : null, stats.calories != null ? 'kcal' : '')}
+              {metric('Protein / day', stats.protein != null ? fmt(stats.protein) : null, stats.protein != null ? 'g' : '')}
+              {metric('Carbs / day', stats.carbs != null ? fmt(stats.carbs) : null, stats.carbs != null ? 'g' : '')}
+              {metric('Fat / day', stats.fat != null ? fmt(stats.fat) : null, stats.fat != null ? 'g' : '')}
+            </div>
+            {(target.protein != null || target.carbs != null || target.fat != null) && (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, marginTop: 14, paddingTop: 10, borderTop: `1px solid ${UI.hair}` }}>
+                {[['P', target.protein], ['C', target.carbs], ['F', target.fat]].map(([label, value]) => <div key={label} style={{ textAlign: 'center', fontFamily: UI.fontNum, fontSize: 11, color: UI.inkFaint }}><span style={{ color: UI.inkGhost }}>{label}</span> {value != null ? `${value}g` : '—'}</div>)}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, flexWrap: 'wrap', marginTop: 12, width: '100%', textAlign: 'center', fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+              <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.loggedDays}</span> logged days</span>
+              <span><span className="num" style={{ color: UI.inkSoft }}>{snapshot.closedFoodDays}</span> food days closed</span>
+              {stats.mealOfChoice > 0 && <span><span className="num" style={{ color: 'var(--accent)' }}>{stats.mealOfChoice}</span> meal-of-choice</span>}
+            </div>
+          </Card>
+
+          {section('BODY, STEPS & WATER', (
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(4, 1fr)' : 'repeat(3, 1fr)', gap: '14px 10px' }}>
+              {metric('Weight start', snapshot.weightStart != null ? fmt(snapshot.weightStart, 1) : null, snapshot.weightStart != null ? weightUnit : '')}
+              {metric('Weight end', snapshot.weightEnd != null ? fmt(snapshot.weightEnd, 1) : null, snapshot.weightEnd != null ? weightUnit : '')}
+              {metric('Steps', stats.stepsSum != null ? fmt(stats.stepsSum) : null)}
+              {metric('Water / day', stats.water != null ? fmt(UI.waterSummaryValue(stats.water, weightUnit), 1) : null, stats.water != null ? UI.waterSummaryUnit(weightUnit) : '')}
+            </div>
+          ))}
+
+          {section('TRAINING', (
+            <div style={{ display: 'grid', gridTemplateColumns: capturing ? 'repeat(3, 1fr)' : 'repeat(4, 1fr)', gap: '14px 10px' }}>
+              {metric('Sessions', snapshot.sessions)}
+              {metric('Time', snapshot.durationMinutes ? Math.round(snapshot.durationMinutes) : null, snapshot.durationMinutes ? 'min' : '')}
+              {metric('Sets', snapshot.sets)}
+              {metric('Volume', snapshot.volume ? Math.round(snapshot.volume).toLocaleString('en-US') : null, snapshot.volume ? weightUnit : '')}
+              {metric('Cardio sessions', snapshot.cardioSessions || null)}
+              {metric('Cardio minutes', snapshot.cardioMinutes || null, snapshot.cardioMinutes ? 'min' : '')}
+            </div>
+          ), snapshot.exerciseCount ? `${snapshot.exerciseCount} exercises` : null)}
+
+          {section('WEEK AT A GLANCE', (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 4 }}>
+              {snapshot.days.map(day => {
+                const state = dayState(day);
+                return <div key={day.date} title={`${day.label}: ${state.label}`} style={{ minWidth: 0, textAlign: 'center', padding: '7px 2px 6px', background: UI.bgInset, borderRadius: 4, border: `1px solid ${UI.hair}` }}>
+                  <div style={{ color: UI.inkFaint, fontSize: 9, fontFamily: UI.fontUi }}>{day.label.split(' ')[0]}</div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, minHeight: 18, margin: '8px auto 6px' }}>
+                    {(state.icons || [{ icon: state.icon, color: state.color }]).map((activity, index) => (
+                      <i key={`${activity.icon}-${index}`} className={`fa-solid ${activity.icon}`} style={{ color: activity.color, fontSize: 12 }} />
+                    ))}
+                  </div>
+                  <div className="num" style={{ color: day.adherence != null ? adherenceColor(day.adherence) : UI.inkFaint, fontSize: 9 }}>{day.adherence != null ? `${Math.round(day.adherence)}%` : state.label === 'CLOSED' ? 'DONE' : state.label === 'REST' ? 'REST' : '—'}</div>
+                </div>;
+              })}
+            </div>
+          ))}
+
+          {highlights.length > 0 && section('HIGHLIGHTS', (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '8px 14px' }}>
+              {highlights.map((highlight, index) => <div key={index} style={{ minWidth: 0, display: 'flex', alignItems: 'flex-start', gap: 8, fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi }}><i className="fa-solid fa-star" style={{ flexShrink: 0, color: 'var(--accent)', fontSize: 10, marginTop: 3 }} />{highlight}</div>)}
+            </div>
+          ))}
+
+          {!snapshot.hasData && (
+            <Card style={{ padding: 16, textAlign: 'center', borderLeft: `3px solid ${UI.inkFaint}`, ...(capturing ? { gridColumn: '1 / -1', position: 'relative', zIndex: 1 } : {}) }}>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkFaint }}>Nothing is logged for this week on this device.</div>
+            </Card>
+          )}
+        </div>
+
+        {!capturing && (
+          <button onClick={shareRecap} disabled={capturing} style={{ width: '100%', padding: '13px 0', borderRadius: 6, border: 'none', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 6px 20px rgba(var(--accent-rgb),0.35)', color: 'var(--accent-ink)', textShadow: 'none', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, WebkitTapHighlightColor: 'transparent' }}>
+            <i className="fa-solid fa-share-nodes" style={{ fontSize: 13 }} />
+            Share recap image
+          </button>
+        )}
       </div>
     </Sheet>
   );

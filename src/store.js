@@ -10,6 +10,7 @@ const SUPABASE_ANON_KEY = SUPABASE_CONFIG.anonKey || 'eyJhbGciOiJIUzI1NiIsInR5cC
 const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
+const COACHING_DRIVE_URL    = `${SUPABASE_URL}/functions/v1/coaching-drive-sync`;
 const SOCIAL_NOTIFY_URL     = `${SUPABASE_URL}/functions/v1/zane_social-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
@@ -51,13 +52,11 @@ async function subscribeWebPush(userId) {
     });
   }
   const json = sub.toJSON();
-  await unwrap(_supabase.from('zane_push_subscriptions').upsert({
-    id: json.endpoint,
-    user_id: userId,
-    endpoint: json.endpoint,
-    p256dh: json.keys.p256dh,
-    auth: json.keys.auth,
-  }, { onConflict: 'id' }));
+  await unwrap(_supabase.rpc('register_web_push_subscription', {
+    p_endpoint: json.endpoint,
+    p_p256dh: json.keys.p256dh,
+    p_auth: json.keys.auth,
+  }));
   return sub;
 }
 
@@ -115,6 +114,22 @@ function isAuthRequest(input) {
 
 function isTransientAuthStatus(status) {
   return status === 408 || status === 425 || status === 429 || status >= 500;
+}
+
+// A rejected refresh token cannot heal through retries. Keep transport and
+// provider failures on the recovery loop, but hand permanent session failures
+// back to the login screen so the local cache can be reattached after login.
+function isPermanentAuthRefreshError(error) {
+  if (!error || error.__zaneAuthTransient) return false;
+  const status = Number(error.status || error.statusCode || 0);
+  if (status === 400 || status === 401 || status === 403) return true;
+  const code = String(error.code || '').toLowerCase();
+  const name = String(error.name || '').toLowerCase();
+  return name === 'authsessionmissingerror'
+    || code === 'refresh_token_not_found'
+    || code === 'refresh_token_already_used'
+    || code === 'invalid_refresh_token'
+    || code === 'session_not_found';
 }
 
 function writeAuthRecovery(reason) {
@@ -511,6 +526,7 @@ function authRecoveryTestApi() {
     rememberUser: rememberOfflineUser,
     offlineUser: getOfflineUser,
     clearUser: clearOfflineUser,
+    isPermanentRefreshError: isPermanentAuthRefreshError,
   };
 }
 
@@ -623,6 +639,46 @@ function nowHHMM() {
   const d = new Date();
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
+
+// Manual Health edits replace a day's detailed Water Tracker rows with one
+// canonical total. Keeping that total in waterLogs prevents the Health card
+// and Water screen from disagreeing until the next drink is logged.
+function reconcileManualWaterLogs(waterLogs, date, amountMl) {
+  const rows = waterLogs || [];
+  const nextTotal = Math.max(0, Number(amountMl) || 0);
+  const currentTotal = rows
+    .filter(entry => entry.date === date)
+    .reduce((sum, entry) => sum + (Number(entry.amountMl) || 0), 0);
+  if (currentTotal === nextTotal) return rows;
+  const otherDays = rows.filter(entry => entry.date !== date);
+  if (!nextTotal) return otherDays;
+  return [{
+    id: uid(), date, time: nowHHMM(), amountMl: nextTotal,
+    name: 'Manual total', category: 'custom', createdAt: new Date().toISOString(),
+  }, ...otherDays];
+}
+
+function positiveNumberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function retainedStateForUser(retained, userId, currentUserId = null, currentStore = null, currentBase = null) {
+  // Prefer the live snapshot for a same-account recovery. localStorage may be
+  // stale precisely because quota/private mode caused the last save to fail.
+  if (userId && currentUserId === userId && currentStore) {
+    return { uid: userId, store: currentStore, base: currentBase };
+  }
+  return retained?.uid === userId && retained.store ? retained : null;
+}
+
+function retainedStateAfterSignedOut(retained, signedOutUserId, currentStore = null, currentBase = null) {
+  // A permanent refresh failure clears userIdRef before GoTrue emits its
+  // delayed SIGNED_OUT event. In that case `retained` is the only copy of an
+  // in-memory edit that localStorage could not persist, so leave it untouched.
+  if (!signedOutUserId) return retained || null;
+  return retainedStateForUser(retained, signedOutUserId, signedOutUserId, currentStore, currentBase);
+}
 // Short display date (e.g. "Wed, Jul 23"), en-US per the app-wide locale
 // standard. Shared helper (was duplicated as healthFmtDate/fdFmtDate in
 // screens-health.jsx/screens-food.jsx with a locale mismatch until both
@@ -701,14 +757,26 @@ function nextCycleD1ISOFromSchedule(schedule, cycleStartDate) {
 
 // ─── AUTH ────────────────────────────────────────────────────────────────
 
-async function recoverAuthSession() {
+async function recoverAuthSessionDetailed() {
   try {
     const { data, error } = await _supabase.auth.refreshSession();
-    if (error || !data?.session) return null;
+    if (error || !data?.session) {
+      const permanent = isPermanentAuthRefreshError(error);
+      if (permanent) clearAuthRecovery();
+      return { session: null, permanent, error: error || null };
+    }
     rememberOfflineUser(data.session.user?.id);
     clearAuthRecovery();
-    return data.session;
-  } catch (_) { return null; }
+    return { session: data.session, permanent: false, error: null };
+  } catch (error) {
+    const permanent = isPermanentAuthRefreshError(error);
+    if (permanent) clearAuthRecovery();
+    return { session: null, permanent, error };
+  }
+}
+
+async function recoverAuthSession() {
+  return (await recoverAuthSessionDetailed()).session;
 }
 
 async function signIn(email, password) {
@@ -802,7 +870,57 @@ async function resetPassword(email, redirectTo) {
   if (error) throw error;
 }
 
+// Supabase Storage metadata is a Postgres table, but objects must be removed
+// through the Storage API. A direct DELETE on storage.objects is rejected by
+// the current Storage service (and would leave the underlying object behind
+// on older versions). Capture the user's own paths before the account tables
+// are wiped, then remove them in API-sized batches. If any lookup or removal
+// fails, abort before deleting database rows so a retry can still find the
+// paths and finish the purge.
+async function deleteOwnedStorageObjects(userId) {
+  if (!userId) throw new Error('Authentication required');
+
+  const [socialRes, coachingRes, notesRes] = await Promise.all([
+    _supabase.from('zane_social_message_attachments')
+      .select('storage_path').eq('uploaded_by', userId),
+    _supabase.from('zane_coaching_drive_photos')
+      .select('staging_path').eq('client_id', userId),
+    _supabase.from('zane_coaching_notes')
+      .select('attachments').eq('author_id', userId).not('attachments', 'is', null),
+  ]);
+  for (const result of [socialRes, coachingRes, notesRes]) {
+    if (result?.error) throw new Error(result.error.message || 'Could not prepare storage cleanup');
+  }
+
+  const uniquePaths = values => [...new Set((values || []).filter(v => typeof v === 'string' && v.length > 0))];
+  const socialPaths = uniquePaths((socialRes.data || []).map(row => row.storage_path));
+  const coachingPaths = uniquePaths((coachingRes.data || []).map(row => row.staging_path));
+  const chatPrefix = `${SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
+  const chatPaths = uniquePaths((notesRes.data || []).flatMap(row =>
+    (Array.isArray(row.attachments) ? row.attachments : [])
+      .map(file => {
+        if (typeof file?.url !== 'string' || !file.url.startsWith(chatPrefix)) return null;
+        const raw = file.url.slice(chatPrefix.length);
+        try { return decodeURIComponent(raw); } catch { return raw; }
+      })
+      .filter(path => path && path.split('/')[0] === String(userId))
+  ));
+
+  const removeInBatches = async (bucket, paths) => {
+    for (let offset = 0; offset < paths.length; offset += 1000) {
+      await unwrap(_supabase.storage.from(bucket).remove(paths.slice(offset, offset + 1000)));
+    }
+  };
+  await removeInBatches('social-chat-attachments', socialPaths);
+  await removeInBatches('coaching-drive-staging', coachingPaths);
+  await removeInBatches('chat-attachments', chatPaths);
+}
+
 async function deleteAllData(userId, { keepPush = false } = {}) {
+  // Backup restore deliberately keeps social/attachment data. The explicit
+  // account purge, however, must clear the user's Storage objects before the
+  // corresponding metadata rows disappear.
+  if (!keepPush) await deleteOwnedStorageObjects(userId);
   const ops = [
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
@@ -838,7 +956,6 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_medication_plan_items').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_schedule_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_medication_logs').delete().eq('user_id', userId)),
-    unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)),
     // These three don't cascade off any table already in this list (only off
     // auth.users, which this function never deletes), so without them "delete
     // all my data" and a backup restore's wipe-first step both left plan
@@ -853,6 +970,15 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   // wipe. Same carve-out as push subscriptions: a RESTORE reuses this function
   // and must not kill links the user already handed out.
   if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_my_recipe_shares')));
+  // Pillbox ticks get the same carve-out, for the same reason. They are pure
+  // existence markers keyed <user>_<date>_<slot>, never exported and never
+  // re-imported, and importFromBackup preserves schedule slot ids verbatim, so
+  // every surviving tick still points at a live slot. Wiping them on restore
+  // un-ticked a pillbox the user had already physically packed for the week.
+  // Only the explicit "delete all my data" flow clears them.
+  if (!keepPush) {
+    ops.push(unwrap(_supabase.from('zane_medication_pillbox_checks').delete().eq('user_id', userId)));
+  }
   // Push subscriptions are device-scoped and are never re-uploaded by
   // importFromBackup, so a restore (which reuses this fn) must NOT drop them,
   // that would silently unsubscribe the device from Web Push. Only the
@@ -1092,6 +1218,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.foodFavorites?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.foodTemplateSlots?.length ? 1 : 0)
+    + (backup.foodTemplateDays?.length ? 1 : 0)
     + (backup.foodMealPlans?.length ? 1 : 0)
     + (backup.foodShoppingPrefs?.length ? 1 : 0)
     + (backup.medicationPlans?.length ? 1 : 0)
@@ -1447,6 +1574,13 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     ));
     stepsDone++;
   }
+  if (backup.foodTemplateDays?.length) {
+    prog('Restoring meal template history...');
+    await unwrap(_supabase.from('zane_food_template_days').upsert(
+      backup.foodTemplateDays.map(d => ({ id: d.id, user_id: userId, date: d.date }))
+    ));
+    stepsDone++;
+  }
   if (backup.workoutTemplates?.length) {
     prog('Uploading workout templates…');
     await unwrap(_supabase.from('zane_workout_templates').upsert(
@@ -1580,6 +1714,12 @@ async function exportBackup(store, userId) {
       .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
     _supabase.from('zane_adaptive_tdee_history').select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
       .eq('user_id', userId).order('as_of_date', { ascending: false }),
+    // These rows are deletion tombstones for template auto-fill. The local
+    // store keeps only a bounded window, but restore deletes the whole table;
+    // fetch every marker so a deliberately removed planned meal never comes
+    // back after importing a backup.
+    _supabase.from('zane_food_template_days').select('id, date')
+      .eq('user_id', userId).order('date', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -1590,7 +1730,7 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, foodTemplateDaysRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
   // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
@@ -1598,6 +1738,7 @@ async function exportBackup(store, userId) {
   if (foodLogsRes.error) throw foodLogsRes.error;
   if (medicationLogsRes.error) throw medicationLogsRes.error;
   if (adaptiveTdeeHistoryRes.error) throw adaptiveTdeeHistoryRes.error;
+  if (foodTemplateDaysRes.error) throw foodTemplateDaysRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -1629,6 +1770,7 @@ async function exportBackup(store, userId) {
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
+    foodTemplateDays: (foodTemplateDaysRes.data || []).map(d => ({ id: d.id, date: d.date })),
     adaptiveTdeeHistory: (adaptiveTdeeHistoryRes.data || []).map(mapAdaptiveTdeeHistoryRow),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
@@ -1861,14 +2003,15 @@ function mapUserSettings(sett = {}) {
 function buildEssentialLoadResult({
   isCoachLoad, profileRes, exRes, schRes, sessRes, settRes, skipsRes,
   cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes, mesoStatesRes,
-  authUser, entriesBySession, statsBySession, exerciseBests,
+  authUser, entriesBySession, statsBySession, exerciseBests, sessionStatsFailed,
 }) {
   const sett = settRes.data || {};
-  return {
+  const result = {
     user: {
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      tierGrantedAt: profileRes.data?.tier_granted_at ?? null,
       xHandle: profileRes.data?.x_handle ?? null,
       xHandlePublic: profileRes.data?.x_handle_public ?? true,
       xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
@@ -2002,6 +2145,11 @@ function buildEssentialLoadResult({
     supportTickets: [],
     supportUnread: 0,
   };
+  Object.defineProperty(result, '__sessionStatsAvailable', {
+    value: !sessionStatsFailed,
+    enumerable: false,
+  });
+  return result;
 }
 
 function mapUserSupportTickets(rows) {
@@ -2024,12 +2172,29 @@ async function loadUserSupportChats() {
   return mapUserSupportTickets(data);
 }
 
+// The founding-member trigger runs when a completed session lands. A full
+// background reload would be wasteful here, so the app uses this tiny,
+// authenticated read once after a newly completed session syncs. The tier and
+// grant timestamp are server-authored; neither is accepted by syncStore.
+async function refreshProfileTier(userId) {
+  if (!userId) return { tier: 'free', tierGrantedAt: null };
+  const { data, error } = await scheduleDbTask(
+    () => _supabase.from('zane_profiles').select('tier, tier_granted_at').eq('id', userId).maybeSingle(),
+    { priority: 'foreground', kind: 'read' },
+  );
+  if (error) throw error;
+  return {
+    tier: data?.tier || 'free',
+    tierGrantedAt: data?.tier_granted_at ?? null,
+  };
+}
+
 async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, tier, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
+    _supabase.from('zane_profiles').select('id, name, tier, tier_granted_at, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
     _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
@@ -2204,14 +2369,34 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     if (data?.length) entriesBySession[histInProgId] = data;
   }
 
+  // Indexes 7 (get_exercise_best_e1rm) and 8 (get_session_stats) are the two
+  // heaviest aggregates and are deliberately NOT thrown on, same soft-fail
+  // reasoning as the coaching block further down: they are derived display
+  // caches, and one statement timeout must not discard every other source
+  // already fetched for this boot. They must not be read as "empty" either,
+  // which is what silently happened before: an errored result yielded {},
+  // that empty map overwrote a perfectly good cached one, and
+  // compactLocalSnapshot then persisted the emptiness so it survived
+  // restarts until the next successful RPC.
+  const bestsFailed = !!queryResults[7]?.error;
+  const sessionStatsFailed = !!queryResults[8]?.error;
+  if (bestsFailed) console.warn('[load] get_exercise_best_e1rm failed, keeping the cached PR baseline', queryResults[7].error);
+  if (sessionStatsFailed) console.warn('[load] get_session_stats failed, windowed session aggregates degraded', queryResults[8].error);
   const statsBySession = {};
   for (const r of (queryResults[8]?.data || [])) statsBySession[r.session_id] = r;
-  const exerciseBests = {};
+  const bestsMap = {};
   for (const r of (queryResults[7]?.data || [])) {
-    if (r.ex_id != null && r.best_e1rm != null) exerciseBests[r.ex_id] = r.best_e1rm;
+    if (r.ex_id != null && r.best_e1rm != null) bestsMap[r.ex_id] = r.best_e1rm;
   }
+  // Omitted (not empty) on failure, so the boot merges keep the cached map.
+  const exerciseBests = bestsFailed ? undefined : bestsMap;
 
-  const orphanIds = isCoachLoad ? [] : (queryResults[3].data || [])
+  // statsBySession is one of the two proofs that an unended session holds
+  // real work; the other is entriesBySession. When the stats RPC failed the
+  // map is empty for every session, so an unended session whose sets live
+  // only on the server would look verifiably empty and get deleted. Skip the
+  // sweep entirely rather than delete on missing evidence.
+  const orphanIds = (isCoachLoad || sessionStatsFailed) ? [] : (queryResults[3].data || [])
     .filter(s => {
       if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
       const entryRows = entriesBySession[s.id];
@@ -2230,7 +2415,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       settRes: queryResults[4], skipsRes: queryResults[5],
       cardioLogsRes: queryResults[14], cardioPlansRes: queryResults[15], dailyLogsRes: queryResults[16],
       statusPeriodsRes: queryResults[17], mesoStatesRes: queryResults[23],
-      authUser, entriesBySession, statsBySession, exerciseBests,
+      authUser, entriesBySession, statsBySession, exerciseBests, sessionStatsFailed,
     }));
   }
 
@@ -2357,6 +2542,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       name: profileRes.data?.name || '',
       email: isCoachLoad ? '' : (authUser?.email || ''),
       tier: profileRes.data?.tier || 'free',
+      tierGrantedAt: profileRes.data?.tier_granted_at ?? null,
       xHandle: profileRes.data?.x_handle ?? null,
       xHandlePublic: profileRes.data?.x_handle_public ?? true,
       xHandlePromptOptedOut: !!profileRes.data?.x_handle_prompt_opted_out,
@@ -2620,6 +2806,10 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     supportTickets: mapUserSupportTickets(supportTicketsRes?.data),
     supportUnread: (supportTicketsRes?.data || []).reduce((s, t) => s + Number(t.unread_count || 0), 0),
   };
+  Object.defineProperty(result, '__sessionStatsAvailable', {
+    value: !sessionStatsFailed,
+    enumerable: false,
+  });
   if (!isCoachLoad) await autoArchiveMissedDays(userId, result);
   return result;
 }
@@ -2700,7 +2890,19 @@ function diffCollectionById(prevList, nextList) {
 // untouched server row back as a brand-new insert; if the user changed it
 // afterwards, the fingerprint no longer matches and the edit is uploaded.
 function diffWindowedCollectionById(prevList, nextList, collection) {
-  const diff = diffCollectionById(prevList, nextList);
+  // A lazy history row may have been removed after the first offline attempt.
+  // The confirmed server row is kept as a tombstone only after it was present
+  // in the local store (see rememberLocalDeletedRows below); carrying it into
+  // the next diff makes retries survive the sync base not containing that old
+  // row. Merely fetching a row never creates a tombstone, so stock backfills
+  // cannot accidentally turn into deletes.
+  const currentIds = new Set((nextList || []).map(row => row?.id).filter(id => id != null));
+  const remembered = _localDeletedRows.get(collection);
+  const deletedRows = remembered
+    ? [...remembered.values()].filter(row => row?.id != null && !currentIds.has(row.id))
+    : [];
+  const diff = diffCollectionById([...(prevList || []), ...deletedRows.filter(row => !(prevList || []).some(p => p?.id === row.id))], nextList);
+  if (diff.removed.length) rememberLocalDeletedRows(collection, diff.removed);
   const confirmed = _localConfirmedRows.get(collection);
   if (!confirmed || !diff.upsert.length) return diff;
   diff.upsert = diff.upsert.filter(row => {
@@ -2949,13 +3151,36 @@ async function syncStore(prev, next, userId) {
   let sessionUpserts = [];
   let sessionsUpsertOp = null;
   if (prev.sessions !== next.sessions) {
-    const prevSessMap = new Map(prev.sessions.map(x => [x.id, x]));
-    const nextSessIds = new Set(next.sessions.map(x => x.id));
+    const nextSessionIds = new Set(next.sessions.map(x => x.id));
+    const rememberedSessionDeletes = _localDeletedRows.get('sessions');
+    const carriedDeletedSessions = rememberedSessionDeletes
+      ? [...rememberedSessionDeletes.values()].filter(row => row?.id != null && !nextSessionIds.has(row.id))
+      : [];
+    const prevSessMap = new Map([
+      ...prev.sessions.map(x => [x.id, x]),
+      ...carriedDeletedSessions.filter(row => !prev.sessions.some(x => x.id === row.id)).map(x => [x.id, x]),
+    ]);
+    const nextSessIds = nextSessionIds;
     const upsert = next.sessions.filter(s => {
       const p = prevSessMap.get(s.id);
-      return !p || (p !== s && JSON.stringify(p) !== JSON.stringify(s));
+      const confirmed = localConfirmedRow('sessions', s.id);
+      // A lazy history read is server-authoritative input, not a local edit.
+      // If the DB-backed session metadata is unchanged and the only new value
+      // is the exact confirmed entry payload, keep this refresh read-only.
+      if (p && confirmed && syncValuesEqual(s.entries || [], confirmed.entries || [])
+          && syncValuesEqual(sessionToRow(s, userId), sessionToRow(p, userId))) {
+        return false;
+      }
+      if (!p) return true;
+      // Compare only values that can actually be written. agg* and the other
+      // cache-only fields are deliberately stripped by sessionToRow; treating
+      // them as DB edits caused a full session upsert exactly when the stats
+      // RPC was failing and the DB was already degraded.
+      return !syncValuesEqual(sessionToRow(p, userId), sessionToRow(s, userId))
+        || !syncValuesEqual(p.entries || [], s.entries || []);
     });
-    const removed = prev.sessions.filter(s => !nextSessIds.has(s.id));
+    const removed = [...prevSessMap.values()].filter(s => !nextSessIds.has(s.id));
+    if (removed.length) rememberLocalDeletedRows('sessions', removed);
     if (upsert.length) {
       // Kept OUT of `ops`: that array is awaited below as one fail-fast batch,
       // so a single unrelated table failing anywhere in the same diff (a food
@@ -2975,7 +3200,13 @@ async function syncStore(prev, next, userId) {
       // _syncEntryRelational still diffs per set: sessions already in prev write
       // only changed sets; sessions NOT in prev (just created, or offline-created
       // and re-synced after a reload merge) write all their seeded sets once.
-      sessionUpserts = upsert;
+      // Metadata may legitimately change in the same render as a lazy fetch.
+      // Upsert that metadata, but do not rewrite server-confirmed entries. A
+      // later real set edit differs from the fingerprint and syncs normally.
+      sessionUpserts = upsert.filter(s => {
+        const confirmed = localConfirmedRow('sessions', s.id);
+        return !confirmed || !syncValuesEqual(s.entries || [], confirmed.entries || []);
+      });
     }
     if (removed.length) ops.push(_supabase.from('zane_sessions').delete().in('id', removed.map(s => s.id)));
   }
@@ -5544,6 +5775,23 @@ function withVersionedDays(schedule, versions) {
   return { ...schedule, versions, days: versions[0]?.days || schedule.days };
 }
 
+// Flex plans advance by completed sessions rather than by calendar date. A
+// version can still change the rotation, though, and may ask to start that
+// version on a particular day. Keep that choice relative to the cycleIndex at
+// which the version was created so the setting survives reloads and also works
+// when the version becomes active on a future date. Older versions only have
+// cycleOffset; that is treated as the historical equivalent of flexStartIndex.
+function flexVersionPosition(state, version, daysLen, cycleIndexOverride) {
+  const len = Math.max(1, Number(daysLen) || 0);
+  const currentRaw = cycleIndexOverride ?? state?.cycleIndex ?? 0;
+  const current = Number.isFinite(Number(currentRaw)) ? Math.floor(Number(currentRaw)) : 0;
+  const anchorRaw = version?.flexCycleAnchor ?? 0;
+  const anchor = Number.isFinite(Number(anchorRaw)) ? Math.floor(Number(anchorRaw)) : 0;
+  const startRaw = version?.flexStartIndex ?? version?.cycleOffset ?? 0;
+  const start = Number.isFinite(Number(startRaw)) ? Math.floor(Number(startRaw)) : 0;
+  return (((start + current - anchor) % len) + len) % len;
+}
+
 // Cycle position for a date-based (non-versioned, non-flex) plan, derived
 // from cycleStartDate, calendar days since start, wrapped to the plan's
 // length. Used to be duplicated within this same file (todaysDay/nextDay)
@@ -5641,9 +5889,14 @@ function todaysDay(state) {
   }
   // Flexible plan: position is the action-advanced cycleIndex, not date-derived.
   if (isFlexPlan(sch)) {
-    const len = sch.days.length;
-    const idx = (((state.cycleIndex || 0) % len) + len) % len;
-    return { schedule: sch, day: sch.days[idx], idx };
+    const activeVersion = sch.versions?.length
+      ? (sch.versions.find(v => v.validFrom <= todayStr) || sch.versions[sch.versions.length - 1])
+      : null;
+    const days = activeVersion?.days || sch.days;
+    const len = days.length;
+    if (!len) return null;
+    const idx = flexVersionPosition(state, activeVersion, len);
+    return { schedule: sch, day: days[idx], idx };
   }
   // When versions exist, derive today's position from the version active today
   const cyclePosToday = getCyclePosForDate(sch, todayStr);
@@ -5663,9 +5916,15 @@ function nextDay(state) {
   if (!sch || !sch.days.length) return null;
   // Flexible plan: the next day in sequence (cycleIndex + 1), no date math.
   if (isFlexPlan(sch)) {
-    const len = sch.days.length;
-    const idx = ((((state.cycleIndex || 0) + 1) % len) + len) % len;
-    return { schedule: sch, day: sch.days[idx], idx };
+    const todayStr = todayISO();
+    const activeVersion = sch.versions?.length
+      ? (sch.versions.find(v => v.validFrom <= todayStr) || sch.versions[sch.versions.length - 1])
+      : null;
+    const days = activeVersion?.days || sch.days;
+    const len = days.length;
+    if (!len) return null;
+    const idx = flexVersionPosition(state, activeVersion, len, (state.cycleIndex || 0) + 1);
+    return { schedule: sch, day: days[idx], idx };
   }
   if (sch.versions?.length) {
     const tomorrow = new Date(); tomorrow.setHours(12, 0, 0, 0); tomorrow.setDate(tomorrow.getDate() + 1);
@@ -5956,7 +6215,7 @@ function locallyEditedSessionScalars(mem, baseMem) {
   return SESSION_SYNC_SCALAR_FIELDS.filter(k => edited.has(k));
 }
 
-function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date()) {
+function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = null, now = new Date(), options = {}) {
   const baseIds = baseSessions ? new Set(baseSessions.map(s => s.id)) : null;
   const baseById = baseSessions ? new Map(baseSessions.map(s => [s.id, s])) : null;
   // Sessions deleted locally: once confirmed synced (in base) but no longer in
@@ -6015,8 +6274,14 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
     const cachedDiffersFromBase = baseEntries ? entrySetsDifferFromBase(mem.entries, baseEntries) : true;
     const mergedEntries = !isActive && hasServerEntries && hasCachedEntries
       ? (cachedDiffersFromBase ? mem.entries : mergeEntrySets(s.entries, mem.entries)) : null;
+    const cachedAggregates = options.preserveCachedAggregates ? {
+      ...(s.aggVolume == null && mem.aggVolume != null ? { aggVolume: mem.aggVolume } : {}),
+      ...(s.aggDoneSets == null && mem.aggDoneSets != null ? { aggDoneSets: mem.aggDoneSets } : {}),
+      ...(s.aggExercises == null && mem.aggExercises != null ? { aggExercises: mem.aggExercises } : {}),
+    } : {};
     return {
       ...s,
+      ...cachedAggregates,
       // An unsynced local edit of any scalar field the server actually
       // stores (audit H2, see locallyEditedSessionScalars above) must win
       // over the server's stale copy, `ended` above all: the follow-up flush
@@ -6040,6 +6305,13 @@ function mergeSessions(freshSessions, curSessions, inProgressId, baseSessions = 
       // forget which exercises the user had switched back to full load and the
       // per-exercise chip would flip back to showing them as reduced.
       ...(mem.cleanupOptOuts ? { cleanupOptOuts: mem.cleanupOptOuts } : {}),
+      // Old sessions keep only an entries digest after local compaction. Carry
+      // that marker through the cache-first merge as well as the private diff
+      // base; otherwise every cold start turns the empty relational payload
+      // into a fresh session change and re-upserts it unnecessarily.
+      ...(!keepCachedEntries && !mergedEntries && !(s.entries || []).length && mem._offlineEntriesDigest
+        ? { _offlineEntriesDigest: mem._offlineEntriesDigest }
+        : {}),
       // for the active session, local entries/restStart/restDuration are authoritative
       ...(isActive ? { entries: mem.entries, restStart: mem.restStart ?? null, restDuration: mem.restDuration ?? null } : {}),
       ...(keepCachedEntries ? { entries: mem.entries } : {}),
@@ -6089,6 +6361,33 @@ const _localSnapshotState = new Map();
 // Keep the registry bounded too: it is a process-local aid, never an archive.
 const _localConfirmedRows = new Map();
 const LOCAL_CONFIRMED_ROWS_MAX = 1000;
+// Rows fetched lazily and then deleted while offline need a durable marker.
+// Keep the complete row when available so a future boot can reconstruct the
+// last server baseline and emit the DELETE again. This registry is process
+// local; saveLocalState persists its entries into the paired baseline.
+const _localDeletedRows = new Map();
+
+function rememberLocalDeletedRows(collection, rows) {
+  if (!collection || !Array.isArray(rows) || !rows.length) return;
+  let map = _localDeletedRows.get(collection);
+  if (!map) { map = new Map(); _localDeletedRows.set(collection, map); }
+  for (const row of rows) {
+    if (!row || row.id == null) continue;
+    map.set(row.id, { ...row, __localDeletedTombstone: true });
+  }
+}
+
+function augmentBaselineWithDeletedRows(store, base) {
+  if (!_localDeletedRows.size) return base;
+  let out = base && typeof base === 'object' ? base : { ...(store || {}) };
+  for (const [collection, rowsById] of _localDeletedRows) {
+    const existing = Array.isArray(out[collection]) ? out[collection] : [];
+    const ids = new Set(existing.map(row => row?.id).filter(id => id != null));
+    const missing = [...rowsById.values()].filter(row => row?.id != null && !ids.has(row.id));
+    if (missing.length) out = { ...out, [collection]: [...existing, ...missing] };
+  }
+  return out;
+}
 
 function markLocalRowsConfirmed(collection, rows) {
   if (!collection || !Array.isArray(rows)) return;
@@ -6158,6 +6457,13 @@ function localCachePendingIds(store, base, now = new Date()) {
     const ids = new Set();
     const dateKey = key === 'adaptiveTdeeHistory' ? 'asOfDate' : 'date';
     const cutoff = historyWindowCutoffISO(now, key === 'sessions' ? HISTORY_WINDOW_DAYS : LOCAL_CACHE_WINDOWS[key]);
+    const currentIds = new Set(current.map(row => row?.id).filter(id => id != null));
+    // A deleted lazy row is intentionally absent from the live store, but its
+    // baseline tombstone must survive compaction until the server confirms the
+    // DELETE. Without this guard an old row was trimmed immediately on reload.
+    (previous || []).forEach(row => {
+      if (row?.__localDeletedTombstone && row.id != null && !currentIds.has(row.id)) ids.add(row.id);
+    });
     if (!previous && current.length) {
       // An older cache can predate a collection entirely. Preserve what it has
       // rather than guessing that those rows are safe to discard, except for
@@ -6426,6 +6732,7 @@ function loadLocalState(userId) {
     // A user switch must never let lazy rows from the previous account
     // influence the next account's pending-diff decision.
     _localConfirmedRows.clear();
+    _localDeletedRows.clear();
     const pairKey = `logbook-pair-${userId}`;
     let pairRaw = localStorage.getItem(pairKey);
     if (pairRaw) {
@@ -6528,20 +6835,24 @@ function saveLocalState(store, base, userId) {
   try {
     const pairKey = `logbook-pair-${userId}`;
     const prev = _localSnapshotState.get(userId) || {};
-    const baseIsStore = !base || base === store;
+    const persistedBaseline = augmentBaselineWithDeletedRows(store, base);
+    const baseIsStore = !persistedBaseline || persistedBaseline === store;
     // Friends is a volatile, server-authoritative surface. Persisting its
     // message/feed/group snapshot doubles the cache during pending writes and
     // can exceed iOS localStorage quota, which then falsely turns the global
     // sync indicator red. Training data remains fully cached offline.
-    const protectedIds = baseIsStore ? {} : localCachePendingIds(store, base);
+    // Include the durable delete tombstones in the protection pass. Passing
+    // the pre-augmented base here would compact an old deleted row out of the
+    // very baseline that is supposed to retry its DELETE after a reload.
+    const protectedIds = baseIsStore ? {} : localCachePendingIds(store, persistedBaseline);
     const persistedStore = compactLocalSnapshot(store, protectedIds);
-    const candidateBase = baseIsStore ? null : compactLocalSnapshot(base, protectedIds);
+    const candidateBase = baseIsStore ? null : compactLocalSnapshot(persistedBaseline, protectedIds);
     // A separately-created object can still represent the exact same durable
     // state (for example after a reload or a JSON round-trip). Only omit the
     // base when that is proven; any real difference keeps the full baseline for
     // offline recovery and conflict detection.
     const baseEquivalent = !baseIsStore && syncValuesEqual(persistedStore, candidateBase);
-    const effectiveBase = baseIsStore || baseEquivalent ? store : base;
+    const effectiveBase = baseIsStore || baseEquivalent ? store : persistedBaseline;
     const persistedBase = baseIsStore || baseEquivalent ? null : candidateBase;
     const encodedBase = persistedBase ? encodeLocalBaseline(persistedStore, persistedBase) : null;
     const raw = (prev.storeRef === store && prev.baseRef === effectiveBase && prev.raw)
@@ -6557,6 +6868,11 @@ function saveLocalState(store, base, userId) {
       localStorage.removeItem(`logbook-base-${userId}`);
     } catch (_) {}
     _localSnapshotState.set(userId, { storeRef: store, baseRef: effectiveBase, raw });
+    // A successful save with no remaining baseline difference means the sync
+    // queue has acknowledged every tombstone that was pending at that point.
+    // If a newer edit is still pending, persistedBaseline differs from store
+    // and the markers remain for the next retry.
+    if (baseIsStore || baseEquivalent) _localDeletedRows.clear();
     return true;
   } catch (_) {
     return false;
@@ -6607,10 +6923,12 @@ function clearLocal(userId) {
       localStorage.removeItem(`logbook-base-${userId}`);
       localStorage.removeItem(`logbook-pair-${userId}`);
       _localSnapshotState.delete(userId);
+      _localDeletedRows.clear();
       return;
     }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
     _localSnapshotState.clear();
+    _localDeletedRows.clear();
   } catch (_) {}
 }
 
@@ -6865,6 +7183,23 @@ function mapSocialAttachment(row, url = null) {
   };
 }
 
+// Re-sign one attachment on demand. The signed URL above is deliberately
+// short-lived, so a chat left open past its expiry serves a dead URL on the
+// next remount or cache miss and the image breaks. Refreshing on that failure
+// keeps the picture working without widening the window a copied URL stays
+// usable in, which is the whole point of the 300 seconds.
+async function resignSocialAttachment(attachmentId) {
+  if (!attachmentId) return null;
+  const { data, error } = await _supabase
+    .from('zane_social_message_attachments')
+    .select('id, message_id, storage_path, file_name, mime_type, created_at')
+    .eq('id', attachmentId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const signed = await signedSocialAttachment(data).catch(() => null);
+  return signed?.url || null;
+}
+
 async function signedSocialAttachment(row) {
   // Attachments are private; keep the bearer URL short-lived so a copied URL
   // cannot remain useful after a friendship is removed or a block is added.
@@ -7097,47 +7432,74 @@ async function loadSocialMessageState(userId) {
 // durable. A tab can be closed or go offline immediately after a message is
 // committed; the small local outbox retries after the next auth/online/focus
 // event. The server still re-checks the event and caller, so an old outbox
-// entry is harmless and is discarded on a permanent 4xx response.
-const SOCIAL_NOTIFY_OUTBOX_KEY = 'zane-social-notification-outbox-v1';
-let _socialNotifyFlushPromise = null;
+// entry is harmless. Only a successful handoff or a structurally invalid
+// payload is terminal; Auth and lookup failures can be transient upstream.
+const SOCIAL_NOTIFY_OUTBOX_KEY_PREFIX = 'zane-social-notification-outbox-v2:';
+const _socialNotifyFlushPromises = new Map();
 
-function readSocialNotifyOutbox() {
+async function socialNotifyUserId() {
   try {
-    const rows = JSON.parse(localStorage.getItem(SOCIAL_NOTIFY_OUTBOX_KEY) || '[]');
+    const { data } = await _supabase.auth.getSession();
+    return data?.session?.user?.id || null;
+  } catch (_) { return null; }
+}
+
+function socialNotifyOutboxKey(userId) {
+  return `${SOCIAL_NOTIFY_OUTBOX_KEY_PREFIX}${userId}`;
+}
+
+function readSocialNotifyOutbox(userId) {
+  if (!userId) return [];
+  try {
+    const rows = JSON.parse(localStorage.getItem(socialNotifyOutboxKey(userId)) || '[]');
     if (!Array.isArray(rows)) return [];
     return rows.filter(row => row && typeof row.event === 'string' && typeof row.id === 'string').slice(-200);
   } catch (_) { return []; }
 }
 
-function writeSocialNotifyOutbox(rows) {
+function writeSocialNotifyOutbox(userId, rows) {
+  if (!userId) return;
   try {
-    if (!rows.length) localStorage.removeItem(SOCIAL_NOTIFY_OUTBOX_KEY);
-    else localStorage.setItem(SOCIAL_NOTIFY_OUTBOX_KEY, JSON.stringify(rows.slice(-200)));
+    const key = socialNotifyOutboxKey(userId);
+    if (!rows.length) localStorage.removeItem(key);
+    else localStorage.setItem(key, JSON.stringify(rows.slice(-200)));
   } catch (_) {}
 }
 
-function enqueueSocialNotify(event, eventId) {
-  const rows = readSocialNotifyOutbox();
+function socialNotifyResponseIsTerminal(response) {
+  return !!response && (response.ok || response.status === 400);
+}
+
+function enqueueSocialNotify(userId, event, eventId) {
+  const rows = readSocialNotifyOutbox(userId);
   if (!rows.some(row => row.event === event && row.id === String(eventId))) {
     rows.push({ event, id: String(eventId), queuedAt: Date.now() });
-    writeSocialNotifyOutbox(rows);
+    writeSocialNotifyOutbox(userId, rows);
   }
 }
 
-async function flushSocialNotificationOutbox() {
-  if (_socialNotifyFlushPromise) return _socialNotifyFlushPromise;
-  _socialNotifyFlushPromise = (async () => {
+async function flushSocialNotificationOutbox(userIdArg = null) {
+  const userId = userIdArg || await socialNotifyUserId();
+  if (!userId) return null;
+  const existing = _socialNotifyFlushPromises.get(userId);
+  if (existing) return existing;
+  const promise = (async () => {
     if (typeof navigator !== 'undefined' && navigator.onLine === false) return null;
-    let rows = readSocialNotifyOutbox();
+    let rows = readSocialNotifyOutbox(userId);
     let lastResponse = null;
     while (rows.length) {
       const current = rows[0];
+      // fnFetch reads the current Supabase session. If the account changed
+      // after this queue started, never send A's event with B's token and
+      // never discard A's row based on B's 4xx response.
+      if (await socialNotifyUserId() !== userId) break;
       const response = await fnFetch(SOCIAL_NOTIFY_URL, { event: current.event, id: current.id });
       lastResponse = response;
       if (!response) break;
-      if (response.ok || [400, 401, 403, 404].includes(response.status)) {
+      if (await socialNotifyUserId() !== userId) break;
+      if (socialNotifyResponseIsTerminal(response)) {
         rows.shift();
-        writeSocialNotifyOutbox(rows);
+        writeSocialNotifyOutbox(userId, rows);
         continue;
       }
       // 409 (session row not replicated yet), 429, 5xx and network errors
@@ -7147,14 +7509,17 @@ async function flushSocialNotificationOutbox() {
       break;
     }
     return lastResponse;
-  })().finally(() => { _socialNotifyFlushPromise = null; });
-  return _socialNotifyFlushPromise;
+  })().finally(() => { if (_socialNotifyFlushPromises.get(userId) === promise) _socialNotifyFlushPromises.delete(userId); });
+  _socialNotifyFlushPromises.set(userId, promise);
+  return promise;
 }
 
-async function notifySocialEvent(event, eventId) {
+async function notifySocialEvent(event, eventId, userIdArg = null) {
   if (!event || !eventId) return null;
-  enqueueSocialNotify(event, eventId);
-  return flushSocialNotificationOutbox();
+  const userId = userIdArg || await socialNotifyUserId();
+  if (!userId) return null;
+  enqueueSocialNotify(userId, event, eventId);
+  return flushSocialNotificationOutbox(userId);
 }
 
 async function sendSocialWorkoutComment(sessionId, body, kind = 'comment') {
@@ -7261,7 +7626,7 @@ async function sendSocialMessage({ senderId, recipientId = null, groupId = null,
     sender_id: senderId, recipient_id: recipientId, group_id: groupId, body: text,
   }).select('id, sender_id, recipient_id, group_id, body, created_at, edited_at').single();
   if (error) throw error;
-  void notifySocialEvent('message', data?.id);
+  void notifySocialEvent('message', data?.id, senderId);
   return mapSocialMessage(data);
 }
 
@@ -8102,12 +8467,15 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   const weekStart = weekStartArg || checkinWeekStart();
   let id = (typeof existingRef === 'string' && existingRef) ? existingRef : null;
   if (!id) {
-    // A failed lookup falls through to a fresh id, which is the behaviour this
-    // whole block replaces: no worse than before, and never a reason to refuse
-    // a check-in the user has already filled in.
+    // Never invent a new primary key when the lookup is ambiguous. An existing
+    // export/outbox row may already reference the week's check-in; allowing an
+    // upsert with a random id would turn a transient SELECT failure into a
+    // foreign-key conflict (or a detached Drive export).
     const { data: prior, error: priorErr } = await _supabase.from('zane_checkins')
       .select('id').eq('coaching_id', coachingId).eq('week_start', weekStart).maybeSingle();
-    if (priorErr && priorErr.code !== 'PGRST116') console.error('submitCheckin: existing-row lookup failed', priorErr);
+    if (priorErr && priorErr.code !== 'PGRST116') {
+      throw new Error('Could not verify the existing check-in. Please try again.');
+    }
     id = prior?.id || ('ci_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
   }
   const row = {
@@ -8187,6 +8555,10 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
     const threadId = await getOrCreateCoachingThread(coachingId, 'Weekly Check-in', userId);
     await addCoachingNote(coachingId, 'general', null, null, lines.filter((_, i) => !(i === 1 && lines[2] === undefined)).join('\n'), userId, threadId);
   } catch (e) { console.error('Failed to send check-in note', e); }
+  // The database trigger has already queued the optional Drive export. Return
+  // the stable check-in id so the form can attach staged photos without
+  // coupling the check-in write to Google/Drive availability.
+  return id;
 }
 
 async function loadCheckins(coachingId) {
@@ -8530,6 +8902,91 @@ function macroAdherence(actual, target) {
   if (totalKcal <= 0) return null;
   const weighted = entries.reduce((s, e) => s + e.score * (e.kcal / totalKcal), 0);
   return Math.round(weighted * 100);
+}
+
+// Google Drive is an optional coach-side archive. The browser only receives
+// short-lived status/authorization URLs; refresh tokens stay inside the Edge
+// Function and its service-only encrypted table.
+async function coachingDriveRequest(action, extra = {}) {
+  const res = await fnFetch(COACHING_DRIVE_URL, { action, ...extra });
+  if (!res) throw new Error('Drive request unavailable');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Drive request failed (${res.status})`);
+  return body;
+}
+
+async function getCoachingDriveStatus() {
+  return coachingDriveRequest('status');
+}
+
+async function startCoachingDriveOAuth() {
+  const result = await coachingDriveRequest('start');
+  if (!result?.url) throw new Error('Google authorization URL missing');
+  return result.url;
+}
+
+async function disconnectCoachingDrive() {
+  return coachingDriveRequest('disconnect');
+}
+
+async function retryCoachingDriveExports() {
+  return coachingDriveRequest('retry');
+}
+
+async function getCoachingDrivePhotoStatus(coachingId) {
+  return coachingDriveRequest('photo-status', { coachingId });
+}
+
+async function configureCoachingDrive(values) {
+  return coachingDriveRequest('configure', {
+    archiveEnabled: values?.archiveEnabled !== false,
+    includePhotos: values?.includePhotos === true,
+  });
+}
+
+// Photos are deliberately staged in a private, short-lived bucket. This is
+// not the permanent archive: the Drive worker deletes each object after a
+// successful upload. A failed Drive/API call therefore has a retryable binary
+// source without putting image data into the check-in JSON itself.
+async function stageCoachingCheckinPhoto(file, coachingId, checkinId, userId) {
+  if (!file || !coachingId || !checkinId || !userId) throw new Error('Photo upload is incomplete');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Use a JPG, PNG or WebP image');
+  if (file.size <= 0 || file.size > 8 * 1024 * 1024) throw new Error('Each photo must be 8 MB or smaller');
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+  const rawName = String(file.name || `photo.${ext}`).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-80) || `photo.${ext}`;
+  const safe = (/^[A-Za-z0-9]/.test(rawName) ? rawName : `photo-${rawName}`).slice(0, 80) || `photo.${ext}`;
+  const reservation = await _supabase.rpc('reserve_coaching_drive_photo', {
+    p_coaching_id: coachingId, p_checkin_id: checkinId, p_file_name: safe,
+    p_mime_type: file.type, p_byte_size: file.size,
+  });
+  if (reservation.error || !reservation.data) throw (reservation.error || new Error('Photo reservation failed'));
+  const path = String(reservation.data);
+  try {
+    const uploaded = await _supabase.storage.from('coaching-drive-staging').upload(path, file, { contentType: file.type, upsert: false });
+    if (uploaded.error) throw uploaded.error;
+    const { error } = await _supabase.from('zane_coaching_drive_photos').insert({
+      coaching_id: coachingId, checkin_id: checkinId, client_id: userId,
+      staging_path: path, file_name: safe, mime_type: file.type, byte_size: file.size,
+    });
+    if (error) throw error;
+    return path;
+  } catch (error) {
+    // The reservation remains until the worker janitor sees it.  This makes a
+    // failed client-side cleanup safe: no untracked object can live forever.
+    await _supabase.rpc('release_coaching_drive_photo_reservation', { p_staging_path: path }).catch(() => {});
+    await _supabase.storage.from('coaching-drive-staging').remove([path]).catch(() => {});
+    throw error;
+  }
+}
+
+// A closed historical food day keeps the target captured when it was closed,
+// but backlogged food must still update the score shown for that frozen target.
+function historicalClosedFoodDayPatch(log, actual, hasEntries) {
+  if (!log?.foodDayClosed) return {};
+  const adherence = hasEntries && !log.mealOfChoice
+    ? macroAdherence(actual, log.targetsSnap)
+    : null;
+  return { adherence, targetsSnap: log.targetsSnap ?? null };
 }
 
 // ── Food tracker meal categories (migration 0206) ───────────────────────────
@@ -8885,6 +9342,106 @@ function effectiveMacroTargets(personal, coachingMacros) {
   if (hasMacroTargets(coachingMacros)) return coachingMacros;
   if (hasMacroTargets(personal)) return personal;
   return null;
+}
+
+const ADAPTIVE_TDEE_TARGET_FIELDS = [
+  'proteinTraining', 'carbsTraining', 'fatTraining', 'caloriesTraining',
+  'proteinRest', 'carbsRest', 'fatRest', 'caloriesRest',
+];
+
+function adaptiveTdeeTargetSnapshot(value) {
+  if (!value || typeof value !== 'object') return null;
+  const snapshot = {};
+  ADAPTIVE_TDEE_TARGET_FIELDS.forEach(key => {
+    if (value[key] != null) snapshot[key] = value[key];
+  });
+  return hasMacroTargets(snapshot) ? snapshot : null;
+}
+
+// A TDEE Apply is deliberately undoable once, but only while the active
+// personal targets are still exactly the values that Apply wrote. This guards
+// against silently overwriting a later manual edit (or a newer synced change).
+// Newer clients have lastApplyPreviousTargets. For older Applies, the last
+// earlier applied history row is a safe compatibility source when it carries
+// the old target snapshot. A missing history row remains unavailable rather
+// than guessing.
+function macroApplyRollbackInfo(settings, history = []) {
+  const calc = settings?.macroCalc || {};
+  const hasPrevious = Object.prototype.hasOwnProperty.call(calc, 'lastApplyPreviousTargets');
+  const appliedTargets = calc.lastAppliedTargets ?? null;
+  const activeMatches = appliedTargets != null
+    && syncValuesEqual(settings?.macroTargets ?? null, appliedTargets);
+  const base = {
+    available: false,
+    source: null,
+    previousTargets: null,
+    previousDate: null,
+    activeMatches,
+    hasPrevious,
+    reason: 'missing_apply',
+  };
+  if (appliedTargets == null) return base;
+  if (calc.lastApplyRolledBackAt != null) return { ...base, reason: 'already_rolled_back' };
+
+  let previousTargets = null;
+  let source = null;
+  let previousDate = null;
+  if (hasPrevious) {
+    // null is a meaningful snapshot: the first Apply may have replaced no
+    // personal targets at all, and Undo must be able to restore that state.
+    previousTargets = calc.lastApplyPreviousTargets;
+    source = 'snapshot';
+  } else {
+    const appliedDate = calc.lastAppliedAt;
+    const prior = (history || [])
+      .filter(row => row?.decision === 'applied'
+        && row.asOfDate && (!appliedDate || row.asOfDate < appliedDate)
+        && row.targetsSnapshot)
+      .sort((a, b) => String(b.asOfDate).localeCompare(String(a.asOfDate)))
+      .find(row => adaptiveTdeeTargetSnapshot(row.targetsSnapshot));
+    if (prior) {
+      previousTargets = adaptiveTdeeTargetSnapshot(prior.targetsSnapshot);
+      previousDate = prior.asOfDate;
+      source = 'history';
+    }
+  }
+
+  const previousAvailable = hasPrevious || previousTargets != null;
+  return {
+    ...base,
+    available: previousAvailable && activeMatches,
+    source,
+    previousTargets,
+    previousDate,
+    reason: !activeMatches ? 'targets_changed' : previousAvailable ? null : 'previous_missing',
+  };
+}
+
+function canUndoMacroApply(settings, history = []) {
+  return macroApplyRollbackInfo(settings, history).available;
+}
+
+// Pure state transition used by the Health screen and unit tests. The second
+// argument remains a timestamp for existing callers; passing an array enables
+// legacy-history recovery, with an optional third argument for the timestamp.
+function rollbackMacroApply(settings, historyOrTimestamp = [], maybeTimestamp) {
+  const history = Array.isArray(historyOrTimestamp) ? historyOrTimestamp : [];
+  const rolledBackAt = Array.isArray(historyOrTimestamp)
+    ? (maybeTimestamp || new Date().toISOString())
+    : (historyOrTimestamp || new Date().toISOString());
+  const info = macroApplyRollbackInfo(settings, history);
+  if (!info.available) return settings;
+  const calc = settings.macroCalc || {};
+  const nextCalc = {
+    ...calc,
+    ...(info.hasPrevious ? {} : { lastApplyPreviousTargets: info.previousTargets }),
+    lastApplyRolledBackAt: rolledBackAt,
+  };
+  return {
+    ...settings,
+    macroTargets: info.previousTargets,
+    macroCalc: nextCalc,
+  };
 }
 
 // Compute the persisted adherence + target snapshot for a daily log at save
@@ -10067,15 +10624,23 @@ function upsertMedicationLog(logs, entry) {
 
 function dsMedsDueTaken(store, dateISO) {
   const wd = isoWd(new Date(dateISO + 'T12:00:00'));
-  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active).map(p => p.id));
+  // Client templates live in the coach's account but belong to a client, so
+  // they must not count toward the coach's own doses.
+  const activePlanIds = new Set((store.medicationPlans || []).filter(p => p.active && !p.isTemplate).map(p => p.id));
   // Tombstones excluded, like logsForStock in screens-medications.jsx. A
   // deliberately removed dose is { skipped: true, planned: false }, and `taken`
   // below counts exactly "a row exists and is not planned", so without this two
   // deleted doses reported a fully adherent day, extended the streak, and told
   // the AI summary the user had taken medication they explicitly removed.
-  const dayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO && !l.skipped);
+  const allDayLogs = (store.medicationLogs || []).filter(l => l.date === dateISO);
+  const dayLogs = allDayLogs.filter(l => !l.skipped);
+  // A removed dose is not "due but untaken", it is gone: the confirm says
+  // "remove this entry", so the slot drops out of the denominator too.
+  // Without this the timeline stopped showing the dose while streak,
+  // adherence and the AI summary still counted it as outstanding forever.
+  const tombstonedSlotIds = new Set(allDayLogs.filter(l => l.skipped && l.scheduleSlotId).map(l => l.scheduleSlotId));
   const medsById = new Map((store.medications || []).map(m => [m.id, m]));
-  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
+  const dueSlots = (store.medicationScheduleSlots || []).filter(slot => !tombstonedSlotIds.has(slot.id) && dsSlotAppliesOn(slot, dateISO, wd, activePlanIds));
   const taken = dueSlots.filter(slot => {
     const row = dayLogs.find(l => l.scheduleSlotId === slot.id);
     return row ? !row.planned : false;
@@ -12717,19 +13282,20 @@ window.LB = {
   supabase: _supabase,
   PLANNABLE_TECHNIQUES, plannedTechniqueLabel, plannedTechniqueShort,
   clearPrecompileCaches, clearCachesAndReload,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, fnFetch,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
-  loadFromSupabase, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
+  loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, realignCycleForToday, todayCycleStripIndex,
+  resignSocialAttachment,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
-  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox,
+  sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
   uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
@@ -12738,6 +13304,7 @@ window.LB = {
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
@@ -12747,7 +13314,7 @@ window.LB = {
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
-  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, hasMacroTargets, effectiveMacroTargets, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
+  isLoggedTrainingDay, plannedTrainingDay, isTrainingDayForDate, dayTargetFromMacros, macroAdherence, historicalClosedFoodDayPatch, hasMacroTargets, effectiveMacroTargets, macroApplyRollbackInfo, canUndoMacroApply, rollbackMacroApply, dailyLogAdherence, statusModeForDate, isNutritionUnscoredMode, isRoutineDisruptedMode, mealOfChoiceRemainder, mealOfChoiceWeekCount,
   withMealOfChoiceNote, mealOfChoiceNoteName, dailyLogsWeekPrefill, weekPerformanceSignal,
   ACTIVITY_FACTORS, FAT_FLOOR_PER_KG, estimateTdee, minRestRatio, macroTargetsFromGoal, rebalanceMacros, weeklyAverageCalories, weeklyAverageMacros, MEAL_CATEGORY_DEFS, mealCategories, foodDayIsClosed, FD_FASTING_PRESETS, fastingCustomHours,
   estimateAdaptiveTdee, adaptiveTdeeHistoryRow, enrichAdaptiveTdeeHistoryTarget, refreshAdaptiveTdeeHistoryEstimate, reconstructAdaptiveTdeeHistory, mergeAdaptiveTdeeHistory,

@@ -1,6 +1,12 @@
 // Medication reminder cron function (Medications feature). Mirrors the meal
 import { localClock } from '../_shared/time.ts';
 import { sendNotification } from '../_shared/notifications.ts';
+import {
+  canonicalMedicationReminderEntries,
+  medicationClaimedIds,
+  type MedicationReminderEntry,
+  type ScheduledMedicationDose,
+} from '../_shared/medication-reminder.ts';
 
 // reminder's channel mechanics (opted-in users, push via Pushover or Web
 // Push) but firing is STATE-BASED rather than window-based since the
@@ -101,6 +107,71 @@ interface Slot {
   end_date: string | null;
 }
 
+const CLAIM_PATCH_RETRY_DELAYS_MS = [0, 100, 300];
+
+async function patchMedicationReminderClaim(
+  userId: string,
+  entry: MedicationReminderEntry,
+  claimToken: string,
+  body: Record<string, unknown>,
+  action: 'release' | 'finalize',
+): Promise<boolean> {
+  for (const delayMs of CLAIM_PATCH_RETRY_DELAYS_MS) {
+    if (delayMs > 0) await new Promise(resolve => setTimeout(resolve, delayMs));
+    try {
+      const result = await dbFetch(
+        `zane_medication_logs?id=eq.${encodeURIComponent(entry.id)}&user_id=eq.${encodeURIComponent(userId)}&reminder_count=eq.${entry.reminder_count ?? 0}&reminder_claim_token=eq.${encodeURIComponent(claimToken)}`,
+        {
+          method: 'PATCH',
+          headers: { 'Prefer': 'return=minimal' },
+          body: JSON.stringify(body),
+        },
+      );
+      if (result.ok) return true;
+      console.error(`[medication-reminder] ${action} patch failed for ${entry.id}: ${result.status} ${await result.text().catch(() => '')}`);
+    } catch (error) {
+      console.error(`[medication-reminder] ${action} patch error for ${entry.id}:`, error);
+    }
+  }
+  return false;
+}
+
+async function releaseMedicationReminderClaims(
+  userId: string,
+  entries: MedicationReminderEntry[],
+  claimToken: string,
+): Promise<boolean> {
+  const results = await Promise.all(entries.map(entry => patchMedicationReminderClaim(
+    userId,
+    entry,
+    claimToken,
+    { reminder_claim_token: null, reminder_claimed_at: null },
+    'release',
+  )));
+  return results.every(Boolean);
+}
+
+async function finalizeMedicationReminderClaims(
+  userId: string,
+  entries: MedicationReminderEntry[],
+  claimToken: string,
+  claimedAt: string,
+): Promise<boolean> {
+  const results = await Promise.all(entries.map(entry => patchMedicationReminderClaim(
+    userId,
+    entry,
+    claimToken,
+    {
+      reminder_sent_at: claimedAt,
+      reminder_count: (entry.reminder_count ?? 0) + 1,
+      reminder_claim_token: null,
+      reminder_claimed_at: null,
+    },
+    'finalize',
+  )));
+  return results.every(Boolean);
+}
+
 // ISO weekday (0 = Monday) for a YYYY-MM-DD date, noon-anchored to stay clear
 // of any DST/rollover edge, same idiom as store.js's dsShiftDate.
 function isoWd(dateISO: string): number {
@@ -130,16 +201,20 @@ function slotAppliesOn(slot: Slot, dateISO: string, wd: number, activePlanIds: S
 // silently (same fail-closed-on-read posture as the rest of this file): a
 // stray missing reminder for one tick is a much smaller failure than
 // materializing off a partial/wrong picture of what's active.
-async function materializeDueDoses(userId: string, dateISOs: string[]) {
+async function materializeDueDoses(userId: string, dateISOs: string[]): Promise<Map<string, ScheduledMedicationDose> | null> {
   const [plansRes, slotsRes, medsRes, logsRes] = await Promise.all([
-    dbFetch(`zane_medication_plans?user_id=eq.${userId}&active=eq.true&select=id`),
+    // is_template excluded: a plan a coach builds FOR a client sits in the
+    // coach's own account until it is pushed. Without this filter the coach
+    // got real reminders to take their client's medication. Defence in depth,
+    // the client now also refuses to leave a template active.
+    dbFetch(`zane_medication_plans?user_id=eq.${userId}&active=eq.true&is_template=eq.false&select=id`),
     dbFetch(`zane_medication_schedule_slots?user_id=eq.${userId}&select=id,medication_id,medication_plan_id,weekdays,hour,dose_qty,interval_days,start_date,end_date`),
     dbFetch(`zane_medications?user_id=eq.${userId}&archived=eq.false&select=id,name`),
     dbFetch(`zane_medication_logs?user_id=eq.${userId}&date=in.(${dateISOs.join(',')})&schedule_slot_id=not.is.null&select=date,schedule_slot_id`),
   ]);
   if (!plansRes.ok || !slotsRes.ok || !medsRes.ok || !logsRes.ok) {
     console.error(`[medication-reminder] materialize lookup failed for ${userId}`);
-    return;
+    return null;
   }
   const activePlanIds = new Set<string>((await plansRes.json().catch(() => [])).map((p: { id: string }) => p.id));
   const slots: Slot[] = await slotsRes.json().catch(() => []);
@@ -149,6 +224,7 @@ async function materializeDueDoses(userId: string, dateISOs: string[]) {
   const existing = new Set<string>(
     (await logsRes.json().catch(() => [])).map((l: { date: string; schedule_slot_id: string }) => `${l.date}_${l.schedule_slot_id}`)
   );
+  const validScheduledDoses = new Map<string, ScheduledMedicationDose>();
 
   // deno-lint-ignore no-explicit-any
   const toInsert: any[] = [];
@@ -156,16 +232,19 @@ async function materializeDueDoses(userId: string, dateISOs: string[]) {
     const wd = isoWd(dateISO);
     for (const slot of slots) {
       const med = meds.get(slot.medication_id);
-      if (!med || existing.has(`${dateISO}_${slot.id}`)) continue;
+      if (!med) continue;
       if (!slotAppliesOn(slot, dateISO, wd, activePlanIds)) continue;
+      const time = `${String(slot.hour).padStart(2, '0')}:00`;
+      validScheduledDoses.set(`${dateISO}_${slot.id}`, { time, medicationName: med.name });
+      if (existing.has(`${dateISO}_${slot.id}`)) continue;
       toInsert.push({
         id: `md_${dateISO}_${slot.id}`, user_id: userId, medication_id: med.id, medication_name: med.name,
-        date: dateISO, time: `${String(slot.hour).padStart(2, '0')}:00`, dose_qty: slot.dose_qty,
+        date: dateISO, time, dose_qty: slot.dose_qty,
         planned: true, schedule_slot_id: slot.id,
       });
     }
   }
-  if (!toInsert.length) return;
+  if (!toInsert.length) return validScheduledDoses;
   const insRes = await dbFetch('zane_medication_logs', {
     method: 'POST',
     // ignore-duplicates, NOT merge-duplicates. The id is deterministic
@@ -179,6 +258,7 @@ async function materializeDueDoses(userId: string, dateISOs: string[]) {
     body: JSON.stringify(toInsert),
   });
   if (!insRes.ok) console.error(`[medication-reminder] materialize insert failed for ${userId}: ${insRes.status} ${await insRes.text().catch(() => '')}`);
+  return validScheduledDoses;
 }
 
 async function sendReminders() {
@@ -208,16 +288,21 @@ async function sendReminders() {
 
     // Fill in whatever the client hasn't materialized itself yet (see
     // materializeDueDoses above) before asking what's still due below.
-    await materializeDueDoses(row.user_id, [yesterday, localDate]);
+    const validScheduledDoses = await materializeDueDoses(row.user_id, [yesterday, localDate]);
+    // Stale planned rows are not authority to notify. Requiring the slot to
+    // still belong to an active, non-template plan also closes the race where
+    // a plan is paused/deleted/moved just after midnight.
+    if (!validScheduledDoses) continue;
 
     // Still-planned (unlogged) entries for today and yesterday. A failed
     // fetch must not be read as "nothing planned", so skip this user rather
     // than guess.
     const eRes = await dbFetch(
-      `zane_medication_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&select=id,date,time,medication_name,reminder_sent_at,reminder_count,snoozed_until`
+      `zane_medication_logs?user_id=eq.${row.user_id}&date=in.(${yesterday},${localDate})&planned=eq.true&schedule_slot_id=not.is.null&select=id,date,time,medication_name,schedule_slot_id,reminder_sent_at,reminder_count,snoozed_until`
     );
     if (!eRes.ok) { console.error(`[medication-reminder] medication log query failed for ${row.user_id}: ${eRes.status}`); continue; }
-    const entries: { id: string; date: string | null; time: string | null; medication_name: string | null; reminder_sent_at: string | null; reminder_count: number | null; snoozed_until: string | null }[] = await eRes.json().catch(() => []);
+    const rawEntries: MedicationReminderEntry[] = await eRes.json().catch(() => []);
+    const entries = canonicalMedicationReminderEntries(rawEntries, validScheduledDoses);
 
     // A row is due for a nudge by its STATE, not by a time window:
     // snoozed_until > now suppresses everything until it expires; otherwise
@@ -249,67 +334,55 @@ async function sendReminders() {
     });
     if (!due.length) continue;
 
-    // Persist the fired state FIRST, then push: reminder_sent_at stamps now
-    // and reminder_count advances, so a failed STATE PATCH cannot leave the
-    // count where it was and re-fire the same nudge on every hourly tick
-    // forever, unbounded, for as long as the underlying PATCH failure
-    // persists (a push-first order only ever protects the ONE failure mode
-    // it defers past, whichever operation still runs second inherits this
-    // exact risk if it fails; state patches are the one it's actually
-    // possible to protect on both sides of, via the rollback below). Rows in
-    // one tick can sit at different counts (a first nudge for one dose, a
-    // second for another), so group by the target count and PATCH each
-    // group once. Only touches the reminder columns, never planned/date/etc,
-    // so logging the dose later works unchanged. Rows whose state failed to
-    // persist are NOT pushed this tick: they retry next tick with the count
-    // unchanged, one attempt per tick instead of unbounded duplicates.
-    const byCount = new Map<number, string[]>();
-    for (const e of due) {
-      const target = (e.reminder_count ?? 0) + 1;
-      const ids = byCount.get(target) ?? [];
-      ids.push(e.id);
-      byCount.set(target, ids);
-    }
-    // Compare-and-swap, not a blind write, exactly like meal-reminder's own
-    // claim: the filter pins reminder_count to the value this tick READ, so
-    // PostgREST applies it atomically and a concurrent invocation (a manual
-    // POST racing the hourly cron, both explicitly supported by this handler)
-    // matches zero rows instead of claiming the same dose a second time. With
-    // a bare id filter both invocations got a 2xx, both pushed the identical
-    // nudge, and the row was left one short of its target, so the 2h follow-up
-    // branch fired a THIRD nudge past the 2-per-day cap documented above.
-    // return=representation rather than minimal so `claimed` is what this tick
-    // actually won, which is also what the message below must describe.
+    // Reserve due rows through one SECURITY DEFINER RPC rather than a
+    // service-role PATCH over a user-controlled `id=in.(...)` string. The
+    // UPDATE rechecks the exact user, planned/snooze/count state and the live
+    // schedule in one database statement. The reservation deliberately does
+    // NOT advance reminder_count yet. A successful provider handoff finalizes
+    // the count below; a failed handoff releases it. If an ambiguous network
+    // failure prevents either compensation, the 15-minute lease expires and
+    // a future cron can safely retry instead of losing the reminder forever.
+    const claimedAt = new Date(now).toISOString();
+    const claimToken = crypto.randomUUID();
     const claimedIds = new Set<string>();
-    for (const [target, ids] of byCount) {
-      // reminder_count is NOT NULL DEFAULT 0 (migration 0246), so eq.<target-1>
-      // covers the first nudge (eq.0) as well, no null branch needed.
-      const patchRes = await dbFetch(`zane_medication_logs?id=in.(${ids.join(',')})&reminder_count=eq.${target - 1}`, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=representation' },
-        body: JSON.stringify({ reminder_sent_at: new Date(now).toISOString(), reminder_count: target }),
+    let claimRes: Response;
+    try {
+      claimRes = await dbFetch('rpc/claim_medication_reminders', {
+        method: 'POST',
+        body: JSON.stringify({
+          p_user_id: row.user_id,
+          p_claimed_at: claimedAt,
+          p_claim_token: claimToken,
+          p_claims: due.map(e => ({
+            id: e.id,
+            expected_reminder_count: e.reminder_count ?? 0,
+            expected_snoozed_until: e.snoozed_until,
+            target_reminder_count: (e.reminder_count ?? 0) + 1,
+            expected_time: e.time,
+          })),
+        }),
       });
-      if (!patchRes.ok) {
-        console.error(`[medication-reminder] state patch failed for ${row.user_id}: ${patchRes.status} ${await patchRes.text().catch(() => '')}`);
-        continue;
-      }
-      // The PATCH is COMMITTED at this point, so an unreadable body must not be
-      // treated as "claimed nothing": that would skip the push AND skip the
-      // compensating rollback below, leaving every row in this group marked as
-      // nudged with nothing sent and no trace. Fall back to the ids this group
-      // asked for, which is what the pre-CAS code effectively did on a 2xx. The
-      // Array.isArray guard matters too: a 2xx body that parses to a non-array
-      // would make .forEach throw, and sendReminders has no try/catch above it,
-      // so one odd response would abort the whole tick and skip every user
-      // after this one.
-      const parsed = await patchRes.json().catch(() => null);
-      if (Array.isArray(parsed)) {
-        parsed.forEach((r: { id?: string }) => { if (r?.id) claimedIds.add(r.id); });
-      } else {
-        console.error(`[medication-reminder] unreadable claim response for ${row.user_id}, assuming the committed PATCH claimed all ${ids.length} rows`);
-        ids.forEach(id => claimedIds.add(id));
-      }
+    } catch (error) {
+      console.error(`[medication-reminder] atomic claim transport failed for ${row.user_id}:`, error);
+      await releaseMedicationReminderClaims(row.user_id, due, claimToken);
+      continue;
     }
+    if (!claimRes.ok) {
+      console.error(`[medication-reminder] atomic claim failed for ${row.user_id}: ${claimRes.status} ${await claimRes.text().catch(() => '')}`);
+      await releaseMedicationReminderClaims(row.user_id, due, claimToken);
+      continue;
+    }
+    const claimedRows = await claimRes.json().catch(() => null);
+    const claimIds = medicationClaimedIds(claimedRows, new Set(due.map(entry => entry.id)));
+    if (!claimIds) {
+      console.error(`[medication-reminder] atomic claim returned an unreadable response for ${row.user_id}`);
+      // The UPDATE may already be committed even though its 2xx body was
+      // truncated. Release every candidate with the exact UUID; only rows
+      // actually won by this invocation can match the CAS.
+      await releaseMedicationReminderClaims(row.user_id, due, claimToken);
+      continue;
+    }
+    claimIds.forEach(id => claimedIds.add(id));
     // Only what this tick actually claimed, so the count/name in the message
     // can never describe a dose another invocation is nudging about.
     const toPush = due.filter(e => claimedIds.has(e.id));
@@ -334,37 +407,17 @@ async function sendReminders() {
       logPrefix: 'medication-reminder',
     });
 
-    // Compensating rollback: the state PATCH above already advanced every
-    // row in toPush, but delivery just failed (including the "no
-    // subscription to deliver to" case sendWebPush itself now detects), so
-    // nothing actually reached the user despite the persisted state now
-    // claiming otherwise. Restore each row's own PRE-tick reminder_count/
-    // reminder_sent_at (captured from `due`, before this tick touched them)
-    // so the next tick's due-filter sees these doses as still owed a nudge
-    // and retries them, instead of silently under-notifying with no path
-    // back. One PATCH per row since rows can have had different prior
-    // counts/timestamps; only reached on an actual detected delivery
-    // failure, not the common path. Checks res.ok same as the state PATCH
-    // above, not just a rejected promise: an HTTP-level failure here (RLS,
-    // a transient 5xx, ...) resolves normally rather than throwing, and
-    // silently trusting that as "rolled back" would leave the row
-    // permanently marked nudged with nothing having gone out, exactly the
-    // failure this rollback exists to prevent, just one layer deeper and
-    // with no log trail. Nothing left to retry the rollback itself with
-    // this tick, so a failure here is logged, not silently accepted.
     if (!delivered) {
-      await Promise.all(toPush.map(async e => {
-        try {
-          const rollbackRes = await dbFetch(`zane_medication_logs?id=eq.${e.id}`, {
-            method: 'PATCH',
-            headers: { 'Prefer': 'return=minimal' },
-            body: JSON.stringify({ reminder_sent_at: e.reminder_sent_at, reminder_count: e.reminder_count ?? 0 }),
-          });
-          if (!rollbackRes.ok) console.error(`[medication-reminder] rollback patch failed for ${e.id}: ${rollbackRes.status} ${await rollbackRes.text().catch(() => '')}`);
-        } catch (err) {
-          console.error(`[medication-reminder] rollback patch error for ${e.id}:`, err);
-        }
-      }));
+      await releaseMedicationReminderClaims(row.user_id, toPush, claimToken);
+      continue;
+    }
+    const finalized = await finalizeMedicationReminderClaims(row.user_id, toPush, claimToken, claimedAt);
+    if (!finalized) {
+      // The provider may already have accepted the notification. Keep the
+      // provisional lease rather than guessing. It expires after 15 minutes,
+      // so the reminder can recover on a later cron tick instead of becoming
+      // permanently capped by a failed finalization write.
+      console.error(`[medication-reminder] one or more delivered claims could not be finalized for ${row.user_id}`);
     }
   }
 }

@@ -10,15 +10,24 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 };
 
-const SELF_URL  = 'https://ebbuvdzgstrhrcsbrlez.supabase.co/functions/v1/pushover';
 const ANON_KEY  = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImViYnV2ZHpnc3RyaHJjc2JybGV6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzYwMjc4ODAsImV4cCI6MjA5MTYwMzg4MH0.RyTzHiqV1TPSZtM7lgenBJbUCTjj5fCUhoWauifjlIE';
 const MAX_CHUNK = 10;   // seconds per relay hop
 const MAX_DELAY = 3600; // cap user-supplied delays at 1 h, rest timers are minutes
 
+async function fetchWithTimeout(input: string, options: RequestInit = {}, timeoutMs = 8_000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(input, { ...options, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -30,7 +39,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
 }
 
 async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
-  const r = await dbFetch(`zane_pushover_active?id=eq.${encodeURIComponent(userId)}&select=nonce`);
+  const r = await dbFetch(`zane_push_schedule_claims?user_id=eq.${encodeURIComponent(userId)}&channel=eq.pushover&select=nonce`);
   // Same trap as web-push/index.ts's own isNonceCurrent (M10, audit-2026-08):
   // a non-2xx PostgREST reply still parses as JSON (an error object, not an
   // array), so the .catch fallback below never fires and rows[0] would read
@@ -41,6 +50,24 @@ async function isNonceCurrent(nonce: string, userId: string): Promise<boolean> {
   if (!r.ok) { console.error(`[pushover] nonce check failed: ${r.status} ${await r.text().catch(() => '')}`); return true; }
   const rows: { nonce: string }[] = await r.json().catch(() => []);
   return rows[0]?.nonce === nonce;
+}
+
+async function takeDirectPushRateLimit(userId: string, cost: number): Promise<'allowed' | 'limited' | 'unavailable'> {
+  const result = await dbFetch('rpc/social_take_notification_rate_limit', {
+    method: 'POST',
+    body: JSON.stringify({ p_caller_id: userId, p_cost: cost }),
+  }).catch(() => null);
+  if (!result?.ok) return 'unavailable';
+  return await result.json().catch(() => false) === true ? 'allowed' : 'limited';
+}
+
+async function claimSchedule(userId: string, nonce: string): Promise<'claimed' | 'duplicate' | 'unavailable'> {
+  const result = await dbFetch('rpc/claim_push_schedule', {
+    method: 'POST',
+    body: JSON.stringify({ p_user_id: userId, p_channel: 'pushover', p_nonce: nonce }),
+  }).catch(() => null);
+  if (!result?.ok) return 'unavailable';
+  return await result.json().catch(() => false) === true ? 'claimed' : 'duplicate';
 }
 
 // Resolve the caller: a real signed-in user (normal app calls) or the
@@ -55,7 +82,7 @@ async function resolveCaller(req: Request): Promise<{ internal: boolean; userId:
   if (serviceKey && token === serviceKey) return { internal: true, userId: null };
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
+  const r = await fetchWithTimeout(`${base}/auth/v1/user`, {
     headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
   }).catch(() => null);
   if (!r?.ok) return { internal: false, userId: null };
@@ -90,6 +117,7 @@ Deno.serve(async (req) => {
     priority = 0,
     ttl = 180,    // expire after 3 minutes by default; pass 0 to disable
   } = await req.json().catch(() => ({}));
+  nonce = typeof nonce === 'string' ? nonce.trim() : '';
 
   if (!caller.internal) {
     // App callers may only act on themselves: identity and target key come
@@ -97,18 +125,53 @@ Deno.serve(async (req) => {
     userId = caller.userId!;
     _relay = false;
     delaySeconds = Math.min(Math.max(0, Number(delaySeconds) || 0), MAX_DELAY);
-    const r = await dbFetch(
-      `zane_user_settings?user_id=eq.${encodeURIComponent(userId)}&select=push_enabled,pushover_user_key`
-    );
-    const [sett] = await r.json().catch(() => [null]);
-    userKey = sett?.push_enabled ? (sett?.pushover_user_key ?? '') : '';
-    if (!cancel && !userKey) {
-      // Nothing to deliver to, e.g. the key was just typed and hasn't synced yet
-      return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
-        status: 200,
+    ttl = Math.min(Math.max(0, Number(ttl) || 180), 86_400);
+    if (nonce.length > 200 || ((delaySeconds > 0 || cancel) && !nonce)) {
+      return new Response(JSON.stringify({ error: 'a valid nonce is required for delayed or cancel requests' }), {
+        status: 400,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       });
     }
+    const rate = await takeDirectPushRateLimit(userId, cancel ? 1 : 3);
+    if (rate === 'limited') {
+      return new Response(JSON.stringify({ error: 'rate limited' }), {
+        status: 429,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (rate === 'unavailable') {
+      return new Response(JSON.stringify({ error: 'rate limiter unavailable' }), {
+        status: 503,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (!cancel) {
+      const r = await dbFetch(
+        `zane_user_settings?user_id=eq.${encodeURIComponent(userId)}&select=push_enabled,pushover_user_key`
+      );
+      if (!r.ok) {
+        return new Response(JSON.stringify({ error: 'settings unavailable' }), {
+          status: 503,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+      const [sett] = await r.json().catch(() => [null]);
+      userKey = sett?.push_enabled ? (sett?.pushover_user_key ?? '') : '';
+      if (!userKey) {
+        // Nothing to deliver to, e.g. the key was just typed and hasn't synced yet
+        return new Response(JSON.stringify({ skipped: true, reason: 'no_user_key' }), {
+          status: 200,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        });
+      }
+    }
+  }
+
+  if (nonce.length > 200 || ((delaySeconds > 0 || cancel || _relay) && !nonce)) {
+    return new Response(JSON.stringify({ error: 'a valid nonce is required for delayed, relay or cancel requests' }), {
+      status: 400,
+      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+    });
   }
 
   // No hardcoded fallback: a live Pushover user key committed to a public
@@ -128,14 +191,20 @@ Deno.serve(async (req) => {
     });
   }
 
-  // First call only: register this nonce as the currently active one.
-  // Relay hops skip this, the nonce is already stored from the initial call.
   if (nonce && !_relay) {
-    await dbFetch('zane_pushover_active', {
-      method: 'POST',
-      headers: { 'Prefer': 'resolution=merge-duplicates' },
-      body: JSON.stringify({ id: userId, nonce }),
-    }).catch(e => console.error('[pushover] nonce upsert error:', e));
+    const scheduleClaim = await claimSchedule(userId, nonce);
+    if (scheduleClaim === 'unavailable') {
+      return new Response(JSON.stringify({ error: 'schedule claim unavailable' }), {
+        status: 503,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
+    if (scheduleClaim === 'duplicate') {
+      return new Response(JSON.stringify({ deduplicated: true, scheduled: delaySeconds > 0 }), {
+        status: delaySeconds > 0 ? 202 : 200,
+        headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+      });
+    }
   }
 
   // Cancel mode: nonce updated (old chain invalidated), nothing to schedule.
@@ -160,7 +229,7 @@ Deno.serve(async (req) => {
       // Relay hops authenticate with the service-role key (caller JWTs could
       // expire mid-chain and must never be forwarded anywhere).
       EdgeRuntime.waitUntil(
-        fetch(SELF_URL, {
+        fetch(`${Deno.env.get('SUPABASE_URL') ?? ''}/functions/v1/pushover`, {
           method: 'POST',
           headers: {
             'Authorization': `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? ''}`,
@@ -177,12 +246,16 @@ Deno.serve(async (req) => {
         return;
       }
       console.log('[pushover] sending');
-      const r = await fetch('https://api.pushover.net/1/messages.json', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token, user, message, title, priority, ...(ttl > 0 ? { ttl } : {}) }),
-      });
-      console.log(`[pushover] ${r.status}: ${await r.text()}`);
+      try {
+        const r = await fetchWithTimeout('https://api.pushover.net/1/messages.json', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token, user, message, title, priority, ...(ttl > 0 ? { ttl } : {}) }),
+        }, 12_000);
+        console.log(`[pushover] ${r.status}: ${await r.text()}`);
+      } catch (error) {
+        console.error('[pushover] provider request failed:', error);
+      }
     }
   };
 

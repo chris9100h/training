@@ -1976,7 +1976,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // The date the quantity sheet is about to write to. Normally curDate, but a
   // staged row carries the date it was picked on and survives day navigation,
   // so editing tomorrow's staged pick from today must still be judged future.
-  const qtyEditingStagedDate = editingStagedId ? staged.find(e => e.id === editingStagedId)?.date : null;
+  const qtyEditingStagedRow = editingStagedId ? staged.find(e => e.id === editingStagedId) : null;
+  const qtyEditingStagedDate = qtyEditingStagedRow?.date ?? null;
+  // Staged rows survive date navigation. If one is edited while another day
+  // is visible, the amount sheet must not pretend that the edit will land in
+  // the currently visible day's forecast.
+  const qtyStagedProjectionOnCurrentDate = !editingStagedId || qtyEditingStagedRow?.date === curDate;
   const qtyTargetIsFuture = (qtyEditingStagedDate || curDate) > today;
 
   // Plan Mode (settings.planMode, off by default): entries carry a `planned`
@@ -2209,7 +2214,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!toAdd.length) return;
     setStore(s => {
       const nextLogs = [...toAdd, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
-      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      // Plan Mode: splitting or merging PLANNED entries does not change what
+      // was actually eaten, so the daily log must not be rebuilt from it.
+      // patchDaily nulls calories/protein/carbs/fat whenever a day holds no
+      // logged entries, which silently wiped macros the user had typed by
+      // hand in the Health tab. commitEntries and deleteEntry guard exactly
+      // this; these three paths did not.
+      const dailyLogs = entries.some(e => !e.planned)
+        ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate))
+        : s.dailyLogs;
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
     clearTimeout(splitUndoTimer.current);
@@ -2240,7 +2253,16 @@ function FoodScreen({ store, setStore, go, userId, date }) {
       const touchedDates = new Set([...batchEntries.map(l => l.date), ...removedEntries.map(l => l.date)]);
       const nextLogs = [...removedEntries, ...logs.filter(l => l.splitBatch?.id !== batchId)];
       let dailyLogs = s.dailyLogs || [];
-      touchedDates.forEach(d => { dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d)); });
+      // Per date, same reasoning as applySplit above: undoing a split of
+      // planned entries must not rewrite (and thereby null) that day's
+      // hand-entered macros. An undo can straddle two dates, so this is
+      // decided per date rather than once for the batch.
+      touchedDates.forEach(d => {
+        const touchesLogged = batchEntries.some(l => l.date === d && !l.planned)
+          || removedEntries.some(l => l.date === d && !l.planned);
+        if (!touchesLogged) return;
+        dailyLogs = patchDaily({ ...s, dailyLogs }, d, nextLogs.filter(l => l.date === d));
+      });
       return { ...s, foodLogs: nextLogs, dailyLogs };
     });
   }
@@ -2363,7 +2385,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const removeIds = new Set(entries.map(e => e.id));
     setStore(s => {
       const nextLogs = [...portionEntries, ...(s.foodLogs || []).filter(l => !removeIds.has(l.id))];
-      const dailyLogs = patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate));
+      // Plan Mode: splitting or merging PLANNED entries does not change what
+      // was actually eaten, so the daily log must not be rebuilt from it.
+      // patchDaily nulls calories/protein/carbs/fat whenever a day holds no
+      // logged entries, which silently wiped macros the user had typed by
+      // hand in the Health tab. commitEntries and deleteEntry guard exactly
+      // this; these three paths did not.
+      const dailyLogs = entries.some(e => !e.planned)
+        ? patchDaily(s, curDate, nextLogs.filter(l => l.date === curDate))
+        : s.dailyLogs;
       const nextRecipes = recipeBlockSave
         ? [{
             id: recipeId, name,
@@ -2828,8 +2858,14 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const keptDayType = existing?.targetsSnap?.dayType;
     const clearedSnap = (keptDayType === 'training' || keptDayType === 'rest') ? { dayType: keptDayType } : null;
     const reopened = dateStr === today ? { foodDayClosed: false } : {};
+    // Historical closed days keep their frozen target, but their score must
+    // follow the food totals when a user backlogs or edits an item. Otherwise
+    // the visible macros change while the persisted adherence stays stale.
+    const closedPatch = dateStr !== today
+      ? LB.historicalClosedFoodDayPatch(existing, { protein, carbs, fat }, has)
+      : {};
     const log = existing
-      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }) }
+      ? { ...existing, calories, protein, carbs, fat, fiber, updatedAt: now, ...reopened, ...(has ? {} : { adherence: null, targetsSnap: clearedSnap }), ...closedPatch }
       : { id: LB.uid(), date: dateStr, weight: null, steps: null, calories, protein, carbs, fat, fiber, waterMl: null, note: null, offPlanNote: null, coachFields: null, mealOfChoice: false, mealOfChoiceHour: null, foodDayClosed: false, adherence: null, targetsSnap: null, updatedAt: now, createdAt: now };
     return [log, ...(s.dailyLogs || []).filter(l => l.id !== log.id && l.date !== dateStr)];
   }
@@ -5942,7 +5978,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
             {qtyPreview && (
               <FdMacroPreview calories={qtyPreview.calories} protein={qtyPreview.protein} carbs={qtyPreview.carbs} fat={qtyPreview.fat}
                 sugar={qtyPreview.sugar} satFat={qtyPreview.satFat} sodiumMg={qtyPreview.sodiumMg}
-                dayProjection={{
+                dayProjection={qtyStagedProjectionOnCurrentDate ? {
                   baseTotals: projectedWithStagedTotals,
                   addition: editingMealItemId ? mealItemsProjectedTotals : qtyPreview,
                   target: dayTarget,
@@ -5955,7 +5991,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                     : editingEntry && editingEntry.date === curDate ? editingEntry
                     : editingStagedId ? staged.find(e => e.id === editingStagedId && e.date === curDate) || null
                     : null,
-                }} />
+                } : undefined} />
             )}
             <button onClick={() => toggleFavorite(buildQtyEntry())} disabled={!qtyPreview || qtyNameMissing} style={fdFavBtn(!!favedId, !qtyPreview || qtyNameMissing)}>
               <i className={`fa-${favedId ? 'solid' : 'regular'} fa-star`} style={{ fontSize: 14, color: favedId ? UI.gold : UI.inkSoft }} />
@@ -6882,7 +6918,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         onClose={() => setIngredientPickerOpen(false)}
         onAdd={addIngredientsToEntry}
         store={store}
-        dayTotals={projectedTotals}
+        dayTotals={projectedWithStagedTotals}
         dayTarget={dayTarget}
         dayReplace={ingredientEditorEntry?.date === curDate ? ingredientEditorEntry : null}
         dayCurrentAddition={ingredientTotals}

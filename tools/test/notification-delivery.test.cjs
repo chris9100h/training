@@ -25,10 +25,12 @@ const sandbox = {
   console,
   Promise,
   JSON,
+  AbortController,
+  setTimeout,
+  clearTimeout,
   Deno: { env: { get: key => env.get(key) ?? '' } },
   fetch: async (url) => {
     if (url === 'https://api.pushover.net/1/messages.json') return fakeResponse(500, 'provider down');
-    if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, [{ id: 'sub-1' }]);
     if (url.includes('/functions/v1/web-push')) return fakeResponse(200, 'accepted');
     throw new Error(`unexpected fetch: ${url}`);
   },
@@ -36,12 +38,90 @@ const sandbox = {
 vm.runInNewContext(compiled, sandbox, { filename: 'notifications.ts' });
 const { sendNotification } = sandboxModule.exports;
 
+const socialResultSource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'social-notification-result.ts'), 'utf8');
+const socialResultCompiled = Babel.transform(socialResultSource, {
+  presets: ['typescript', ['env', { modules: 'commonjs' }]],
+  sourceType: 'module',
+  filename: 'supabase/functions/_shared/social-notification-result.ts',
+}).code;
+const socialResultModule = { exports: {} };
+vm.runInNewContext(socialResultCompiled, { module: socialResultModule, exports: socialResultModule.exports }, { filename: 'social-notification-result.ts' });
+const { socialAuthFailureStatus, socialNotificationStatus } = socialResultModule.exports;
+
+const medicationSource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'medication-reminder.ts'), 'utf8');
+const medicationCompiled = Babel.transform(medicationSource, {
+  presets: ['typescript', ['env', { modules: 'commonjs' }]],
+  sourceType: 'module',
+  filename: 'supabase/functions/_shared/medication-reminder.ts',
+}).code;
+const medicationModule = { exports: {} };
+vm.runInNewContext(medicationCompiled, { module: medicationModule, exports: medicationModule.exports }, { filename: 'medication-reminder.ts' });
+const { canonicalMedicationReminderEntries, medicationClaimedIds } = medicationModule.exports;
+
+const webPushSecuritySource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'web-push-security.ts'), 'utf8');
+const webPushSecurityCompiled = Babel.transform(webPushSecuritySource, {
+  presets: ['typescript', ['env', { modules: 'commonjs' }]],
+  sourceType: 'module',
+  filename: 'supabase/functions/_shared/web-push-security.ts',
+}).code;
+const webPushSecurityModule = { exports: {} };
+vm.runInNewContext(webPushSecurityCompiled, {
+  module: webPushSecurityModule,
+  exports: webPushSecurityModule.exports,
+  URL,
+}, { filename: 'web-push-security.ts' });
+const { isAllowedWebPushEndpoint } = webPushSecurityModule.exports;
+
 function fakeResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, text: async () => String(body), json: async () => body };
 }
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
 (async () => {
+  assert(isAllowedWebPushEndpoint('https://web.push.apple.com/QE-valid-token'), 'Apple Web Push endpoint was rejected');
+  assert(isAllowedWebPushEndpoint('https://fcm.googleapis.com/fcm/send/valid-token'), 'FCM endpoint was rejected');
+  for (const endpoint of [
+    'http://web.push.apple.com/not-https',
+    'https://127.0.0.1/internal',
+    'https://169.254.169.254/latest/meta-data',
+    'https://attacker.example/push',
+    'https://web.push.apple.com.evil.example/fake',
+  ]) {
+    assert(!isAllowedWebPushEndpoint(endpoint), `unsafe push endpoint was accepted: ${endpoint}`);
+  }
+
+  const stalePlannedDose = {
+    id: 'dose-1', date: '2026-08-17', time: '08:00', medication_name: 'Old name',
+    schedule_slot_id: 'slot-1', reminder_sent_at: null, reminder_count: 0, snoozed_until: null,
+  };
+  const canonicalDoses = canonicalMedicationReminderEntries(
+    [stalePlannedDose, { ...stalePlannedDose, id: 'removed', schedule_slot_id: 'removed-slot' }],
+    new Map([['2026-08-17_slot-1', { time: '20:00', medicationName: 'Current name' }]]),
+  );
+  assert(canonicalDoses.length === 1 && canonicalDoses[0].time === '20:00'
+      && canonicalDoses[0].medication_name === 'Current name',
+    'reminders must use the live schedule, not a stale planned log row');
+  const allowedClaimIds = new Set(['dose-1', 'dose-2']);
+  assert(medicationClaimedIds([{ id: 'dose-1' }, { id: 'dose-2' }], allowedClaimIds).join(',') === 'dose-1,dose-2',
+    'valid atomic-claim response ids were not preserved');
+  assert(medicationClaimedIds(null, allowedClaimIds) === null
+      && medicationClaimedIds({ id: 'dose-1' }, allowedClaimIds) === null
+      && medicationClaimedIds([{}], allowedClaimIds) === null
+      && medicationClaimedIds([{ id: '' }], allowedClaimIds) === null
+      && medicationClaimedIds([{ id: 'unexpected' }], allowedClaimIds) === null
+      && medicationClaimedIds([{ id: 'dose-1' }, { id: 'dose-1' }], allowedClaimIds) === null,
+    'an unreadable/non-array 2xx claim body must enter the CAS rollback path');
+
+  assert(socialNotificationStatus({ sent: 1, skipped: 0, duplicates: 0, retryable: 1 }) === 503,
+    'a partial fanout failure must remain queued for the failed recipient');
+  assert(socialNotificationStatus({ sent: 0, skipped: 0, duplicates: 2, retryable: 0 }) === 200,
+    'a fully delivered or duplicate fanout should complete');
+  assert(socialAuthFailureStatus(401) === 401 && socialAuthFailureStatus(403) === 401,
+    'an explicit GoTrue token rejection must require reauthentication');
+  assert(socialAuthFailureStatus(429) === 503 && socialAuthFailureStatus(500) === 503
+      && socialAuthFailureStatus(null) === 503 && socialAuthFailureStatus(null, false) === 503,
+    'Auth transport, throttle, server and configuration failures must remain retryable');
+
   const pushoverFailed = await sendNotification({
     userId: 'u1', title: 't', message: 'm', usePushover: true, pushoverUserKey: 'p1', logPrefix: 'test',
   });
@@ -54,7 +134,6 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   assert(webPushAccepted === true, 'a subscription plus immediate web-push handoff was not accepted');
 
   sandbox.fetch = async (url) => {
-    if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, [{ id: 'sub-1' }]);
     if (url.includes('/functions/v1/web-push')) return fakeResponse(202, 'scheduled');
     throw new Error(`unexpected fetch: ${url}`);
   };
@@ -63,13 +142,32 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   });
   assert(delayedHandoff === false, 'a delayed web-push schedule was treated as delivered');
 
-  sandbox.fetch = async (url) => {
-    if (url.includes('/rest/v1/zane_push_subscriptions')) return fakeResponse(200, []);
-    throw new Error(`unexpected fetch: ${url}`);
-  };
+  sandbox.fetch = async (url) => url.includes('/functions/v1/web-push')
+    ? fakeResponse(503, 'no subscription accepted')
+    : (() => { throw new Error(`unexpected fetch: ${url}`); })();
   const noSubscription = await sendNotification({
     userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
   });
   assert(noSubscription === false, 'a missing web-push subscription was treated as delivered');
-  console.log('notification-delivery OK: provider failure and missing subscriptions stay retryable');
+
+  // ttl was declared in NotificationArgs and forwarded to Pushover but never
+  // to Web Push, which hardcoded 300 seconds, so a reminder meant to stay
+  // deliverable for 12 hours expired in five minutes on that channel.
+  let webPushBody = null;
+  sandbox.fetch = async (url, init) => {
+    if (url.includes('/functions/v1/web-push')) { webPushBody = JSON.parse(init.body); return fakeResponse(200, 'accepted'); }
+    throw new Error(`unexpected fetch: ${url}`);
+  };
+  await sendNotification({
+    userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, ttl: 43200, logPrefix: 'test',
+  });
+  assert(webPushBody && webPushBody.ttl === 43200, 'ttl was not forwarded to web-push');
+
+  webPushBody = null;
+  await sendNotification({
+    userId: 'u1', title: 't', message: 'm', usePushover: false, pushoverUserKey: null, logPrefix: 'test',
+  });
+  assert(webPushBody && webPushBody.ttl === undefined, 'a caller without a ttl must not pin one, web-push defaults it');
+
+  console.log('notification-delivery OK: provider failure, partial fanout retry, subscriptions and ttl forwarding all hold');
 })().catch(error => { console.error(error); process.exit(1); });

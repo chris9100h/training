@@ -1,4 +1,5 @@
 import { sendNotification } from '../_shared/notifications.ts';
+import { socialAuthFailureStatus, socialNotificationStatus } from '../_shared/social-notification-result.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -7,6 +8,8 @@ const corsHeaders = {
 };
 
 const EVENT_KINDS = new Set(['message', 'friend_request', 'finished_workout_comment', 'friend_started']);
+const DELIVERY_CHUNK_SIZE = 6;
+const MAX_DELIVERIES_PER_INVOCATION = 24;
 const PREF_BY_EVENT: Record<string, string> = {
   message: 'social_push_messages',
   friend_request: 'social_push_friend_requests',
@@ -55,19 +58,35 @@ function oneLine(value: unknown, max = 100) {
   return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, max);
 }
 
-async function resolveUser(req: Request): Promise<string | null> {
+type UserResolution = { userId: string | null; status: number };
+
+async function resolveUser(req: Request): Promise<UserResolution> {
   const token = (req.headers.get('Authorization') ?? '').replace(/^Bearer\s+/i, '');
-  if (!token) return null;
+  if (!token) return { userId: null, status: 401 };
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
   const apiKey = Deno.env.get('SUPABASE_ANON_KEY') || serviceKey;
-  if (!base || !apiKey) return null;
-  const result = await fetch(`${base}/auth/v1/user`, {
-    headers: { Authorization: `Bearer ${token}`, apikey: apiKey },
-  }).catch(() => null);
-  if (!result?.ok) return null;
+  if (!base || !apiKey) return { userId: null, status: socialAuthFailureStatus(null, false) };
+  let result: Response;
+  try {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    try {
+      result = await fetch(`${base}/auth/v1/user`, {
+        signal: controller.signal,
+        headers: { Authorization: `Bearer ${token}`, apikey: apiKey },
+      });
+    } finally {
+      clearTimeout(timer);
+    }
+  } catch (_) {
+    return { userId: null, status: socialAuthFailureStatus(null) };
+  }
+  if (!result.ok) return { userId: null, status: socialAuthFailureStatus(result.status) };
   const user = await result.json().catch(() => null);
-  return user?.id ?? null;
+  return user?.id
+    ? { userId: user.id, status: 200 }
+    : { userId: null, status: socialAuthFailureStatus(null) };
 }
 
 async function rows<T>(path: string, label: string): Promise<T[]> {
@@ -88,77 +107,30 @@ async function profileName(userId: string) {
   return oneLine(result[0]?.name || 'Zane athlete', 60);
 }
 
-async function recipientSettings(userId: string, preference: string) {
-  const result = await rows<Record<string, unknown>>(
-    `zane_user_settings?user_id=eq.${encodeURIComponent(userId)}&select=push_enabled,pushover_user_key,use_pushover,${preference}`,
+type RecipientSettings = {
+  user_id: string;
+  push_enabled: boolean | null;
+  pushover_user_key: string | null;
+  use_pushover: boolean | null;
+  social_push_messages: boolean | null;
+  social_push_friend_requests: boolean | null;
+  social_push_finished_comments: boolean | null;
+  social_push_friend_started: boolean | null;
+};
+
+type DeliveryClaim = {
+  recipient_id: string;
+  claim_token: string | null;
+  state: 'claimed' | 'delivered' | 'busy';
+};
+
+async function recipientSettingsBatch(userIds: string[]) {
+  if (!userIds.length) return new Map<string, RecipientSettings>();
+  const result = await rows<RecipientSettings>(
+    `zane_user_settings?user_id=in.(${userIds.join(',')})&select=user_id,push_enabled,pushover_user_key,use_pushover,social_push_messages,social_push_friend_requests,social_push_finished_comments,social_push_friend_started`,
     'recipient settings',
   );
-  return result[0] ?? null;
-}
-
-// Returns false for an already delivered event or a concurrent retry that is
-// still inside the short retry window. A failed provider handoff leaves the
-// row retryable because delivered_at stays null.
-async function claimDelivery(eventKey: string, recipientId: string, eventKind: string) {
-  const existing = await rows<{ last_attempt_at: string | null; delivered_at: string | null }>(
-    `zane_social_notification_deliveries?event_key=eq.${encodeURIComponent(eventKey)}&recipient_id=eq.${encodeURIComponent(recipientId)}&select=last_attempt_at,delivered_at`,
-    'delivery ledger',
-  );
-  const previous = existing[0];
-  const now = new Date();
-  if (previous?.delivered_at) return false;
-  if (previous?.last_attempt_at && now.getTime() - new Date(previous.last_attempt_at).getTime() < 30_000) return false;
-
-  if (!previous) {
-    // Ignore a duplicate insert and inspect the returned representation. Only
-    // the request that actually inserted the row may hand the event to the
-    // provider; this closes the no-row race between two concurrent retries.
-    const result = await dbFetch('zane_social_notification_deliveries', {
-      method: 'POST',
-      headers: { Prefer: 'resolution=ignore-duplicates,return=representation' },
-      body: JSON.stringify({
-        event_key: eventKey,
-        recipient_id: recipientId,
-        event_kind: eventKind,
-        last_attempt_at: now.toISOString(),
-      }),
-    });
-    if (!result.ok) throw new Error(`delivery claim failed: ${result.status} ${await result.text().catch(() => '')}`);
-    const inserted = await result.json().catch(() => []);
-    return Array.isArray(inserted) && inserted.length > 0;
-  }
-
-  // A retry after the short backoff must win a compare-and-set update. Two
-  // callers can read the same stale timestamp, but only the first PATCH still
-  // matches it; the other one gets an empty representation and stays a
-  // duplicate instead of sending a second push.
-  const cutoff = new Date(now.getTime() - 30_000).toISOString();
-  const attemptFilter = previous.last_attempt_at
-    ? `last_attempt_at=lt.${encodeURIComponent(cutoff)}`
-    : 'last_attempt_at=is.null';
-  const result = await dbFetch(
-    `zane_social_notification_deliveries?event_key=eq.${encodeURIComponent(eventKey)}&recipient_id=eq.${encodeURIComponent(recipientId)}&delivered_at=is.null&${attemptFilter}&select=event_key`,
-    {
-      method: 'PATCH',
-      headers: { Prefer: 'return=representation' },
-      body: JSON.stringify({ last_attempt_at: now.toISOString() }),
-    },
-  );
-  if (!result.ok) throw new Error(`delivery claim failed: ${result.status} ${await result.text().catch(() => '')}`);
-  const claimed = await result.json().catch(() => []);
-  return Array.isArray(claimed) && claimed.length > 0;
-}
-
-async function markDelivered(eventKey: string, recipientId: string) {
-  const result = await dbFetch(
-    `zane_social_notification_deliveries?event_key=eq.${encodeURIComponent(eventKey)}&recipient_id=eq.${encodeURIComponent(recipientId)}`,
-    {
-      method: 'PATCH',
-      headers: { Prefer: 'return=minimal' },
-      body: JSON.stringify({ delivered_at: new Date().toISOString() }),
-    },
-  );
-  if (!result.ok) console.error(`[social-notify] delivery mark failed: ${result.status}`);
+  return new Map(result.map(setting => [setting.user_id, setting]));
 }
 
 type PendingPush = {
@@ -167,14 +139,10 @@ type PendingPush = {
   message: string;
 };
 
-async function deliver(eventKind: string, eventId: string, push: PendingPush) {
-  if (!push.recipientId) return 'skipped';
-  const preference = PREF_BY_EVENT[eventKind];
-  const settings = await recipientSettings(push.recipientId, preference);
+async function deliver(eventKind: string, push: PendingPush, settings: RecipientSettings | null) {
+  if (!push.recipientId || !settings) return 'skipped';
+  const preference = PREF_BY_EVENT[eventKind] as keyof RecipientSettings;
   if (!settings?.push_enabled || settings[preference] !== true) return 'skipped';
-
-  const eventKey = `${eventKind}:${eventId}`;
-  if (!await claimDelivery(eventKey, push.recipientId, eventKind)) return 'duplicate';
 
   const sent = await sendNotification({
     userId: push.recipientId,
@@ -184,8 +152,19 @@ async function deliver(eventKind: string, eventId: string, push: PendingPush) {
     pushoverUserKey: settings.pushover_user_key as string | null | undefined,
     logPrefix: 'social-notify',
   });
-  if (sent) await markDelivered(eventKey, push.recipientId);
   return sent ? 'sent' : 'retryable';
+}
+
+async function mapConcurrent<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await fn(items[index]);
+    }
+  }));
+  return results;
 }
 
 async function notifyMessage(callerId: string, messageId: string): Promise<PendingPush[]> {
@@ -198,30 +177,20 @@ async function notifyMessage(callerId: string, messageId: string): Promise<Pendi
   if (message.sender_id !== callerId) throw new Error('forbidden');
   const sender = await profileName(callerId);
   const text = oneLine(message.body);
-  if (message.recipient_id && message.recipient_id !== callerId) {
-    if (!await dbRpc<boolean>('social_can_notify_message', { p_message_id: messageId, p_recipient_id: message.recipient_id })) return [];
-    return [{ recipientId: message.recipient_id, title: `Zane · ${sender}`, message: text || 'New message' }];
+  const recipients = await dbRpc<{ recipient_id: string }[]>('social_notification_message_recipients', {
+    p_message_id: messageId,
+    p_caller_id: callerId,
+  });
+  if (message.recipient_id) {
+    return recipients.map(row => ({ recipientId: row.recipient_id, title: `Zane · ${sender}`, message: text || 'New message' }));
   }
   if (!message.group_id) return [];
-  const members = await rows<{ user_id: string }>(
-    `zane_social_group_members?group_id=eq.${encodeURIComponent(message.group_id)}&select=user_id&limit=200`,
-    'group members',
-  );
   const groupRows = await rows<{ name: string | null }>(
     `zane_social_groups?id=eq.${encodeURIComponent(message.group_id)}&select=name`,
     'group',
   );
   const groupName = oneLine(groupRows[0]?.name || 'Friends group', 60);
-  const candidates = members
-    .map(member => member.user_id)
-    .filter(userId => userId && userId !== callerId)
-    .slice(0, 50)
-    ;
-  const allowed = await Promise.all(candidates.map(async recipientId => (
-    await dbRpc<boolean>('social_can_notify_message', { p_message_id: messageId, p_recipient_id: recipientId }) ? recipientId : null
-  )));
-  return allowed.filter((recipientId): recipientId is string => !!recipientId)
-    .map(recipientId => ({ recipientId, title: `Zane · ${groupName}`, message: text || 'New group message' }));
+  return recipients.map(row => ({ recipientId: row.recipient_id, title: `Zane · ${groupName}`, message: text || 'New group message' }));
 }
 
 async function notifyFriendRequest(callerId: string, friendshipId: string): Promise<PendingPush[]> {
@@ -272,25 +241,12 @@ async function notifyFriendStarted(callerId: string, sessionId: string): Promise
   if (session.user_id !== callerId) throw new Error('forbidden');
   if (session.ended || !session.started_at) return [];
 
-  const [outgoing, incoming] = await Promise.all([
-    rows<{ addressee_id: string }>(
-      `zane_social_friendships?requester_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=addressee_id&limit=200`,
-      'outgoing friendships',
-    ),
-    rows<{ requester_id: string }>(
-      `zane_social_friendships?addressee_id=eq.${encodeURIComponent(callerId)}&status=eq.accepted&select=requester_id&limit=200`,
-      'incoming friendships',
-    ),
-  ]);
-  const ids = [...new Set([
-    ...outgoing.map(row => row.addressee_id),
-    ...incoming.map(row => row.requester_id),
-  ])].filter(userId => userId && userId !== callerId).slice(0, 50);
-  const allowed = await Promise.all(ids.map(async recipientId => (
-    await dbRpc<boolean>('social_can_notify_friend_started', { p_session_id: sessionId, p_recipient_id: recipientId }) ? recipientId : null
-  )));
-  return allowed.filter((recipientId): recipientId is string => !!recipientId).map(recipientId => ({
-    recipientId,
+  const recipients = await dbRpc<{ recipient_id: string }[]>('social_notification_friend_started_recipients', {
+    p_session_id: sessionId,
+    p_caller_id: callerId,
+  });
+  return recipients.map(row => ({
+    recipientId: row.recipient_id,
     title: 'Zane · Friend started a workout',
     message: 'A friend started a workout.',
   }));
@@ -298,8 +254,14 @@ async function notifyFriendStarted(callerId: string, sessionId: string): Promise
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders });
-  const callerId = await resolveUser(req);
-  if (!callerId) return response({ error: 'unauthorized' }, 401);
+  const caller = await resolveUser(req);
+  if (!caller.userId) {
+    return response(
+      caller.status === 401 ? { error: 'unauthorized' } : { error: 'authentication unavailable', retry: true },
+      caller.status,
+    );
+  }
+  const callerId = caller.userId;
 
   const body = await req.json().catch(() => ({}));
   const event = String(body?.event || '');
@@ -309,7 +271,7 @@ Deno.serve(async (req) => {
   if (!EVENT_KINDS.has(event) || !id || id.length > 200 || (event === 'friend_started' ? !sessionLike.test(id) : !uuidLike.test(id))) return response({ error: 'invalid event' }, 400);
 
   try {
-    if (!await dbRpc<boolean>('social_take_notification_rate_limit', { p_caller_id: callerId })) {
+    if (!await dbRpc<boolean>('social_take_notification_rate_limit', { p_caller_id: callerId, p_cost: 1 })) {
       return response({ error: 'rate limited', retry: true }, 429);
     }
     const pending = event === 'message'
@@ -320,8 +282,78 @@ Deno.serve(async (req) => {
           ? await notifyFinishedComment(callerId, id)
           : await notifyFriendStarted(callerId, id);
 
-    const results = await Promise.all(pending.map(push => deliver(event, id, push)));
-    return response({ sent: results.filter(result => result === 'sent').length, skipped: results.filter(result => result === 'skipped').length, duplicates: results.filter(result => result === 'duplicate').length, retryable: results.filter(result => result === 'retryable').length });
+    const uniquePending = [...new Map(pending.map(push => [push.recipientId, push])).values()];
+    const eventKey = `${event}:${id}`;
+    const counts = {
+      sent: 0,
+      skipped: 0,
+      duplicates: 0,
+      retryable: 0,
+    };
+    if (uniquePending.length) {
+      // Charge for every recipient examined, not only for newly claimed rows.
+      // A replay of an already delivered large group event therefore cannot
+      // scan the delivery ledger at the one-unit base rate.
+      const workCost = Math.max(1, Math.ceil(uniquePending.length / 5));
+      if (!await dbRpc<boolean>('social_take_notification_rate_limit', { p_caller_id: callerId, p_cost: workCost })) {
+        return response({ ...counts, retryable: uniquePending.length, error: 'rate limited' }, 429);
+      }
+    }
+    const pendingRecipients = uniquePending.length
+      ? await dbRpc<{ recipient_id: string }[]>('social_pending_notification_recipients', {
+          p_event_key: eventKey,
+          p_recipient_ids: uniquePending.map(push => push.recipientId),
+        })
+      : [];
+    const pendingRecipientIds = new Set(pendingRecipients.map(row => row.recipient_id));
+    const deliveryPending = uniquePending.filter(push => pendingRecipientIds.has(push.recipientId));
+    counts.duplicates += uniquePending.length - deliveryPending.length;
+    let attempted = 0;
+    for (let offset = 0; offset < deliveryPending.length; offset += DELIVERY_CHUNK_SIZE) {
+      if (attempted >= MAX_DELIVERIES_PER_INVOCATION) {
+        counts.retryable += deliveryPending.length - offset;
+        break;
+      }
+      const batch = deliveryPending.slice(offset, offset + DELIVERY_CHUNK_SIZE);
+      const claims = await dbRpc<DeliveryClaim[]>('social_claim_notification_deliveries', {
+        p_event_key: eventKey,
+        p_event_kind: event,
+        p_recipient_ids: batch.map(push => push.recipientId),
+      });
+      const claimByRecipient = new Map(claims.map(claim => [claim.recipient_id, claim]));
+      const claimed = batch.filter(push => claimByRecipient.get(push.recipientId)?.state === 'claimed');
+      counts.duplicates += claims.filter(claim => claim.state === 'delivered').length;
+      counts.retryable += claims.filter(claim => claim.state === 'busy').length
+        + batch.filter(push => !claimByRecipient.has(push.recipientId)).length;
+      if (!claimed.length) continue;
+
+      const settings = await recipientSettingsBatch(claimed.map(push => push.recipientId));
+      const results = await mapConcurrent(claimed, DELIVERY_CHUNK_SIZE, push => deliver(event, push, settings.get(push.recipientId) ?? null));
+      const finishResults = claimed.map((push, index) => ({
+        recipient_id: push.recipientId,
+        claim_token: claimByRecipient.get(push.recipientId)!.claim_token,
+        // Disabled/missing preferences are a terminal skip for this historical
+        // event. Provider failures release only this exact claim for retry.
+        delivered: results[index] !== 'retryable',
+      }));
+      const changed = await dbRpc<number>('social_finish_notification_deliveries', {
+        p_event_key: eventKey,
+        p_results: finishResults,
+      });
+      if (changed !== finishResults.length) throw new Error('delivery claim finalization mismatch');
+      attempted += claimed.length;
+      counts.sent += results.filter(result => result === 'sent').length;
+      counts.skipped += results.filter(result => result === 'skipped').length;
+      counts.retryable += results.filter(result => result === 'retryable').length;
+    }
+    // A provider handoff that failed and is worth retrying must not come back
+    // as 200: the client outbox treats any ok as delivered and drops the row,
+    // and no cron picks these up, so the push was simply lost. 503 is one of
+    // the statuses flushSocialNotificationOutbox already keeps queued.
+    // The delivery ledger is recipient-specific. Retrying a partial fanout is
+    // therefore safe: successful recipients are returned as duplicates while
+    // only the failed recipients get another provider attempt.
+    return response(counts, socialNotificationStatus(counts));
   } catch (error) {
     console.error('[social-notify] failed:', error);
     if (error instanceof Error && error.message === 'session not ready') {

@@ -441,6 +441,151 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
+const LIFETIME_CONGRATS_SEEN_PREFIX = 'logbook-lifetime-premium-seen:';
+const LIFETIME_CONGRATS_PENDING_PREFIX = 'logbook-lifetime-premium-pending:';
+
+function lifetimeCongratsSeenKey(userId) {
+  return `${LIFETIME_CONGRATS_SEEN_PREFIX}${userId}`;
+}
+
+function lifetimeCongratsPendingKey(userId) {
+  return `${LIFETIME_CONGRATS_PENDING_PREFIX}${userId}`;
+}
+
+function lifetimeGrantKey(user) {
+  if (!user || user.tier !== 'lifetime') return null;
+  // Older profile caches do not have tierGrantedAt. The fallback is still
+  // account-scoped and gives those founding members one congratulations card.
+  return String(user.tierGrantedAt || 'legacy');
+}
+
+function LifetimePremiumCongratsModal({ onDone }) {
+  const ctaRef = useRefA(null);
+
+  useEffectA(() => {
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const focusTimer = setTimeout(() => ctaRef.current?.focus(), 40);
+    return () => {
+      clearTimeout(focusTimer);
+      document.body.style.overflow = previousOverflow;
+    };
+  }, []);
+
+  const confetti = [
+    { top: 34, left: '9%', rotate: '25deg', color: 'var(--accent-light)' },
+    { top: 12, left: '25%', rotate: '-35deg', color: 'var(--ok)', height: 7 },
+    { top: 27, right: '25%', rotate: '0deg', color: 'var(--danger)', round: true },
+    { top: 52, right: '9%', rotate: '-25deg', color: 'var(--accent-light)', height: 9 },
+    { top: 91, left: '17%', rotate: '0deg', color: 'var(--info)', round: true },
+    { top: 85, right: '18%', rotate: '42deg', color: 'var(--ok)', height: 11 },
+  ];
+
+  const modal = (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="lifetime-premium-congrats-title"
+      aria-describedby="lifetime-premium-congrats-copy"
+      style={{
+        position: localViewportLayerPosition(), inset: 0, zIndex: 10000,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        minHeight: '100dvh', padding: '24px 16px',
+        background: 'rgba(8, 6, 13, 0.72)',
+        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+      }}
+    >
+      <style>{`
+        @keyframes lifetimeCongratsRise {
+          from { opacity: 0; transform: translateY(12px) scale(.97); }
+          to { opacity: 1; transform: translateY(0) scale(1); }
+        }
+        @keyframes lifetimeCongratsPop {
+          0% { opacity: 0; transform: scale(.55) rotate(-9deg); }
+          70% { opacity: 1; transform: scale(1.08) rotate(3deg); }
+          100% { opacity: 1; transform: scale(1) rotate(0); }
+        }
+        @keyframes lifetimeCongratsFloat {
+          from { transform: translateY(0); }
+          to { transform: translateY(8px); }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .lifetime-congrats-modal, .lifetime-congrats-emoji, .lifetime-congrats-confetti i { animation: none !important; }
+        }
+      `}</style>
+      <section
+        className="lifetime-congrats-modal"
+        style={{
+          position: 'relative', width: 'min(100%, 380px)', overflow: 'hidden',
+          border: `1px solid ${UI.goldSoft}`, borderRadius: 14,
+          backgroundColor: UI.bgRaised,
+          backgroundImage: 'linear-gradient(rgba(151,134,182,.065) 1px, transparent 1px), linear-gradient(90deg, rgba(151,134,182,.065) 1px, transparent 1px)',
+          backgroundSize: '27px 27px',
+          boxShadow: '0 0 0 1px rgba(var(--accent-rgb),.10), 0 18px 55px rgba(0,0,0,.58), 0 0 46px rgba(var(--accent-rgb),.13)',
+          textAlign: 'center', animation: 'lifetimeCongratsRise .45s cubic-bezier(.2,.8,.2,1) both',
+        }}
+      >
+        <div style={{ height: 3, background: 'linear-gradient(90deg, transparent, var(--accent-light), transparent)' }} />
+        <div className="lifetime-congrats-confetti" aria-hidden="true" style={{ position: 'absolute', inset: '12px 18px auto', height: 122, pointerEvents: 'none' }}>
+          {confetti.map((piece, index) => (
+            <i key={index} style={{
+              position: 'absolute', display: 'block', top: piece.top, left: piece.left, right: piece.right,
+              width: piece.round ? 7 : 5, height: piece.height || (piece.round ? 7 : 12),
+              borderRadius: piece.round ? '50%' : 3, background: piece.color, opacity: .82,
+              transform: `rotate(${piece.rotate})`,
+              animation: index % 2 === 0 ? 'lifetimeCongratsFloat 2.8s ease-in-out infinite alternate' : undefined,
+              animationDelay: `${index * 90}ms`,
+            }} />
+          ))}
+        </div>
+        <div style={{ padding: '38px 26px 27px' }}>
+          <span
+            className="lifetime-congrats-emoji"
+            aria-hidden="true"
+            style={{ display: 'block', margin: '0 auto 14px', fontSize: 'clamp(58px, 17vw, 76px)', lineHeight: 1, filter: 'drop-shadow(0 7px 13px rgba(var(--accent-rgb),.28))', animation: 'lifetimeCongratsPop .7s cubic-bezier(.2,1.4,.45,1) both' }}
+          >🎉</span>
+          <div style={{ marginBottom: 7, color: UI.goldLight, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '.25em' }}>
+            FOUNDING MEMBER
+          </div>
+          <h2 id="lifetime-premium-congrats-title" style={{ margin: 0, color: UI.ink, fontFamily: UI.fontDisplay, fontSize: 'clamp(29px, 8vw, 37px)', fontWeight: 600, lineHeight: .98, letterSpacing: '.08em' }}>
+            LIFETIME PREMIUM
+          </h2>
+          <div style={{ marginTop: 17, color: UI.goldLight, fontFamily: UI.fontUi, fontSize: 16, fontWeight: 700, lineHeight: 1.1, letterSpacing: '.12em' }}>
+            YOU EARNED IT.
+          </div>
+          <p id="lifetime-premium-congrats-copy" style={{ maxWidth: 275, margin: '12px auto 0', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.55 }}>
+            Every premium feature is now yours forever. No subscription. No expiry.
+          </p>
+          <div style={{ height: 1, margin: '23px 0 15px', background: 'linear-gradient(90deg, transparent, var(--accent-soft), transparent)' }} />
+          <div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 600, lineHeight: 1.2, letterSpacing: '.17em' }}>
+            ALL FEATURES&nbsp;&nbsp;·&nbsp;&nbsp;FOREVER
+          </div>
+          <button
+            ref={ctaRef}
+            type="button"
+            onClick={onDone}
+            style={{
+              display: 'block', width: '100%', marginTop: 24, padding: '13px 16px 12px',
+              border: '1px solid rgba(255,198,104,.76)', borderRadius: 7,
+              background: 'linear-gradient(155deg, var(--accent-light) 0%, var(--accent) 58%, var(--accent-deep) 100%)',
+              boxShadow: '0 8px 22px rgba(var(--accent-rgb),.24), inset 0 1px 0 rgba(255,238,193,.45)',
+              color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
+              letterSpacing: '.16em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', textShadow: 'none',
+            }}
+          >
+            LET'S GO
+          </button>
+          <div style={{ marginTop: 14, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, lineHeight: 1.4 }}>
+            Your founding-member badge is now on your home screen.
+          </div>
+        </div>
+      </section>
+    </div>
+  );
+
+  return ReactDOM.createPortal(modal, document.body);
+}
+
 
 function LoadingScreen() {
   return (
@@ -525,14 +670,34 @@ function mergeProfileIdentity(fresh, cur, base) {
   return merged;
 }
 
+function hasNewlyCompletedSession(previous, next) {
+  const previousById = new Map((previous?.sessions || []).map(session => [session.id, session]));
+  return (next?.sessions || []).some(session => {
+    if (!session || session.ended == null) return false;
+    const old = previousById.get(session.id);
+    return !old || old.ended == null;
+  });
+}
+
 // A first-install boot renders its essential payload while secondary tables
 // hydrate. Any edit made during that short window must survive the full server
 // response exactly like an edit made against the normal persisted cache.
 function mergeStagedBootStore(fresh, cur, base) {
   if (!cur || !base) return fresh;
   const merged = { ...fresh };
+  // loadFromSupabase omits this when its aggregate RPC failed, so a transient
+  // server error cannot blank the PR baseline that history stars, the PR
+  // count and the 5/3/1 TM suggestion all read straight out of the store.
+  if (!merged.exerciseBests && cur.exerciseBests) merged.exerciseBests = cur.exerciseBests;
   const inProgressId = LB.resolveInProgressId(cur, fresh, base);
-  const sessionMerge = LB.mergeSessions(fresh.sessions || [], cur.sessions || [], inProgressId, base.sessions || []);
+  const sessionMerge = LB.mergeSessions(
+    fresh.sessions || [],
+    cur.sessions || [],
+    inProgressId,
+    base.sessions || [],
+    new Date(),
+    { preserveCachedAggregates: fresh.__sessionStatsAvailable === false },
+  );
   merged.sessions = sessionMerge.sessions;
   merged.inProgress = sessionMerge.activeExists ? inProgressId : null;
 
@@ -598,6 +763,7 @@ function App() {
   const [syncStatus, setSyncStatus] = useStateA('synced'); // 'synced' | 'pending' | 'error'
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
+  const [lifetimeCongratsPending, setLifetimeCongratsPending] = useStateA(false);
   const onboardingChecked = useRefA(false);
   // Live snapshot of store, read (not subscribed to) by the What's New effect
   // below so it can peek at the current onboarding-relevant fields without
@@ -635,7 +801,16 @@ function App() {
   const prevStore                 = useRefA(null);
   const syncBase                  = useRefA(null);  // last state confirmed written to Supabase
   const pendingStore              = useRefA(null);  // latest state awaiting sync
+  // Memory fallback for the narrow but destructive case where Auth requires a
+  // fresh login while localStorage is unavailable/full. The pending snapshot
+  // must survive that same-page reauthentication even though it could not be
+  // serialized. It is consumed only by the same user and discarded on an
+  // explicit logout or an account switch.
+  const reauthPending             = useRefA(null);
   const syncing                   = useRefA(false); // true while a sync is in flight
+  const inFlightSync              = useRefA(null);  // promise for the current account's sync request
+  const syncGeneration             = useRefA(0);     // invalidates completions after account switches
+  const signoutFlushInFlight       = useRefA(false); // prevents a parallel fire-and-forget sync
   const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
@@ -655,12 +830,48 @@ function App() {
   const adminSupportUnreadRequest  = useRefA(0);
 
   useEffectA(() => {
+    syncGeneration.current += 1;
     userIdRef.current = userId;
+    setLifetimeCongratsPending(false);
     previousMedsEnabled.current = null;
     adminSupportUnreadRevision.current += 1;
     adminSupportUnreadRequest.current += 1;
     adminSupportUnreadRef.current = null;
   }, [userId]);
+
+  // A Lifetime seat is granted server-side by the completed-session trigger.
+  // Keep the congratulations pending across route changes, but only display
+  // it later on a quiet Home surface. The grant timestamp makes this once per
+  // actual unlock; the legacy fallback covers older profile caches safely.
+  const queueLifetimeCongrats = useCallbackA((uid, user) => {
+    const grantKey = lifetimeGrantKey(user);
+    if (!uid || !grantKey || user?.tier !== 'lifetime') return;
+    let seen = null;
+    try { seen = localStorage.getItem(lifetimeCongratsSeenKey(uid)); } catch (_) {}
+    // A legacy cache may briefly report the fallback key before the fresh
+    // profile query supplies its timestamp. Treat that as the same unlock in
+    // either direction so the first rollout cannot show the card twice.
+    if (seen && (seen === grantKey || seen === 'legacy' || grantKey === 'legacy')) return;
+    try { localStorage.setItem(lifetimeCongratsPendingKey(uid), grantKey); } catch (_) {}
+    setLifetimeCongratsPending(true);
+  }, []);
+
+  useEffectA(() => {
+    if (phase !== 'ready' || !userId || !store) return;
+    queueLifetimeCongrats(userId, store?.user);
+  }, [phase, userId, store?.user?.tier, store?.user?.tierGrantedAt, queueLifetimeCongrats]);
+
+  const dismissLifetimeCongrats = useCallbackA(() => {
+    const uid = userIdRef.current || userId;
+    const grantKey = lifetimeGrantKey(store?.user);
+    if (uid && grantKey) {
+      try {
+        localStorage.setItem(lifetimeCongratsSeenKey(uid), grantKey);
+        localStorage.removeItem(lifetimeCongratsPendingKey(uid));
+      } catch (_) {}
+    }
+    setLifetimeCongratsPending(false);
+  }, [userId, store?.user?.tier, store?.user?.tierGrantedAt]);
   useEffectA(() => {
     const selected = phase === 'ready' && userId ? store?.settings?.vipBackground : null;
     const syncBackgroundCache = () => tellServiceWorkerBackground(selected);
@@ -690,6 +901,13 @@ function App() {
 
   useEffectA(() => {
     const onAuthDegraded = () => {
+      reauthPending.current = LB.retainedStateForUser(
+        reauthPending.current,
+        userIdRef.current,
+        userIdRef.current,
+        pendingStore.current,
+        syncBase.current,
+      );
       setAuthState('recovering');
       setSyncStatus('error');
     };
@@ -1406,6 +1624,27 @@ function App() {
     return ok;
   }, [cancelScheduledLocalSave]);
 
+  // A revoked, expired or otherwise invalid refresh token needs a real login,
+  // not an endless retry loop. Persist the pending snapshot before detaching
+  // the account so the next successful login can merge and sync it normally.
+  const requireReauthentication = useCallbackA(() => {
+    const uid = userIdRef.current;
+    const target = pendingStore.current;
+    const base = syncBase.current;
+    const persisted = persistLocalNow();
+    if (!persisted && uid && target) reauthPending.current = { uid, store: target, base };
+    clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    syncGeneration.current += 1;
+    loadSeq.current += 1;
+    LB.clearAuthRecovery();
+    setAuthState('reauth-required');
+    setSyncStatus('error');
+    userIdRef.current = null;
+    setUserId(null);
+    setPhase('unauthed');
+  }, [persistLocalNow, setAuthState]);
+
   const scheduleLocalSave = useCallbackA((delay = 300) => {
     cancelScheduledLocalSave();
     const task = { debounceId: null, idleId: null, idleIsTimeout: false };
@@ -1435,6 +1674,7 @@ function App() {
     // scheduled with the old uid could otherwise fire after an account switch
     // and upsert one account's data stamped with another's user_id.
     if (uid !== userIdRef.current) return;
+    if (signoutFlushInFlight.current) return;
     // Auth recovery must finish before an RLS write is attempted. Keeping the
     // pending snapshot local is safer than firing a burst of guaranteed 401s
     // while the refresh endpoint is recovering.
@@ -1453,12 +1693,54 @@ function App() {
       return;
     }
     syncing.current = true;
+    const generation = syncGeneration.current;
+    const baseAtStart = syncBase.current;
+    const targetAtStart = target;
+    const shouldRefreshLifetimeTier = targetAtStart.user?.tier !== 'lifetime'
+      && hasNewlyCompletedSession(baseAtStart, targetAtStart);
+    const isCurrent = () => generation === syncGeneration.current && uid === userIdRef.current;
     let ok = false;
-    LB.syncStore(syncBase.current, target, uid)
-      .then(() => { syncBase.current = target; scheduleLocalSave(0); ok = true; })
+    const request = LB.syncStore(baseAtStart, targetAtStart, uid);
+    inFlightSync.current = request;
+    request
+      .then(() => {
+        // The request may finish after SIGNED_OUT/SIGNED_IN. Its server write
+        // belongs to the old JWT, but its completion must never advance the
+        // new account's baseline or serialize the old baseline under it.
+        if (!isCurrent()) return;
+        syncBase.current = targetAtStart;
+        scheduleLocalSave(0);
+        ok = true;
+        if (shouldRefreshLifetimeTier) {
+          // The database trigger runs in the same transaction as the session
+          // write. Read back only the two server-authored profile fields; do
+          // not reload the whole store or compete with the normal sync queue.
+          LB.refreshProfileTier(uid).then(profile => {
+            if (!isCurrent() || profile?.tier !== 'lifetime') return;
+            setStore(current => {
+              if (!current || current.user?.tier === 'lifetime' && current.user?.tierGrantedAt === profile.tierGrantedAt) return current;
+              return { ...current, user: {
+                ...current.user,
+                tier: profile.tier,
+                tierGrantedAt: profile.tierGrantedAt,
+              } };
+            });
+          }).catch(err => console.warn('Lifetime tier refresh failed; next boot will retry', err));
+        }
+      })
       .catch(err => console.error('Supabase sync failed, will retry', err))
       .finally(() => {
+        if (inFlightSync.current === request) inFlightSync.current = null;
         syncing.current = false;
+        if (!isCurrent()) {
+          // If the new account's first store update happened while the old
+          // request was in flight, its effect may have seen syncing=true. Give
+          // that pending target one clean chance now, but never touch the old
+          // baseline or status.
+          const currentUid = userIdRef.current;
+          if (currentUid && !signoutFlushInFlight.current) flushSync(currentUid);
+          return;
+        }
         if (ok) {
           clearTimeout(retryTimer.current);
           retryTimer.current = null;
@@ -1607,26 +1889,47 @@ function App() {
     // reason as in flushSync), so whatever is pending stays unflushed. Report
     // failure, the caller then keeps the local cache instead of wiping it.
     if (uid !== userIdRef.current) return false;
-    const target = pendingStore.current;
-    // Nothing pending: there is no unsynced change a wipe could destroy.
-    if (!target || target === syncBase.current || !uid) return true;
-    // Only the sync path sets this. The timeout ends the WAIT, it can never
-    // report success: without the flag, a 5s stall resolved the race exactly
-    // like a completed write (and so did the catch below), the caller wiped
-    // the local cache, and the change was gone with nothing left to retry.
+    if (!uid) return true;
+    // Never start a second write while the normal queue is already in flight:
+    // two requests racing the same base can both appear successful while one
+    // completion advances the wrong account's baseline. The flag also stops
+    // flushSync's automatic "more edits landed" follow-up until this final
+    // sign-out decision is complete.
+    signoutFlushInFlight.current = true;
     let landed = false;
-    const timeout = new Promise(resolve => setTimeout(resolve, 5000));
-    try {
-      await Promise.race([
-        LB.syncStore(syncBase.current, target, uid).then(() => {
-          syncBase.current = target;
-          setStorageFull(!LB.saveSyncedState(target, uid));
-          landed = true;
-        }),
-        timeout,
+    const deadline = Date.now() + 5000;
+    const waitWithDeadline = promise => {
+      const remaining = Math.max(0, deadline - Date.now());
+      if (!remaining) return Promise.resolve(false);
+      return Promise.race([
+        Promise.resolve(promise).then(() => true, () => false),
+        new Promise(resolve => setTimeout(() => resolve(false), remaining)),
       ]);
+    };
+    try {
+      const inFlight = inFlightSync.current;
+      if (inFlight) await waitWithDeadline(inFlight);
+      if (Date.now() >= deadline || uid !== userIdRef.current) return false;
+      const target = pendingStore.current;
+      // Nothing pending after the existing request settled: there is no
+      // unsynced change a wipe could destroy.
+      if (!target || target === syncBase.current) return true;
+      const generation = syncGeneration.current;
+      const baseAtStart = syncBase.current;
+      const finalRequest = LB.syncStore(baseAtStart, target, uid);
+      inFlightSync.current = finalRequest;
+      const finished = await waitWithDeadline(finalRequest.then(() => {
+        if (generation !== syncGeneration.current || uid !== userIdRef.current) return;
+        syncBase.current = target;
+        setStorageFull(!LB.saveSyncedState(target, uid));
+        landed = true;
+      }));
+      if (!finished) landed = false;
+      if (inFlightSync.current === finalRequest) inFlightSync.current = null;
     } catch (err) {
       console.error('flushBeforeSignOut: final sync attempt failed', err);
+    } finally {
+      signoutFlushInFlight.current = false;
     }
     return landed;
   }, []);
@@ -1652,10 +1955,19 @@ function App() {
         timer = setTimeout(attempt, delay);
         return;
       }
-      const session = await LB.recoverAuthSession();
+      const recovery = await LB.recoverAuthSessionDetailed();
       if (cancelled) return;
+      if (recovery.permanent) {
+        requireReauthentication();
+        return;
+      }
+      const session = recovery.session;
       if (session?.user?.id) {
         const uid = session.user.id;
+        const retained = LB.retainedStateForUser(
+          reauthPending.current, uid, userIdRef.current, pendingStore.current, syncBase.current,
+        );
+        reauthPending.current = null;
         LB.rememberOfflineUser(uid);
         LB.clearAuthRecovery();
         setAuthState('online');
@@ -1663,7 +1975,7 @@ function App() {
           userIdRef.current = uid;
           setUserId(uid);
         }
-        loadData(uid);
+        loadData(uid, { retainedState: retained });
         if (pendingStore.current !== syncBase.current) flushSync(uid);
         return;
       }
@@ -1675,9 +1987,9 @@ function App() {
     // connectivity; ordinary Auth failures wait five seconds first.
     timer = setTimeout(attempt, delay);
     return () => { cancelled = true; clearTimeout(timer); };
-  }, [authStatus, flushSync, setAuthState]);
+  }, [authStatus, flushSync, requireReauthentication, setAuthState]);
 
-  const loadData = async (uid, { offlineOnly = false } = {}) => {
+  const loadData = async (uid, { offlineOnly = false, retainedState = null } = {}) => {
     // Generation stamp: SIGNED_OUT and every newer loadData bump this, and
     // nothing below writes to the store, the diff base or the local cache
     // unless it is still the newest load for the CURRENT user. Without it a
@@ -1687,13 +1999,17 @@ function App() {
     const seq = ++loadSeq.current;
     const isStale = () => seq !== loadSeq.current || uid !== userIdRef.current;
     const localState = LB.loadLocalState(uid);
-    const cached = localState.store;
+    // A failed localStorage write immediately before reauthentication leaves
+    // a newer in-memory snapshot than the persisted cache. Prefer it for this
+    // same-user login; the normal base-aware boot merge then preserves and
+    // uploads its unsynced changes.
+    const cached = retainedState?.store || localState.store;
     if (cached) {
       // Show instantly from cache, then refresh from Supabase in background
       prevStore.current = cached;
       // base = last state confirmed written to Supabase. Lets the merge below
       // tell apart locally-changed-but-unsynced settings from server state.
-      const base = localState.base;
+      const base = retainedState ? retainedState.base : localState.base;
       syncBase.current = base || cached;
       pendingStore.current = cached;
       setStore(cached);
@@ -1773,7 +2089,14 @@ function App() {
             // The persisted base tells apart "never reached the server" (keep
             // + re-sync) from "deleted on another device" (drop, keeping it
             // would push it right back).
-            const { sessions, activeExists } = LB.mergeSessions(fresh.sessions, cur.sessions, inProgressId, base?.sessions);
+            const { sessions, activeExists } = LB.mergeSessions(
+              fresh.sessions,
+              cur.sessions,
+              inProgressId,
+              base?.sessions,
+              new Date(),
+              { preserveCachedAggregates: fresh.__sessionStatsAvailable === false },
+            );
             // Same resurrection guard for the other ID-merged collections:
             // local-only items are kept only if they were never confirmed
             // synced (not in the base). No base (legacy cache) → keep.
@@ -1796,6 +2119,19 @@ function App() {
             const serverCardioIds = new Set((fresh.cardioLogs || []).map(l => l.id));
             const baseCardioIds = base ? new Set((base.cardioLogs || []).map(l => l.id)) : null;
             const localOnlyCardioLogs = (cur.cardioLogs || []).filter(x => !serverCardioIds.has(x.id) && !baseCardioIds?.has(x.id));
+            // Glucose, blood pressure and body temperature are written directly
+            // to Supabase, but their optimistic local delete can still race the
+            // boot SELECT. Track base ids exactly like the other collections so
+            // an older server response cannot resurrect a just-deleted reading.
+            const serverGlucoseIds = new Set((fresh.glucoseLogs || []).map(l => l.id));
+            const baseGlucoseIds = base ? new Set((base.glucoseLogs || []).map(l => l.id)) : null;
+            const localOnlyGlucose = (cur.glucoseLogs || []).filter(x => !serverGlucoseIds.has(x.id) && !baseGlucoseIds?.has(x.id));
+            const serverBpIds = new Set((fresh.bloodPressureLogs || []).map(l => l.id));
+            const baseBpIds = base ? new Set((base.bloodPressureLogs || []).map(l => l.id)) : null;
+            const localOnlyBp = (cur.bloodPressureLogs || []).filter(x => !serverBpIds.has(x.id) && !baseBpIds?.has(x.id));
+            const serverTempIds = new Set((fresh.bodyTempLogs || []).map(l => l.id));
+            const baseTempIds = base ? new Set((base.bodyTempLogs || []).map(l => l.id)) : null;
+            const localOnlyTemp = (cur.bodyTempLogs || []).filter(x => !serverTempIds.has(x.id) && !baseTempIds?.has(x.id));
             const serverWaterIds = new Set((fresh.waterLogs || []).map(l => l.id));
             const baseWaterIds = base ? new Set((base.waterLogs || []).map(l => l.id)) : null;
             const localOnlyWaterLogs = (cur.waterLogs || []).filter(x => !serverWaterIds.has(x.id) && !baseWaterIds?.has(x.id));
@@ -1875,6 +2211,12 @@ function App() {
             const delDailyIds = baseDailyIds ? new Set([...baseDailyIds].filter(id => !curDailyIdSet.has(id))) : null;
             const curCardioIdSet = new Set((cur.cardioLogs || []).map(l => l.id));
             const delCardioIds = baseCardioIds ? new Set([...baseCardioIds].filter(id => !curCardioIdSet.has(id))) : null;
+            const curGlucoseIdSet = new Set((cur.glucoseLogs || []).map(l => l.id));
+            const delGlucoseIds = baseGlucoseIds ? new Set([...baseGlucoseIds].filter(id => !curGlucoseIdSet.has(id))) : null;
+            const curBpIdSet = new Set((cur.bloodPressureLogs || []).map(l => l.id));
+            const delBpIds = baseBpIds ? new Set([...baseBpIds].filter(id => !curBpIdSet.has(id))) : null;
+            const curTempIdSet = new Set((cur.bodyTempLogs || []).map(l => l.id));
+            const delTempIds = baseTempIds ? new Set([...baseTempIds].filter(id => !curTempIdSet.has(id))) : null;
             const curWaterIdSet = new Set((cur.waterLogs || []).map(l => l.id));
             const delWaterIds = baseWaterIds ? new Set([...baseWaterIds].filter(id => !curWaterIdSet.has(id))) : null;
             const curFoodIdSet = new Set((cur.foodLogs || []).map(l => l.id));
@@ -1999,6 +2341,9 @@ function App() {
             if (!base && fresh.settings.unit == null) mergedSettings.unit = null;
             merged = {
               ...fresh,
+              // Omitted by loadFromSupabase when get_exercise_best_e1rm
+              // failed; keep the cached baseline instead of blanking it.
+              exerciseBests: fresh.exerciseBests || cur.exerciseBests || {},
               // This admin-only counter is deliberately omitted from the
               // server payload and local snapshots. Preserve the live value
               // while replacing the rest of the boot state.
@@ -2018,6 +2363,9 @@ function App() {
               skips: [...localOnlySkips, ...(fresh.skips || []).filter(s => !delSkipIds?.has(s.id))],
               dailyLogs: [...localOnlyDailyLogs, ...LB.mergeWindowedCollectionById(fresh.dailyLogs, cur.dailyLogs, base?.dailyLogs, delDailyIds, 'dailyLogs')],
               cardioLogs: [...localOnlyCardioLogs, ...LB.mergeWindowedCollectionById(fresh.cardioLogs, cur.cardioLogs, base?.cardioLogs, delCardioIds, 'cardioLogs')],
+              glucoseLogs: [...localOnlyGlucose, ...LB.mergeWindowedCollectionById(fresh.glucoseLogs || [], cur.glucoseLogs, base?.glucoseLogs, delGlucoseIds, 'glucoseLogs')],
+              bloodPressureLogs: [...localOnlyBp, ...LB.mergeWindowedCollectionById(fresh.bloodPressureLogs || [], cur.bloodPressureLogs, base?.bloodPressureLogs, delBpIds, 'bloodPressureLogs')],
+              bodyTempLogs: [...localOnlyTemp, ...LB.mergeWindowedCollectionById(fresh.bodyTempLogs || [], cur.bodyTempLogs, base?.bodyTempLogs, delTempIds, 'bodyTempLogs')],
               waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
               foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
@@ -2116,23 +2464,31 @@ function App() {
   // after an explicit logout or a permanent Auth rejection.
   const enterOfflineCache = (uid) => {
     if (!uid) { setPhase('error'); return; }
+    const retained = LB.retainedStateForUser(
+      reauthPending.current, uid, userIdRef.current, pendingStore.current, syncBase.current,
+    );
     userIdRef.current = uid;
     setUserId(uid);
     setAuthState('recovering');
     setSyncStatus('error');
-    loadData(uid, { offlineOnly: true });
+    loadData(uid, { offlineOnly: true, retainedState: retained });
   };
 
   useEffectA(() => {
     const { data: { subscription } } = LB.supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'INITIAL_SESSION') {
         if (session) {
+          const retained = LB.retainedStateForUser(
+            reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+          );
+          reauthPending.current = null;
+          userIdRef.current = session.user.id;
           LB.rememberOfflineUser(session.user.id);
           LB.clearAuthRecovery();
           setAuthState('online');
           setUserId(session.user.id);
           if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
-          else loadData(session.user.id);
+          else loadData(session.user.id, { retainedState: retained });
         }
         else {
           const offlineUser = LB.getOfflineUser();
@@ -2162,13 +2518,23 @@ function App() {
         // with the old uid after an in-session account switch, and drop its
         // stale pending state.
         clearTimeout(retryTimer.current);
-        pendingStore.current = null;
+        // Invalidate an old account's in-flight completion immediately; the
+        // userId effect below is intentionally redundant because Auth events
+        // can arrive before React commits the new state.
+        syncGeneration.current += 1;
+        const retained = LB.retainedStateForUser(
+          reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+        );
+        // Never let one account's in-memory fallback cross into another.
+        reauthPending.current = null;
+        userIdRef.current = session.user.id;
+        if (!retained) pendingStore.current = null;
         LB.rememberOfflineUser(session.user.id);
         LB.clearAuthRecovery();
         setAuthState('online');
         setUserId(session.user.id);
         if (isTokenFlow.current) { isTokenFlow.current = false; setPhase('invite'); }
-        else loadData(session.user.id);
+        else loadData(session.user.id, { retainedState: retained });
       } else if (event === 'TOKEN_REFRESHED') {
         const wasRecovering = authStatusRef.current !== 'online';
         LB.rememberOfflineUser(session?.user?.id);
@@ -2178,7 +2544,11 @@ function App() {
           // The offline cache was intentionally not refreshed while Auth was
           // down. Re-enter the normal cache-first boot path now that the JWT
           // is valid again; its merge preserves any local pending edits.
-          loadData(session.user.id);
+          const retained = LB.retainedStateForUser(
+            reauthPending.current, session.user.id, userIdRef.current, pendingStore.current, syncBase.current,
+          );
+          reauthPending.current = null;
+          loadData(session.user.id, { retainedState: retained });
           if (pendingStore.current !== syncBase.current) flushSync(session.user.id);
         }
       } else if (event === 'PASSWORD_RECOVERY') {
@@ -2194,6 +2564,14 @@ function App() {
         setPhase('invite');
       } else if (event === 'SIGNED_OUT') {
         onboardingChecked.current = false;
+        // Do this before clearing the refs so a late A-sync cannot serialize
+        // its baseline into the next account's local cache.
+        syncGeneration.current += 1;
+        const signedOutUid = userIdRef.current;
+        reauthPending.current = LB.retainedStateAfterSignedOut(
+          reauthPending.current, signedOutUid, pendingStore.current, syncBase.current,
+        );
+        userIdRef.current = null;
         unitPicked.current = false;
         recoveryInProgress.current = false;
         // Only a deliberate LB.signOut() (Settings → Sign out / Delete all
@@ -2213,18 +2591,47 @@ function App() {
         const armed = !!armedAt && (Date.now() - armedAt) < INTENTIONAL_SIGNOUT_TTL_MS;
         intentionalSignOut.current = null;
         if (!armed) {
+          const alreadyRequiresLogin = authStatusRef.current === 'reauth-required';
           setAuthState('reauth-required');
           setSyncStatus('error');
+          // recoverAuthSessionDetailed may have already classified the token
+          // as permanent. A later SDK SIGNED_OUT event must not re-arm the
+          // recovery loop after the app has deliberately returned to Login.
+          if (alreadyRequiresLogin) {
+            setUserId(null);
+            setPhase('unauthed');
+            return;
+          }
           const offlineUser = LB.getOfflineUser();
           const recovery = LB.getAuthRecoveryState();
-          if (phaseRef.current === 'ready') return;
+          // An app that is already 'ready' must not be torn down here:
+          // enterOfflineCache re-enters the boot and would throw away the
+          // screen (and any running session) the user is looking at. But
+          // returning outright stranded it instead. userIdRef was already
+          // null, so scheduleLocalSave and persistLocalNow stopped writing
+          // every later edit, and both flushSync and probeSyncConnection bail
+          // out unless authStatus is 'online', which left the red retry dot a
+          // silent no-op with no other way back. Restore the ref and hand over
+          // to the 'recovering' loop above, which refreshes the JWT and
+          // flushes the pending diff once the session is valid again. Writes
+          // stay blocked meanwhile: the generation bumped above invalidates
+          // any in-flight sync, and 'recovering' is not 'online'.
+          if (phaseRef.current === 'ready') {
+            const resumeUid = signedOutUid || offlineUser?.userId || null;
+            if (resumeUid) {
+              userIdRef.current = resumeUid;
+              setAuthState('recovering');
+            }
+            return;
+          }
           if (offlineUser && recovery) enterOfflineCache(offlineUser.userId);
           else setPhase('error');
           return;
         }
         LB.clearOfflineUser();
         LB.clearAuthRecovery();
-        LB.clearLocal(userIdRef.current);
+        reauthPending.current = null;
+        LB.clearLocal(signedOutUid);
         clearTimeout(retryTimer.current);
         setStore(null);
         setUserId(null);
@@ -2440,11 +2847,15 @@ function App() {
         coachingPending = false;
         try {
           const coaching = await LB.reloadCoachingState(userId);
-          if (!disposed) setStore(s => s ? { ...s, coaching: {
-            ...coaching,
-            anyClientLive: s.coaching?.anyClientLive,
-            pendingCheckinsCount: s.coaching?.pendingCheckinsCount,
-          } } : s);
+          if (!disposed) {
+            const stillCoaching = (coaching.asCoach || []).some(c => c.status === 'active');
+            setStore(s => s ? { ...s, coaching: {
+              ...coaching,
+              anyClientLive: stillCoaching ? !!s.coaching?.anyClientLive : false,
+              pendingCheckinsCount: stillCoaching ? (s.coaching?.pendingCheckinsCount || 0) : 0,
+            } } : s);
+            if (stillCoaching) triggerPoll();
+          }
         } catch (_) {}
       } while (!disposed && coachingPending);
       coachingInFlight = false;
@@ -2883,7 +3294,12 @@ function App() {
   useEffectA(() => {
     const onOffline = () => setSyncStatus('error');
     const onOnline  = async () => {
-      const session = await LB.recoverAuthSession();
+      const recovery = await LB.recoverAuthSessionDetailed();
+      if (recovery.permanent) {
+        requireReauthentication();
+        return;
+      }
+      const session = recovery.session;
       const uid = session?.user?.id || userIdRef.current;
       if (!session && authStatusRef.current !== 'online') {
         setAuthState('recovering');
@@ -2904,7 +3320,7 @@ function App() {
       window.removeEventListener('offline', onOffline);
       window.removeEventListener('online',  onOnline);
     };
-  }, [userId, flushSync, probeSyncConnection]);
+  }, [userId, flushSync, probeSyncConnection, requireReauthentication]);
 
   // Keep nextReminderAt in sync whenever reminder settings or schedule state changes.
   useEffectA(() => {
@@ -2941,10 +3357,23 @@ function App() {
   // interval is only the fallback for a dropped/reconnecting channel, so it
   // can be slow, it's a safety net.
   const isCoachActive = phase === 'ready' && (store?.coaching?.asCoach || []).some(c => c.status === 'active');
+  const coachStatusSignature = (store?.coaching?.asCoach || [])
+    .map(c => `${c.id}:${c.status}:${c.checkinEnabled !== false}`)
+    .sort()
+    .join('|');
   const prevAnyLiveRef = useRefA(false);
   const prevPendingRef = useRefA(0);
   useEffectA(() => {
-    if (!isCoachActive) { pollFnRef.current = null; return; }
+    if (!isCoachActive) {
+      pollFnRef.current = null;
+      prevAnyLiveRef.current = false;
+      prevPendingRef.current = 0;
+      setStore(s => {
+        if (!s?.coaching || (!s.coaching.anyClientLive && !(s.coaching.pendingCheckinsCount || 0))) return s;
+        return { ...s, coaching: { ...s.coaching, anyClientLive: false, pendingCheckinsCount: 0 } };
+      });
+      return;
+    }
     const poll = () => {
       Promise.all([LB.loadCoachClientsStatus(), LB.loadCoachCheckinStatus()])
         .then(([statusData, checkinData]) => {
@@ -2969,7 +3398,7 @@ function App() {
     poll();
     const iv = setInterval(poll, 60000);
     return () => { clearInterval(iv); pollFnRef.current = null; };
-  }, [isCoachActive]);
+  }, [isCoachActive, coachStatusSignature]);
 
   // Exposed globally so Settings → How to… can launch any tour.
   // Also clears WhatsNew so it doesn't block the tour overlay (z-index).
@@ -3005,6 +3434,14 @@ function App() {
   const onRetrySync = () => {
     setStorageFull(false);
     const uid = userIdRef.current || userId;
+    // A red dot can also mean the session died, not just that a write failed.
+    // flushSync and probeSyncConnection both return early unless authStatus is
+    // 'online', so routing there would do nothing in exactly the case the user
+    // is trying to fix. Re-entering 'recovering' restarts the refresh loop.
+    if (authStatusRef.current !== 'online') {
+      if (uid) setAuthState('recovering');
+      return;
+    }
     if (pendingStore.current !== syncBase.current) flushSync(uid);
     else probeSyncConnection(uid);
   };
@@ -3015,6 +3452,19 @@ function App() {
   const safeToApplyUpdate = route?.name === 'home'
     && !store?.inProgress
     && !onboardingState
+    && openSheetCount === 0
+    && !textEntryFocused;
+  const safeForLifetimeCongrats = route?.name === 'home'
+    && store?.user?.tier === 'lifetime'
+    && !store?.inProgress
+    && !onboardingState
+    && !whatsNew
+    && !autoCloseNotify
+    && !unitPromptOpen
+    && !xHandlePromptOpen
+    && !pendingShare
+    && !forceShowUpdateBanner
+    && !updateAvailable
     && openSheetCount === 0
     && !textEntryFocused;
 
@@ -3156,7 +3606,7 @@ function App() {
       {autoCloseNotify && <AutoCloseBanner notify={autoCloseNotify} onDismiss={() => setAutoCloseNotify(null)} />}
       {whatsNew && <WhatsNewModal entries={whatsNew} onDismiss={dismissWhatsNew} />}
       {store && <window.Screens.CoachingPendingBanner store={store} setStore={setStore} userId={userId} />}
-      {store && friendsTabEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
+      {store && friendsDataEnabled && route.name !== 'train' && <window.Screens.FriendRequestBanner store={store} setStore={setStore} userId={userId} />}
       {onboardingState?.phase === 'prompt' && (
         <window.Screens.OnboardingPrompt
           onStart={() => setOnboardingState({ phase: 'tour', tourKey: 'createPlan' })}
@@ -3221,6 +3671,9 @@ function App() {
             setPendingShare(null);
           }}
         />
+      )}
+      {lifetimeCongratsPending && safeForLifetimeCongrats && (
+        <LifetimePremiumCongratsModal onDone={dismissLifetimeCongrats} />
       )}
     </>
   );

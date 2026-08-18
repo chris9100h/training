@@ -1368,6 +1368,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   name, setName, selectedTags, setSelectedTags, category, setCategory,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
   bwMode, setBwMode }) {
+  const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -1424,7 +1425,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
 
   let body;
   if (step === 'name') {
-    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus />;
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. BENCH PRESS" autoFocus={!iosChrome} />;
   } else if (step === 'muscle') {
     body = <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
       {MUSCLES.map(m => {
@@ -1473,10 +1474,17 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   const needsNext = step === 'name' || step === 'muscle' || (step === 'logging' && equipment === 'bodyweight' && logMode === 'weight');
   const canNext = step !== 'name' || name.trim();
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  // Keep the iOS Chrome wizard in the app's local viewport. Its shell already
+  // compensates for visualViewport movement, so applying vp.top again causes
+  // the painted dialog and its tap targets to diverge after keyboard dismissal.
+  const overlayStyle = localViewportLayerPosition() === 'absolute'
+    ? { ...overlayBase, position: 'absolute', inset: 0 }
+    : vp
+      ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height }
+      : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
-      <div style={{ width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: iosChrome ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>
@@ -2691,7 +2699,15 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
             </div>
           )}
         </div>
-        {setsPerMuscle.length === 0 ? (
+        {/* Three ways, not two. setsPerMuscle only sums local entries, and a
+            session older than the boot window carries entries: [] until the
+            hydration effect above fetches it. Keyed purely on length, paging
+            back to a cycle beyond that window claimed there were no sessions
+            at all while the fetch was still in flight. Same predicate the
+            effect uses to decide what to fetch. */}
+        {setsPerMuscle.length === 0 && thisPeriodSessions.some(s => s.ended && !(s.entries || []).length && (s.aggExercises || 0) > 0) ? (
+          <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>Loading older sessions…</div>
+        ) : setsPerMuscle.length === 0 ? (
           <div style={{ color: UI.inkFaint, fontSize: 13, fontFamily: UI.fontUi }}>{isCycleMode ? `No sessions in cycle ${selectedCycleNum + 1}.` : 'No sessions this week yet.'}</div>
         ) : setsPerMuscle.map(({ muscle, sets }) => (
           <div key={muscle} style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 10 }}>
@@ -5897,6 +5913,11 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   const bwB = LB.bodyweightForDate(store.dailyLogs, cmp.date);
   const volDelta = volA - volB;
   const volDeltaRounded = Math.round(volDelta);
+  // Cleanup is an intentional rebuild, not a performance comparison. A
+  // normal session may still use cleanup as its baseline, but a cleanup
+  // session itself must never paint its reduced loads as regressions. Deload
+  // remains non-comparative on either side, as before.
+  const comparisonSuppressed = !!(s.isDeload || s.isCleanup || cmp.isDeload);
   const fmtDate = (d, opts) => LB.parseDate(d).toLocaleDateString('en-US', opts || { weekday: 'short', day: 'numeric', month: 'short' });
   // isCardio may be missing on entries loaded from DB (not a DB column), fall
   // back to the exercise's movement_type, matching SessionDetailScreen.
@@ -5985,8 +6006,10 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
           </button>
         </div>
 
-        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
-          {volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume
+        <div className="micro" style={{ textAlign: 'center', marginTop: -8, color: comparisonSuppressed ? UI.inkFaint : volDeltaRounded > 0 ? UI.gold : volDeltaRounded < 0 ? UI.danger : UI.inkFaint }}>
+          {comparisonSuppressed
+            ? 'Comparison not shown for cleanup/deload'
+            : <>{volDeltaRounded > 0 ? '↑' : volDeltaRounded < 0 ? '↓' : '—'} {Math.abs(volDeltaRounded).toLocaleString('en-US')} {UI.unit()} total volume</>}
           {/* Both sides get their own line: an explicit compare is just as often
               "today (post-cleanup) vs a pre-cleanup baseline" as the other way
               round, and only cmp used to be checked here, so that first case
@@ -6026,15 +6049,17 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
               // however: cleanup is the intended last baseline for the rebuild.
               // Deload remains non-comparative on either side.
               const reducedInS = s.isDeload || (s.isCleanup && !s.cleanupOptOuts?.[entry.exId] && LB.cleanupAppliesToExercise(store, entry.exId, s.dayId));
-              const reducedLoad = reducedInS || cmp.isDeload;
+              const reducedLoad = comparisonSuppressed || reducedInS || cmp.isDeload;
               return (
                 <div key={entry.exId + ei}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 8, gap: 10 }}>
                     <span style={{ fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, letterSpacing: '0.05em', color: UI.ink }}>{entry.name}</span>
-                    {cmpEntry ? (
+                    {cmpEntry && !comparisonSuppressed ? (
                       <span className="num" style={{ fontSize: 12, color: entryDeltaRounded > 0 ? UI.gold : entryDeltaRounded < 0 ? UI.danger : UI.inkFaint, flexShrink: 0 }}>
                         {entryDeltaRounded > 0 ? '↑' : entryDeltaRounded < 0 ? '↓' : '—'} {Math.abs(entryDeltaRounded).toLocaleString('en-US')} {UI.unit()}
                       </span>
+                    ) : comparisonSuppressed ? (
+                      <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT COMPARED</span>
                     ) : (
                       <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>NOT LOGGED THEN</span>
                     )}
@@ -6052,8 +6077,8 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
                     // exercise you already had a baseline for) when cmpEntry exists.
                     // If the whole exercise is new (NOT LOGGED THEN), there's nothing
                     // to have improved on, so every set stays neutral instead of "+".
-                    const icon = !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
-                    const iconColor = (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
+                    const icon = comparisonSuppressed ? '—' : !curr ? '−' : !prev ? (cmpEntry ? '+' : '—') : currSkipped && prevDone ? '↓' : curr && !currSkipped && prev?.skipped && !prev?.done ? '↑' : improved ? '↑' : declined ? '↓' : '—';
+                    const iconColor = comparisonSuppressed ? UI.inkFaint : (improved || (!prev && cmpEntry && curr && !curr.skipped) || (curr && !curr.skipped && prev?.skipped)) ? 'var(--accent)'
                       : declined ? UI.danger : UI.inkFaint;
                     const isLastSet = si === maxLen - 1;
                     const currIsTechnique = isTechniqueSet(curr);
@@ -6131,7 +6156,7 @@ function SessionCompareScreen({ store, setStore, go, sessionId, compareId, back 
   );
 }
 
-function ComparisonScreen({ session, onDismiss, go, userName }) {
+function ComparisonScreen({ session, onDismiss, go, userName, back }) {
   const entries     = session.entries || [];
   const lastEntries = session.last_session_entries || [];
   // Label weights in the trainee's own unit (stored numbers aren't converted),
@@ -6145,7 +6170,7 @@ function ComparisonScreen({ session, onDismiss, go, userName }) {
 
   return (
     <Screen scroll={false} style={{ position: 'relative' }}>
-      <TopBar title={userName} onBack={() => go({ name: 'settings' })} />
+      <TopBar title={userName} onBack={() => go(back || { name: 'settings' })} />
       <div style={{ flexShrink: 0, padding: '12px 22px', borderBottom: `var(--hair-width) solid ${UI.hair}` }}>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 2 }}>
           {session.day_name} · COMPLETE
@@ -6352,7 +6377,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
       }
       go(back || { name: 'settings' });
     };
-    return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} />;
+    return <ComparisonScreen session={session} onDismiss={dismiss} go={go} userName={userName} back={back} />;
   }
 
   if (!session) return (
@@ -6388,7 +6413,7 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
         background: 'rgba(var(--bg-rgb),0.9)',
         display: 'flex', alignItems: 'center', gap: 12,
       }}>
-        <button onClick={() => go({ name: 'settings' })} style={{
+        <button onClick={() => go(back || { name: 'settings' })} style={{
           width: 32, height: 32, borderRadius: 4,
           border: `1px solid ${UI.hairStrong}`, background: 'transparent',
           color: UI.gold, cursor: 'pointer', flexShrink: 0,
@@ -6917,7 +6942,11 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
   const yPos = (v) => PAD_T + plotH - ((v - dom.min) / dom.range) * plotH;
 
   const gridVals = Array.from({ length: 4 }, (_, i) => dom.min + (dom.range / 3) * i);
-  const setAlphas = [1, 0.55, 0.35, 0.22, 0.14];
+  // Set 4 and 5 used to sit at 0.22 and 0.14, which on paper and on dark left
+  // them barely distinguishable from the grid. The ramp still falls off
+  // steeply enough that set 1 reads as the primary series, it just no longer
+  // fades the later sets out of visibility.
+  const setAlphas = [1, 0.62, 0.46, 0.34, 0.26];
 
   const labelIdxs = (() => {
     if (n <= 5) return allSessions.map((_, i) => i);
@@ -6996,7 +7025,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
                 .map((sess, xi) => { const v = getValue(sess.sets[si]); return v != null ? { x: xPos(xi), y: yPos(v) } : null; })
                 .filter(Boolean);
               if (!pts.length) return null;
-              const a = setAlphas[si] ?? 0.12;
+              const a = setAlphas[si] ?? 0.24;
               return (
                 <g key={si}>
                   {pts.length > 1 && (
@@ -7025,7 +7054,7 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
             <div style={{ display: 'flex', gap: 12, marginBottom: 20, flexWrap: 'wrap' }}>
               {Array.from({ length: maxSets }, (_, si) => (
                 <div key={si} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.12})` }} />
+                  <div style={{ width: 14, height: 2, borderRadius: 4, background: `rgba(var(--accent-rgb),${setAlphas[si] ?? 0.24})` }} />
                   <span className="micro" style={{ color: UI.inkFaint }}>Set {si + 1}</span>
                 </div>
               ))}

@@ -219,8 +219,15 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
           delete pd.bumpedCycle;
           sch.program_data = pd;
         }
-        setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, sch] }));
-        go({ name: 'plan-view', scheduleId: sch.id, fromPlan: true });
+        // Same self-heal pushToClient and loadFromSupabase already run. An
+        // exported file can carry a versions[] entry from before a
+        // cycle<->weekday switch, whose days no longer match the top-level
+        // mode. Without this the imported plan has days but resolves to zero
+        // for every weekday, so Home shows a rest day until the next online
+        // reload happens to heal it server-side.
+        const healed = LB.healScheduleWeekdays(sch);
+        setStore(s => ({ ...s, exercises: [...s.exercises, ...newExercises], schedules: [...s.schedules, healed] }));
+        go({ name: 'plan-view', scheduleId: healed.id, fromPlan: true });
       } catch (_) { UI.alert('Could not read plan file.'); }
     };
     reader.readAsText(file);
@@ -608,7 +615,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (isWeekday) return displayDays.find(d => d.weekday === todayWeekday)?.id ?? null;
         let pos;
         if (isFlex) {
-          pos = ((store.cycleIndex || 0) % sch.days.length + sch.days.length) % sch.days.length;
+          pos = LB.flexVersionPosition(store, selectedVersion, displayDays.length);
         } else if (versions) {
           pos = LB.getCyclePosForDate(sch, today);
         } else if (store.cycleStartDate) {
@@ -2126,6 +2133,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
     });
   };
   const daysListRef = UI.useDragReorder({ onReorder: reorderDays });
+  // Cycle start / Week plan start used to write straight into the store on
+  // every keystroke. They live on the store, not on the schedule, so `dirty`
+  // (which diffs draft against original) never saw them: Save stayed grey and
+  // Discard could not put the date back, leaving the active plan pointing at a
+  // different training day than before the edit. Held here and applied in
+  // doSave instead, the same deferral the flex anchor already uses.
+  const [startDateDraft, setStartDateDraft] = useStateS(null);
 
   if (!draft) return null;
 
@@ -2165,16 +2179,39 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       const originalDays = original.days;
       // Find the original plan's start date for the snapshot's validFrom
       const isWd = LB.isWeekdayPlan(original);
-      const originalStart = isWd
-        ? (store.weekPlanStartDate || null)
-        : (store.cycleStartDate || null);
+      const originalStart = isFlex
+        ? (store.sessions || [])
+          .filter(s => s.scheduleId === original.id && s.date)
+          .map(s => String(s.date).slice(0, 10))
+          .filter(Boolean)
+          .sort()[0] || null
+        : isWd
+          ? (store.weekPlanStartDate || null)
+          : (store.cycleStartDate || null);
       const existingVersions = original.versions || [];
       const newVersionEntry = { validFrom: effectiveFrom, days: draft.days };
-      if (startDayIdx && startDayIdx > 0) newVersionEntry.cycleOffset = startDayIdx;
+      if (isFlex) {
+        // Flex rotation is driven by cycleIndex, not by calendar date. Store
+        // the selected start day relative to the current position so a
+        // version scheduled for today or a future date can both resume at the
+        // requested day without resetting the user's cycle count.
+        const len = Math.max(1, draft.days.length);
+        const requested = Number.isFinite(Number(startDayIdx)) ? Math.floor(Number(startDayIdx)) : 0;
+        newVersionEntry.flexCycleAnchor = Math.max(0, Math.floor(Number(store.cycleIndex) || 0));
+        newVersionEntry.flexStartIndex = ((requested % len) + len) % len;
+      } else if (startDayIdx && startDayIdx > 0) {
+        newVersionEntry.cycleOffset = startDayIdx;
+      }
       let versions;
       if (existingVersions.length === 0) {
         // First versioned change, anchor the original plan
-        const anchorDate = originalStart || LB.todayISO();
+        // The old snapshot must be strictly before the new effective date.
+        // Flex plans intentionally have no cycleStartDate, so using today here
+        // produced two same-date entries; dedupe then removed the old version
+        // and the plan stayed at V1.
+        const anchorDate = originalStart && originalStart < effectiveFrom
+          ? originalStart
+          : LB.shiftDate(effectiveFrom, -1);
         versions = [newVersionEntry, { validFrom: anchorDate, days: originalDays }];
       } else {
         // Already versioned, prepend new version, keep rest
@@ -2231,6 +2268,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
       const turnedOn = LB.isFlexPlan(draft);
       setStore(s => ({ ...s, cycleStartDate: turnedOn ? null : LB.todayISO() }));
     }
+    // Commit the deferred start date. After the flex block on purpose: turning
+    // flex on clears cycleStartDate, and a stale draft date must not undo that.
+    if (isActive && startDateDraft && !LB.isFlexPlan(draft)) {
+      const key = isWeekday ? 'weekPlanStartDate' : 'cycleStartDate';
+      setStore(s => ({ ...s, [key]: startDateDraft }));
+    }
+    setStartDateDraft(null);
 
     const asClient = store.coaching?.asClient;
     if (store.activeScheduleId === draft.id && asClient?.status === 'active') {
@@ -2342,7 +2386,13 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
   const dirtyBaseline = (editVerIdx > 0 && original?.versions?.[editVerIdx])
     ? { ...original, days: original.versions[editVerIdx].days || [] }
     : original;
-  const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline);
+  const committedStartDate = (isWeekday ? store.weekPlanStartDate : store.cycleStartDate) || '';
+  const effectiveStartDate = startDateDraft ?? committedStartDate;
+  // Historical version editing replaces only that version's days. A global
+  // active-plan anchor is unrelated and doSaveVersion intentionally cannot
+  // commit it, so it must neither make this screen dirty nor be editable here.
+  const startDateDirty = editVerIdx <= 0 && startDateDraft != null && startDateDraft !== committedStartDate;
+  const dirty = JSON.stringify(draft) !== JSON.stringify(dirtyBaseline) || startDateDirty;
   const dateInputStyle = {
     background: UI.bgInset, border: 'none',
     borderRadius: 4, padding: '10px 14px', color: UI.ink,
@@ -2516,28 +2566,28 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           );
         })()}
 
-        {isActive && !isWeekday && !isFlex && (
+        {editVerIdx <= 0 && isActive && !isWeekday && !isFlex && (
           <Field label="Cycle start date (Day 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
-              <input type="date" value={store.cycleStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, cycleStartDate: e.target.value })); }}
+              <input type="date" value={effectiveStartDate}
+                onChange={e => { if (e.target.value) setStartDateDraft(e.target.value); }}
                 style={dateInputStyle} />
             </div>
-            {store.cycleStartDate && draft.days.length > 0 && (() => {
-              const idx = LB.cyclePosFromStartDate(store.cycleStartDate, draft.days.length, LB.todayISO());
+            {effectiveStartDate && draft.days.length > 0 && (() => {
+              const idx = LB.cyclePosFromStartDate(effectiveStartDate, draft.days.length, LB.todayISO());
               return <div className="micro" style={{ marginTop: 8 }}>Today = Day {idx + 1} of {draft.days.length}</div>;
             })()}
           </Field>
         )}
-        {isActive && isWeekday && (
+        {editVerIdx <= 0 && isActive && isWeekday && (
           <Field label="Week plan start date (Week 1)">
             <div style={{ overflow: 'hidden', borderRadius: 4, width: '100%', border: `1px solid ${UI.hairStrong}` }}>
-              <input type="date" value={store.weekPlanStartDate || ''}
-                onChange={e => { if (e.target.value) setStore(s => ({ ...s, weekPlanStartDate: e.target.value })); }}
+              <input type="date" value={effectiveStartDate}
+                onChange={e => { if (e.target.value) setStartDateDraft(e.target.value); }}
                 style={dateInputStyle} />
             </div>
-            {store.weekPlanStartDate && (() => {
-              const start = LB.parseDate(store.weekPlanStartDate);
+            {effectiveStartDate && (() => {
+              const start = LB.parseDate(effectiveStartDate);
               const today = new Date(); today.setHours(12, 0, 0, 0);
               const weekNum = Math.floor(Math.round((today - start) / 86400000) / 7) + 1;
               return <div className="micro" style={{ marginTop: 8 }}>Today = Week {weekNum}</div>;
@@ -2722,7 +2772,14 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
           currentDayId={null}
           multiSelect={false}
           onClose={() => setImportDayOpen(false)}
-          onCopy={(sourceDay, migrateId) => {
+          onCopy={async (sourceDay, migrateId) => {
+            // Same 5/3/1 gate the day editor and the wizard already apply:
+            // max, percentage sets and the AMRAP top set do not travel, the
+            // lift quietly becomes an ordinary exercise on Smart Progression.
+            // This path and the cycle Add-Day path below were the two that
+            // imported main lifts with no warning at all.
+            const srcPlan = (store.schedules || []).find(sc => (sc.days || []).some(d => d.id === sourceDay.id));
+            if (!await confirm531LiftImport(confirm, srcPlan, sourceDay.items, LB.is531Plan(draft))) return;
             // Deep-copy items + remap superset group ids so the new day never
             // shares objects / group ids with the source day.
             const gidMap = {};
@@ -3120,13 +3177,23 @@ function ScheduleEditScreen({ store, setStore, go, userId, scheduleId, versionFr
                           </div>
                         )}
                       </div>
+                      {/* Confirmed rather than deferred into the draft: meso state
+                          is its own table, not part of the plan, so Save/Discard
+                          never governed it and moving it into the draft would be a
+                          lie in the other direction. What was missing is that this
+                          is immediate and permanent: one stray tap wiped the
+                          completed-block history and Discard could not bring it
+                          back. */}
                       {mesoCompletions > 0 && (
-                        <button onClick={() => setStore(s => ({
-                          ...s,
-                          mesoStates: (s.mesoStates || []).map(m =>
-                            m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
-                          ),
-                        }))} style={{
+                        <button onClick={async () => {
+                          if (!await confirm(`Reset this plan's mesocycle history? ${mesoCompletions} completed block${mesoCompletions === 1 ? '' : 's'} will be cleared. This applies immediately and is not undone by discarding your plan edits.`, { title: 'Reset meso history', ok: 'Reset', cancel: 'Cancel', danger: true })) return;
+                          setStore(s => ({
+                            ...s,
+                            mesoStates: (s.mesoStates || []).map(m =>
+                              m.scheduleId === draft.id ? { ...m, completions: 0, updatedAt: new Date().toISOString() } : m
+                            ),
+                          }));
+                        }} style={{
                           marginTop: 10, width: '100%', background: 'transparent',
                           border: `1px solid ${UI.hairStrong}`, borderRadius: 4,
                           padding: '7px 12px', cursor: 'pointer', fontFamily: UI.fontUi,
@@ -3286,7 +3353,20 @@ function DayTypePicker({ store, setStore, title, onClose, onPick, onImport, hide
           schedule={schedule}
           currentDayId={null}
           onClose={() => setImportOpen(false)}
-          onCopy={(selections) => {
+          onCopy={async (selections) => {
+            // Ask once per distinct source plan rather than per day: a
+            // multi-select import usually pulls several days out of the same
+            // 5/3/1 plan, and one dialog per day would be noise.
+            const seen = new Set();
+            for (const { day } of selections) {
+              const srcPlan = (store.schedules || []).find(sc => (sc.days || []).some(d => d.id === day.id));
+              if (!srcPlan || seen.has(srcPlan.id)) continue;
+              seen.add(srcPlan.id);
+              const planItems = selections
+                .filter(sel => (srcPlan.days || []).some(d => d.id === sel.day.id))
+                .flatMap(sel => sel.day.items || []);
+              if (!await confirm531LiftImport(confirm, srcPlan, planItems, LB.is531Plan(schedule))) return;
+            }
             selections.forEach(({ day, migrateId }) => onImport(day, migrateId));
             setImportOpen(false);
           }}
@@ -4368,6 +4448,7 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 }
 
 function PlanWizard({ store, setStore, go }) {
+  const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
   // zIndex 9999: +1 over this wizard's own overlay (9998, see overlayBase
@@ -4543,7 +4624,10 @@ function PlanWizard({ store, setStore, go }) {
 
   let body;
   if (step === 'name') {
-    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus />;
+    // Avoid opening the native keyboard during the first paint on Chrome iOS.
+    // Its initial visual-viewport resize can leave the browser's hit-test
+    // origin stale; the user can still tap the field normally when ready.
+    body = <TextInput value={name} onChange={v => setName(v.toUpperCase())} placeholder="e.g. YEEZUSCREW" autoFocus={!iosChrome} />;
   } else if (step === 'type') {
     body = <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {[['cycle', 'Cycle', 'fa-repeat', 'A repeating rotation (Day 1, 2, 3...). Advances by date, rest days included.'],
@@ -4838,11 +4922,18 @@ function PlanWizard({ store, setStore, go }) {
     </>
   );
   const overlayBase = { zIndex: 9998, background: 'rgba(0,0,0,0.74)', backdropFilter: 'blur(14px)', WebkitBackdropFilter: 'blur(14px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24 };
-  const overlayStyle = vp ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height } : { ...overlayBase, position: 'fixed', inset: 0 };
+  // Chrome on iOS already gets a local, viewport-sized containing block from
+  // the app shell. Applying the visualViewport offset a second time here
+  // moves the dialog away from its hit targets after the keyboard closes.
+  const overlayStyle = localViewportLayerPosition() === 'absolute'
+    ? { ...overlayBase, position: 'absolute', inset: 0 }
+    : vp
+      ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height }
+      : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
     <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: iosChrome ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>

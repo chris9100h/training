@@ -10,6 +10,7 @@ const assert = require('assert');
 let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
 let testSession = null; // swapped per test to give fnFetch a bearer token to send
+let testRefreshSession = async () => ({ data: { session: null }, error: null });
 let testClientOptions = null;
 let testRpc = async () => ({ data: null, error: null });
 const rpcLog = []; // records every rpc(name, args) call
@@ -27,6 +28,7 @@ function loadStore() {
     auth: {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
       getSession: async () => ({ data: { session: testSession } }),
+      refreshSession: (...args) => testRefreshSession(...args),
     },
     from: (...args) => testFrom(...args),
     rpc: async (name, args) => { rpcLog.push({ name, args }); return testRpc(name, args); },
@@ -81,6 +83,101 @@ async function testAsync(name, fn) {
 
 (async () => {
   const LB = loadStore();
+
+  test('auth recovery classifies permanent refresh failures without misclassifying pressure', () => {
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ status: 400 }), true);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ statusCode: 401 }), true);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ status: 403 }), true);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ code: 'refresh_token_not_found' }), true);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ status: 429 }), false);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ status: 503 }), false);
+    assert.strictEqual(LB.authRecoveryTest.isPermanentRefreshError({ status: 401, __zaneAuthTransient: true }), false);
+  });
+
+  await testAsync('detailed auth recovery stops on a rejected refresh token and keeps transient failures retryable', async () => {
+    LB.authRecoveryTest.mark('before-permanent-test');
+    testRefreshSession = async () => ({ data: { session: null }, error: { status: 401, code: 'invalid_refresh_token' } });
+    const permanent = await LB.recoverAuthSessionDetailed();
+    assert.strictEqual(permanent.session, null);
+    assert.strictEqual(permanent.permanent, true);
+    assert.strictEqual(LB.authRecoveryTest.state(), null, 'permanent rejection clears the recovery lease');
+
+    testRefreshSession = async () => ({ data: { session: null }, error: { status: 503 } });
+    const transient = await LB.recoverAuthSessionDetailed();
+    assert.strictEqual(transient.session, null);
+    assert.strictEqual(transient.permanent, false);
+    testRefreshSession = async () => ({ data: { session: null }, error: null });
+  });
+
+  test('manual water reconciliation replaces one day only and keeps equal totals untouched', () => {
+    const rows = [
+      { id: 'a', date: '2026-08-17', amountMl: 500 },
+      { id: 'b', date: '2026-08-17', amountMl: 250 },
+      { id: 'other', date: '2026-08-16', amountMl: 900 },
+    ];
+    assert.strictEqual(LB.reconcileManualWaterLogs(rows, '2026-08-17', 750), rows);
+    const changed = LB.reconcileManualWaterLogs(rows, '2026-08-17', 1000);
+    assert.strictEqual(changed.filter(row => row.date === '2026-08-17').length, 1);
+    assert.strictEqual(changed[0].amountMl, 1000);
+    assert.strictEqual(changed[0].name, 'Manual total');
+    assert.strictEqual(changed.some(row => row.id === 'other'), true);
+    const cleared = LB.reconcileManualWaterLogs(rows, '2026-08-17', null);
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(cleared)), [rows[2]]);
+  });
+
+  test('manual water normalization keeps decimals and rejects zero/negative values', () => {
+    assert.strictEqual(LB.positiveNumberOrNull(12.5), 12.5);
+    assert.strictEqual(LB.positiveNumberOrNull(0), null);
+    assert.strictEqual(LB.positiveNumberOrNull(-20), null);
+    assert.strictEqual(LB.positiveNumberOrNull(Number.NaN), null);
+  });
+
+  test('reauth memory fallback is scoped to the same account only', () => {
+    const retained = { uid: 'u1', store: { sessions: [{ id: 'pending' }] }, base: { sessions: [] } };
+    assert.strictEqual(LB.retainedStateForUser(retained, 'u1'), retained);
+    assert.strictEqual(LB.retainedStateForUser(retained, 'u2'), null);
+    assert.strictEqual(LB.retainedStateForUser(null, 'u1'), null);
+    const liveStore = { sessions: [{ id: 'newest-memory-edit' }] };
+    const liveBase = { sessions: [{ id: 'server-base' }] };
+    const transient = LB.retainedStateForUser(retained, 'u1', 'u1', liveStore, liveBase);
+    assert.strictEqual(transient.store, liveStore, 'same-user transient recovery must prefer memory over stale disk/fallback');
+    assert.strictEqual(transient.base, liveBase);
+    assert.strictEqual(
+      LB.retainedStateForUser(retained, 'u2', 'u1', liveStore, liveBase),
+      null,
+      'a live snapshot must never cross accounts',
+    );
+  });
+
+  test('delayed signed-out cannot erase a permanent reauth memory fallback', () => {
+    const retained = { uid: 'u1', store: { sessions: [{ id: 'unsaved-set' }] }, base: { sessions: [] } };
+    assert.strictEqual(
+      LB.retainedStateAfterSignedOut(retained, null, { sessions: [] }, { sessions: [] }),
+      retained,
+      'the fallback must survive after requireReauthentication already cleared the current uid',
+    );
+    const liveStore = { sessions: [{ id: 'newer-edit' }] };
+    const refreshed = LB.retainedStateAfterSignedOut(retained, 'u1', liveStore, retained.base);
+    assert.strictEqual(refreshed.store, liveStore);
+    assert.strictEqual(LB.retainedStateAfterSignedOut(retained, 'u2', liveStore, retained.base).uid, 'u2');
+  });
+
+  test('social push outbox only drops success and structurally invalid payloads', () => {
+    assert.strictEqual(LB.socialNotifyResponseIsTerminal({ ok: true, status: 200 }), true);
+    assert.strictEqual(LB.socialNotifyResponseIsTerminal({ ok: false, status: 400 }), true);
+    for (const status of [401, 403, 404, 409, 429, 500, 503]) {
+      assert.strictEqual(LB.socialNotifyResponseIsTerminal({ ok: false, status }), false, `${status} must remain queued`);
+    }
+  });
+
+  test('historical closed food edits rescore against the frozen target', () => {
+    const closed = { foodDayClosed: true, mealOfChoice: false, targetsSnap: { protein: 200, carbs: 300, fat: 80, dayType: 'training' } };
+    const patch = LB.historicalClosedFoodDayPatch(closed, { protein: 200, carbs: 270, fat: 80 }, true);
+    assert.strictEqual(patch.adherence, LB.macroAdherence({ protein: 200, carbs: 270, fat: 80 }, closed.targetsSnap));
+    assert.strictEqual(patch.targetsSnap, closed.targetsSnap);
+    assert.strictEqual(LB.historicalClosedFoodDayPatch({ ...closed, mealOfChoice: true }, { protein: 1, carbs: 1, fat: 1 }, true).adherence, null);
+    assert.strictEqual(Object.keys(LB.historicalClosedFoodDayPatch({ foodDayClosed: false }, {}, true)).length, 0);
+  });
 
   await testAsync('runtime config exposes global Social and Coaching transports in both directions', async () => {
     testRpc = async name => {
@@ -1249,6 +1346,16 @@ async function testAsync(name, fn) {
     assert.strictEqual(sessions[0].entries, cachedEntries, 'windowing must not wipe history already on the device');
     assert.strictEqual(sessions[0].aggVolume, 640, 'fresh aggregates still attached');
   });
+  test('mergeSessions preserves cached aggregates only when the stats RPC failed', () => {
+    const fresh = [{ id: 'old-stats', date: '2025-01-01', ended: 'x', entries: [] }];
+    const cur = [{ id: 'old-stats', date: '2025-01-01', ended: 'x', entries: [], aggVolume: 900, aggDoneSets: 8, aggExercises: 3 }];
+    const failed = LB.mergeSessions(fresh, cur, null, cur, now, { preserveCachedAggregates: true }).sessions[0];
+    assert.strictEqual(failed.aggVolume, 900);
+    assert.strictEqual(failed.aggDoneSets, 8);
+    assert.strictEqual(failed.aggExercises, 3);
+    const successfulEmpty = LB.mergeSessions(fresh, cur, null, cur, now).sessions[0];
+    assert.strictEqual(successfulEmpty.aggVolume, undefined, 'a successful empty aggregate result remains authoritative');
+  });
   test('mergeSessions keeps LOCAL entries authoritative for the active session', () => {
     const localEntries = [{ exId: 'e1', sets: [{ kg: 100, reps: 5, done: true }] }];
     const fresh = [{ id: 'act', date: '2026-06-10', ended: null, entries: [{ exId: 'e1', sets: [] }] }];
@@ -1543,6 +1650,59 @@ async function testAsync(name, fn) {
     assert.ok(call, 'sync_sets_batch must be called for the surviving edit');
     assert.strictEqual(call.args.p_sets.length, 1, 'only the edited set is re-written, not the whole session');
     assert.strictEqual(call.args.p_sets[0].kg, 100, 'the edited value is what gets pushed');
+  });
+
+  await testAsync('lazy server-confirmed session hydration stays read-only until a real set edit', async () => {
+    rpcLog.length = 0;
+    testFrom = () => builder({ data: null, error: null });
+    const metadata = {
+      id: 'lazy-confirmed-session', scheduleId: 'sch', dayId: 'day', dayName: 'PUSH',
+      date: '2025-01-01', startedAt: '2025-01-01T09:00:00Z', ended: '2025-01-01T10:00:00Z',
+    };
+    const entries = [{ exId: 'e1', name: 'Press', sets: [{ kg: 80, reps: 8, done: true }] }];
+    const previous = { ...baseStore(), sessions: [{ ...metadata, entries: [] }] };
+    const hydrated = { ...baseStore(), sessions: [{ ...metadata, entries }] };
+    LB.markLocalRowsConfirmed('sessions', hydrated.sessions);
+    await LB.syncStore(previous, hydrated, 'u1');
+    assert.strictEqual(rpcLog.some(call => call.name === 'sync_sets_batch'), false, 'the fetch itself must not rewrite sets');
+
+    rpcLog.length = 0;
+    const edited = {
+      ...baseStore(),
+      sessions: [{ ...metadata, entries: [{ ...entries[0], sets: [{ ...entries[0].sets[0], kg: 82.5 }] }] }],
+    };
+    await LB.syncStore(hydrated, edited, 'u1');
+    const call = rpcLog.find(item => item.name === 'sync_sets_batch');
+    assert.ok(call, 'a later real edit must still sync');
+    assert.strictEqual(call.args.p_sets[0].kg, 82.5);
+  });
+
+  await testAsync('cache-only session aggregates never create database writes', async () => {
+    let sessionWrites = 0;
+    testFrom = table => {
+      const b = {
+        upsert: rows => {
+          if (table === 'zane_sessions') sessionWrites += rows.length;
+          return Promise.resolve({ data: null, error: null });
+        },
+        insert: () => Promise.resolve({ data: null, error: null }),
+        delete() { return b; },
+        in: () => Promise.resolve({ data: null, error: null }),
+        eq: () => Promise.resolve({ data: null, error: null }),
+      };
+      return b;
+    };
+    const metadata = {
+      id: 'stats-only-session', scheduleId: 'sch', dayId: 'day', dayName: 'PUSH',
+      date: '2025-01-01', startedAt: '2025-01-01T09:00:00Z', ended: '2025-01-01T10:00:00Z', entries: [],
+    };
+    const previous = { ...baseStore(), sessions: [metadata] };
+    const preserved = {
+      ...baseStore(),
+      sessions: [{ ...metadata, aggVolume: 900, aggDoneSets: 8, aggExercises: 3 }],
+    };
+    await LB.syncStore(previous, preserved, 'u1');
+    assert.strictEqual(sessionWrites, 0, 'read-only cached aggregates must not amplify a stats outage with writes');
   });
 
   // ── resolveInProgressId: boot-merge in-progress-session pointer ──────────
@@ -2079,6 +2239,67 @@ async function testAsync(name, fn) {
     assert.strictEqual(row.targetsSnapshot.caloriesTraining, 2200);
   });
 
+  test('adaptiveTdeeHistoryRow: preserves a kept-without-apply decision', () => {
+    const days = [];
+    for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
+    days[0].weight = 80;
+    days[13].weight = 79;
+    const row = LB.adaptiveTdeeHistoryRow({ dailyLogs: days }, 'user-1', '2025-01-14', {
+      decision: 'kept',
+      source: 'live',
+      targetsSnapshot: { caloriesTraining: 2200, weeklyAverageCalories: 2086 },
+    });
+    assert.ok(row);
+    assert.strictEqual(row.decision, 'kept');
+    assert.strictEqual(row.targetsSnapshot.weeklyAverageCalories, 2086);
+  });
+
+  test('canUndoMacroApply: allows undo only while the applied targets are still active', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedTargets: applied,
+      lastApplyPreviousTargets: previous,
+      lastApplyRolledBackAt: null,
+    } };
+    assert.strictEqual(LB.canUndoMacroApply(settings), true);
+    assert.strictEqual(LB.canUndoMacroApply({ ...settings, macroTargets: { ...applied, carbsTraining: 251 } }), false);
+    assert.strictEqual(LB.canUndoMacroApply({ ...settings, macroCalc: { ...settings.macroCalc, lastApplyRolledBackAt: '2025-01-15T12:00:00.000Z' } }), false);
+  });
+
+  test('rollbackMacroApply: restores the previous snapshot and is one-shot', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedAt: '2025-01-14', lastAppliedTargets: applied,
+      lastApplyPreviousTargets: previous, lastApplyRolledBackAt: null,
+    } };
+    const rolledBack = LB.rollbackMacroApply(settings, '2025-01-15T12:00:00.000Z');
+    assert.deepStrictEqual(rolledBack.macroTargets, previous);
+    assert.strictEqual(rolledBack.macroCalc.lastAppliedTargets, applied);
+    assert.strictEqual(rolledBack.macroCalc.lastApplyRolledBackAt, '2025-01-15T12:00:00.000Z');
+    assert.strictEqual(LB.rollbackMacroApply(rolledBack, '2025-01-16T12:00:00.000Z'), rolledBack);
+    assert.strictEqual(settings.macroTargets, applied);
+  });
+
+  test('macroApplyRollbackInfo: recovers a legacy apply from the prior history snapshot', () => {
+    const previous = { proteinTraining: 150, carbsTraining: 220, fatTraining: 60, caloriesTraining: 2260, proteinRest: 150, carbsRest: 180, fatRest: 60, caloriesRest: 2100 };
+    const applied = { proteinTraining: 160, carbsTraining: 250, fatTraining: 55, caloriesTraining: 2260, proteinRest: 160, carbsRest: 190, fatRest: 55, caloriesRest: 2100 };
+    const settings = { macroTargets: applied, macroCalc: {
+      lastAppliedAt: '2025-01-14', lastAppliedTargets: applied,
+    } };
+    const history = [{ asOfDate: '2025-01-07', decision: 'applied', targetsSnapshot: { ...previous, weeklyAverageCalories: 2200 } }];
+    const info = LB.macroApplyRollbackInfo(settings, history);
+    assert.strictEqual(info.available, true);
+    assert.strictEqual(info.source, 'history');
+    assert.strictEqual(info.previousDate, '2025-01-07');
+    assert.strictEqual(JSON.stringify(info.previousTargets), JSON.stringify(previous));
+    const rolledBack = LB.rollbackMacroApply(settings, history, '2025-01-15T12:00:00.000Z');
+    assert.strictEqual(JSON.stringify(rolledBack.macroTargets), JSON.stringify(previous));
+    assert.strictEqual(JSON.stringify(rolledBack.macroCalc.lastApplyPreviousTargets), JSON.stringify(previous));
+    assert.strictEqual(rolledBack.macroCalc.lastApplyRolledBackAt, '2025-01-15T12:00:00.000Z');
+  });
+
   test('reconstructAdaptiveTdeeHistory: uses only reliable macroCalc anchors', () => {
     const days = [];
     for (let d = 1; d <= 14; d++) days.push({ date: `2025-01-${String(d).padStart(2, '0')}`, calories: 2000 });
@@ -2611,6 +2832,40 @@ async function testAsync(name, fn) {
   test('nextDay on a flex plan is the following day in the rotation', () => {
     assert.strictEqual(LB.nextDay(flexState(0)).day.id, 'd1');
     assert.strictEqual(LB.nextDay(flexState(2)).day.id, 'd0'); // wraps
+  });
+
+  test('versioned flex plans use the active version and its selected start day', () => {
+    const today = LB.todayISO();
+    const yesterday = LB.shiftDate(today, -1);
+    const versioned = {
+      ...flexSch,
+      days: [
+        { id: 'n0', name: 'PUSH', items: [{ exId: 'e1' }] },
+        { id: 'n1', name: 'PULL', items: [{ exId: 'e2' }] },
+        { id: 'n2', name: 'LEGS', items: [{ exId: 'e3' }] },
+        { id: 'n3', name: 'FULL', items: [{ exId: 'e4' }] },
+      ],
+      versions: [
+        { validFrom: today, days: [
+          { id: 'n0', name: 'PUSH', items: [{ exId: 'e1' }] },
+          { id: 'n1', name: 'PULL', items: [{ exId: 'e2' }] },
+          { id: 'n2', name: 'LEGS', items: [{ exId: 'e3' }] },
+          { id: 'n3', name: 'FULL', items: [{ exId: 'e4' }] },
+        ], flexCycleAnchor: 0, flexStartIndex: 2 },
+        { validFrom: yesterday, days: flexSch.days },
+      ],
+    };
+    const state = { activeScheduleId: 'fx', cycleIndex: 0, cycleStartDate: null, schedules: [versioned] };
+    assert.strictEqual(LB.todaysDay(state).day.id, 'n2');
+    assert.strictEqual(LB.todaysDay({ ...state, cycleIndex: 1 }).day.id, 'n3');
+    assert.strictEqual(LB.todaysDay({ ...state, cycleIndex: 2 }).day.id, 'n0');
+    assert.strictEqual(LB.nextDay(state).day.id, 'n3');
+  });
+
+  test('flex version position falls back to the legacy cycleOffset field', () => {
+    const state = { cycleIndex: 0 };
+    assert.strictEqual(LB.flexVersionPosition(state, { cycleOffset: 2 }, 3), 2);
+    assert.strictEqual(LB.flexVersionPosition({ cycleIndex: 1 }, { cycleOffset: 2 }, 3), 0);
   });
 
   // ── weekPerformanceSignal ────────────────────────────────────────────────
@@ -3874,6 +4129,12 @@ async function testAsync(name, fn) {
   test('mergeWindowedCollectionById does not resurrect a recent server deletion', () => {
     const recent = { id: 'recent-food', date: LB.todayISO(), calories: 100 };
     const out = LB.mergeWindowedCollectionById([], [recent], [recent], new Set(['recent-food']), 'foodLogs');
+    assert.deepStrictEqual(out, []);
+  });
+
+  test('mergeWindowedCollectionById keeps a direct health delete out of a racing boot response', () => {
+    const deleted = { id: 'bp-deleted', date: LB.todayISO(), systolic: 120, diastolic: 80 };
+    const out = LB.mergeWindowedCollectionById([deleted], [], [deleted], new Set(['bp-deleted']), 'bloodPressureLogs');
     assert.deepStrictEqual(out, []);
   });
 

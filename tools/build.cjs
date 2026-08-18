@@ -9,7 +9,7 @@ const root = path.resolve(__dirname, '..');
 const dist = path.join(root, 'dist');
 const staticFiles = [
   'index.html', 'sw.js', 'manifest.json', '.nojekyll',
-  'welcome.html', 'features.html', 'autoreg.html', 'CNAME',
+  'welcome.html', 'cloud.html', 'cloud.js', 'features.html', 'autoreg.html', 'privacy.html', 'privacy.js', 'CNAME',
 ];
 const staticDirectories = ['src', 'icons', 'Background', 'screenshots'];
 const plainScripts = [
@@ -157,6 +157,8 @@ function patchServiceWorker(bundlePaths) {
     '/icons/icon-192.png',
     '/icons/icon-512.png',
     '/icons/icon-180.png',
+    '/icons/zane-logo.png',
+    '/icons/zane-logo-2.png',
   ];
   const body = assets.map(rel => `  BASE + '${rel}',`).join('\n');
   const assetBlock = /const ASSETS = \[[\s\S]*?\];/;

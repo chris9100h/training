@@ -1286,7 +1286,18 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
                     </div>
                   ) : <>
                     {message.body !== '[image]' && <div style={{ whiteSpace: 'pre-wrap', overflowWrap: 'anywhere' }}>{message.body}</div>}
-                    {message.attachments?.map(attachment => attachment.url ? <img key={attachment.id} src={attachment.url} alt={attachment.fileName || 'Attachment'} style={{ display: 'block', maxWidth: 190, maxHeight: 190, borderRadius: 4, marginTop: message.body !== '[image]' ? 6 : 0, objectFit: 'cover' }} /> : <span key={attachment.id}>Image</span>)}
+                    {message.attachments?.map(attachment => attachment.url ? <img key={attachment.id} src={attachment.url} alt={attachment.fileName || 'Attachment'}
+                      /* The signed URL expires after five minutes and a thread
+                         left open never re-signs, so a remount or a cache miss
+                         past that point loads a dead URL. Re-sign once on that
+                         failure rather than handing out longer-lived URLs. */
+                      onError={e => {
+                        const img = e.currentTarget;
+                        if (img.dataset.resigned) return;
+                        img.dataset.resigned = '1';
+                        LB.resignSocialAttachment(attachment.id).then(url => { if (url) img.src = url; }).catch(() => {});
+                      }}
+                      style={{ display: 'block', maxWidth: 190, maxHeight: 190, borderRadius: 4, marginTop: message.body !== '[image]' ? 6 : 0, objectFit: 'cover' }} /> : <span key={attachment.id}>Image</span>)}
                     {message.body === '[image]' && !message.attachments?.length && <span>Image</span>}
                   </>}
                 </div>

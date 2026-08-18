@@ -175,13 +175,19 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       if (result?.startsWith('ERROR:self')) { setInviteError('Cannot coach yourself.'); return; }
       if (result?.startsWith('ERROR:exists')) { setInviteError('Invite already sent or coaching already active.'); return; }
       if (result?.startsWith('ERROR:already_coached')) { setInviteError('This person already has an active coach.'); return; }
+      if (result?.startsWith('ERROR:rate_limited')) { setInviteError('Too many invites just now. Try again in a little while.'); return; }
       // Any other ERROR:* (rate-limit, permission, a future code) must not fall
       // through to the success path and pretend the invite was sent.
       if (result?.startsWith('ERROR:')) { setInviteError('Could not send invite.'); return; }
       setInviteEmail('');
       setInviteOpen(false);
       const coaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching } : s);
+      // reloadCoachingState does not return anyClientLive or
+      // pendingCheckinsCount, so replacing the whole object wiped the live
+      // dot and the check-in count off the tab. The 60s poll only rewrites
+      // them when a value actually changes, so they stayed gone until then.
+      // Same preserving merge the pending-invite banner already uses.
+      setStore(s => s ? { ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (e) {
       setInviteError(e.message);
     } finally {
@@ -202,7 +208,12 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
     try {
       await LB.endCoaching(client.id);
       const coaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching } : s);
+      // reloadCoachingState does not return anyClientLive or
+      // pendingCheckinsCount, so replacing the whole object wiped the live
+      // dot and the check-in count off the tab. The 60s poll only rewrites
+      // them when a value actually changes, so they stayed gone until then.
+      // Same preserving merge the pending-invite banner already uses.
+      setStore(s => s ? { ...s, coaching: { ...coaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (e) {
       UI.alert(e.message);
     } finally {
@@ -1253,7 +1264,7 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
 
 // ─── CheckInForm ──────────────────────────────────────────────────────────────
 
-function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema }) {
+function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefill, dailyPrefill, perfPrefill, onSaved, schema, photosEnabled = false }) {
   const sections = schema || CHECKIN_DEFAULT_SCHEMA;
   const allFields = sections.flatMap(s => s.fields || []);
 
@@ -1286,6 +1297,8 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
 
   const [saving, setSaving] = useStateC(false);
   const [error, setError] = useStateC('');
+  const [photos, setPhotos] = useStateC([]);
+  const photoInputRef = useRefC(null);
 
   const set = (key, val) => setForm(f => ({ ...f, [key]: val }));
 
@@ -1320,7 +1333,19 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
       }
       // existing?.id, not !!existing: re-saving a check-in must keep the row's
       // primary key, see the comment on submitCheckin.
-      await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, existing?.id, sections);
+      const checkinId = await LB.submitCheckin(coachingId, clientId, responses, userId, weekStart, existing?.id, sections);
+      if (photos.length) {
+        // Keep staging inside the app's write-pressure budget. The database
+        // trigger still serializes the eight-photo cap, but sequential uploads
+        // avoid eight concurrent Storage + metadata writes on mobile.
+        const results = [];
+        for (const file of photos) {
+          try { await LB.stageCoachingCheckinPhoto(file, coachingId, checkinId, userId); results.push({ status: 'fulfilled' }); }
+          catch (reason) { results.push({ status: 'rejected', reason }); }
+        }
+        const failed = results.filter(r => r.status === 'rejected').length;
+        if (failed) setTimeout(() => UI.alert(`Check-in saved. ${failed} photo${failed === 1 ? '' : 's'} could not be staged and can be added again later.`), 0);
+      }
       onSaved();
     } catch (e) { setError(e.message); }
     finally { setSaving(false); }
@@ -1370,6 +1395,33 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
           </div>
         );
       })}
+      {photosEnabled && <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 7, padding: '12px 14px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+          <i className="fa-solid fa-camera" style={{ color: 'var(--accent)', fontSize: 13 }} />
+          <span style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Photos for your coach</span>
+        </div>
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.45, marginBottom: 9 }}>Optional. Up to 8 JPG, PNG or WebP images, 8 MB each.</div>
+        <input ref={photoInputRef} type="file" accept="image/jpeg,image/png,image/webp" multiple disabled={saving} onChange={e => {
+          const next = Array.from(e.target.files || []).slice(0, Math.max(0, 8 - photos.length));
+          setPhotos(prev => [...prev, ...next]); e.target.value = '';
+        }} style={{ display: 'none' }} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <Btn kind="ghost" type="button" onClick={() => photoInputRef.current?.click()} disabled={saving || photos.length >= 8}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8, padding: '10px 14px', minHeight: 42, fontSize: 11 }}>
+            <i className="fa-solid fa-folder-open" aria-hidden="true" />
+            Choose photos
+          </Btn>
+          <span style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi }}>
+            {photos.length ? `${photos.length} photo${photos.length === 1 ? '' : 's'} selected` : 'No photos selected'}
+          </span>
+        </div>
+        {photos.length > 0 && <div style={{ display: 'flex', flexDirection: 'column', gap: 5, marginTop: 8 }}>
+          {photos.map((file, i) => <div key={`${file.name}-${i}`} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>
+            <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{file.name}</span>
+            <button type="button" disabled={saving} aria-label={`Remove ${file.name}`} onClick={() => setPhotos(prev => prev.filter((_, j) => j !== i))} style={{ width: 28, height: 28, borderRadius: 4, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, opacity: saving ? 0.45 : 1, cursor: saving ? 'default' : 'pointer', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', fontSize: 15, lineHeight: 1, WebkitTapHighlightColor: 'transparent' }}>×</button>
+          </div>)}
+        </div>}
+      </div>}
       {error && <div style={{ fontSize: 12, color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi }}>{error}</div>}
       <Btn onClick={handleSubmit} disabled={saving}>
         {saving ? 'Sending…' : existing ? 'Update Check-in' : 'Submit Check-in'}
@@ -1414,6 +1466,18 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     return LB.fmtISO(m);
   })();
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
+  const [photosEnabled, setPhotosEnabled] = useStateC(false);
+  useEffectC(() => {
+    let alive = true;
+    setPhotosEnabled(false);
+    // Self-coaching uses the same Drive archive as a coached client. The
+    // earlier self guard made the photo picker unreachable even when the user
+    // had enabled both archive switches for their own Drive.
+    LB.getCoachingDrivePhotoStatus(coachingId)
+      .then(result => { if (alive) setPhotosEnabled(result?.enabled === true); })
+      .catch(() => { if (alive) setPhotosEnabled(false); });
+    return () => { alive = false; };
+  }, [coachingId, isSelf, userId]);
   const [editTarget, setEditTarget] = useStateC(null); // null = overview | 'new' | a check-in object
   const [confirmDelete, setConfirmDelete] = useStateC(null); // id of check-in awaiting delete confirm
   const [deleting, setDeleting] = useStateC(false);
@@ -1509,7 +1573,8 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
           perfPrefill={!target ? LB.weekPerformanceSignal(store, formWeek) : undefined}
           onSaved={() => { setEditTarget(null); load(); }}
           schema={resolvedSchema}
-        />
+          photosEnabled={photosEnabled}
+         />
       </div>
     );
   }
@@ -1670,7 +1735,7 @@ function CheckInRequestModal({ coaching }) {
 
   return ReactDOM.createPortal(
     <div style={{
-      position: 'fixed', top: 0, right: 0, bottom: 0, left: 0,
+      position: localViewportLayerPosition(), top: 0, right: 0, bottom: 0, left: 0,
       zIndex: 9000, background: 'rgba(0,0,0,0.75)',
       display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24,
     }}>
@@ -1729,7 +1794,7 @@ function CoachingTabClientView({ store, setStore, userId, go, hideTopBar = false
     }
     try {
       const newCoaching = await LB.reloadCoachingState(userId);
-      setStore(s => s ? { ...s, coaching: newCoaching } : s);
+      setStore(s => s ? { ...s, coaching: { ...newCoaching, anyClientLive: s.coaching?.anyClientLive, pendingCheckinsCount: s.coaching?.pendingCheckinsCount } } : s);
     } catch (_) {
       setStore(s => s ? { ...s, coaching: { ...(s.coaching || {}), asClient: null } } : s);
     } finally {

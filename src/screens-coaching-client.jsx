@@ -35,6 +35,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
   const coachingEntry = store?.coaching?.asCoach?.find(c => c.id === coachingId);
   const [checkinEnabled, setCheckinEnabled] = useStateC(coachingEntry?.checkinEnabled ?? true);
   const [ciToggling, setCiToggling] = useStateC(false);
+  // The coach screen can remain open while another device changes the
+  // setting. Keep the switch derived from the live asCoach row instead of
+  // preserving the value that happened to exist at mount time.
+  useEffectC(() => {
+    if (coachingEntry?.checkinEnabled != null) setCheckinEnabled(!!coachingEntry.checkinEnabled);
+  }, [coachingEntry?.checkinEnabled]);
   const handleToggleCheckin = async () => {
     if (ciToggling) return;
     const next = !checkinEnabled;
@@ -42,6 +48,12 @@ function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, 
     setCiToggling(true);
     try {
       await LB.setCheckinEnabled(coachingId, next);
+      // The store's asCoach entry is what the client list, the CHECK-IN DUE
+      // marker and this toggle's own initial value all read. Without this
+      // patch only local state moved, so leaving and re-entering the screen
+      // showed the switch back on until a realtime invalidation happened to
+      // refresh asCoach, and offline it never did.
+      setStore(s => s ? { ...s, coaching: { ...s.coaching, asCoach: (s.coaching?.asCoach || []).map(c => c.id === coachingId ? { ...c, checkinEnabled: next } : c) } } : s);
     } catch (_) {
       setCheckinEnabled(!next);
       setCiToggling(false);
@@ -185,8 +197,12 @@ function cyclePosFn(clientStore, date) {
   // is the action-advanced cycleIndex, independent of `date` (date extrapolation
   // is meaningless for flex and drifts when the client rests).
   if (LB.isFlexPlan(activeSch)) {
-    const cycleLen = activeSch.days?.length || 1;
-    return (((clientStore.cycleIndex || 0) % cycleLen) + cycleLen) % cycleLen;
+    const todayStr = LB.todayISO();
+    const activeVersion = activeSch.versions?.length
+      ? (activeSch.versions.find(v => v.validFrom <= todayStr) || activeSch.versions[activeSch.versions.length - 1])
+      : null;
+    const cycleLen = (activeVersion?.days || activeSch.days || []).length || 1;
+    return LB.flexVersionPosition(clientStore, activeVersion, cycleLen);
   }
   const d = new Date(date); d.setHours(12, 0, 0, 0);
   const dateStr = d.toISOString().slice(0, 10);
@@ -212,6 +228,7 @@ function getTodayDay(clientStore) {
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   if (!activeSch) return null;
   const todayStr = LB.todayISO();
+  if (LB.isFlexPlan(activeSch)) return LB.todaysDay(clientStore)?.day || null;
   if (LB.isWeekdayPlan(activeSch)) {
     const todayWd = LB.isoWd(new Date());
     const vDays = LB.getPlanDaysForDate(activeSch, todayStr);
@@ -540,7 +557,10 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
     } else if (LB.isFlexPlan(activeSch)) {
       // Flex advances per action, so a date window drifts when the client rests.
       // Show the current rotation's worth: the most recent cycleLen sessions.
-      const cycleLen = activeSch.days?.length || 1;
+      const activeVersion = activeSch.versions?.length
+        ? (activeSch.versions.find(v => v.validFrom <= LB.todayISO()) || activeSch.versions[activeSch.versions.length - 1])
+        : null;
+      const cycleLen = (activeVersion?.days || activeSch.days || []).length || 1;
       return ended.slice(0, cycleLen);
     } else {
       // Start of the *current* cycle run = today minus today's position in the

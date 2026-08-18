@@ -11,12 +11,14 @@
 (function () {
   var ua = navigator.userAgent || '';
   var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
-  if (ios && /CriOS\//i.test(ua)) document.documentElement.classList.add('ios-chrome');
+  var standalone = !!(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  if (ios && /CriOS\//i.test(ua) && !standalone) document.documentElement.classList.add('ios-chrome');
 })();
 </script>
 <meta name="theme-color" content="#07060a" />
-<title>Zane</title>
-<meta name="description" content="Training, nutrition, health metrics and coaching in one log. The plan adapts to how the last session actually felt, and a full workout logs with no signal." />
+<title>Zane · Training, nutrition and coaching</title>
+<meta name="application-name" content="Zane" />
+<meta name="description" content="Zane is an all-in-one fitness app for adaptive training plans, workout logging, nutrition, health metrics, friends and coaching. Workouts remain usable offline." />
 <!-- Share metadata. Without these a link to the app renders as a bare URL in
      WhatsApp, Instagram, Discord and every other chat app, which is how it sat
      for a long time. Absolute URLs are required, scrapers do not resolve
@@ -214,7 +216,28 @@
      while hit-testing against their current CSS geometry. Keep the app shell
      in document positioning on that browser so paint and input coordinates
      share the same containing block. */
-  html.ios-chrome #root { position: absolute; }
+  html.ios-chrome body {
+    /* Make the body the local containing block for the absolute app shell and
+       for the small number of body-level portals. Keeping the document itself
+       non-scrollable prevents WebKit's page pan from becoming a second,
+       invisible coordinate system while the Screen scrollers do their work. */
+    position: relative;
+    overflow: hidden;
+    /* Include the compensating top in the body's box. When WebKit has panned
+       the visual viewport upward, the corrected root starts lower in document
+       coordinates; without this extra span body overflow would clip its
+       bottom edge even though the root itself is the right size. */
+    height: calc(var(--app-viewport-height, 100dvh) + var(--app-viewport-top, 0px));
+    min-height: calc(var(--app-viewport-height, 100dvh) + var(--app-viewport-top, 0px));
+  }
+  html.ios-chrome #root {
+    position: absolute;
+    /* Fixed descendants (sheets, alerts, lightboxes) must share the app
+       shell's containing block. Otherwise Chrome iOS can paint the shell in
+       document coordinates but hit-test a fixed overlay in stale visual-
+       viewport coordinates after its browser chrome or keyboard moves. */
+    transform: translateZ(0);
+  }
   @media (min-width: 768px) {
     #root {
       max-width: 100%;
@@ -626,6 +649,13 @@
 </style>
 </head>
 <body>
+<noscript>
+  <main style="max-width:760px;margin:48px auto;padding:0 24px;font-family:system-ui,sans-serif;line-height:1.6;color:#ece4d0;background:#141218">
+    <h1>Zane</h1>
+    <p>Zane is an all-in-one fitness app for adaptive training plans, workout logging, nutrition, health metrics, friends and coaching.</p>
+    <p><a href="welcome.html" style="color:#e5c97e">Learn what Zane does</a></p>
+  </main>
+</noscript>
 <div id="root"></div>
 <!-- Global, zero-size SVG defs: any <text filter="url(#chart-text-lift)">
      anywhere in the app can reference this one filter (SVG filter refs work
@@ -1189,6 +1219,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   var root = document.getElementById('root');
   if (!root) return;
   var raf = 0;
+  var iosChromeTopCorrection = 0;
+  var isIosChrome = document.documentElement.classList.contains('ios-chrome');
   var isStandalone = !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
   var viewportMeta = document.querySelector('meta[name="viewport"]');
   var healthyWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
@@ -1206,16 +1238,53 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       var typing = isTyping();
       var visualHeight = vv ? Math.round(vv.height || 0) : 0;
       var layout = layoutHeight();
+      // Regular Chrome on iOS can leave the visual viewport panned after the
+      // keyboard is dismissed. The old handler only used offsetTop while a
+      // field was focused, so the app then remained visibly shifted while its
+      // hit-test boxes stayed at the old origin. Keep a correction for the
+      // browser (non-PWA) shell until the observed root rect proves that the
+      // browser has actually returned to its origin. Installed PWAs retain
+      // the older, safer keyboard-only rule because their visualViewport can
+      // stay stale after resume.
+      var top = 0;
+      if (isIosChrome && !isStandalone) {
+        var reportedTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
+        if (typing) {
+          iosChromeTopCorrection = reportedTop;
+        } else if (reportedTop > 2) {
+          iosChromeTopCorrection = reportedTop;
+        } else if (iosChromeTopCorrection) {
+          // Some iOS 26 Chrome builds report offsetTop as zero even while the
+          // document is still visually panned. The root rect is the
+          // observable result of that pan. Do not clear a working correction
+          // merely because the rect is now zero: that is exactly what we
+          // expect when the correction cancels the stale browser pan.
+          var rootTop = root.getBoundingClientRect().top;
+          if (rootTop > 2 && rootTop < 240) iosChromeTopCorrection = 0;
+          else if (rootTop < -2 && rootTop > -240) iosChromeTopCorrection = Math.round(-rootTop);
+        } else if (!typing) {
+          var uncorrectedTop = root.getBoundingClientRect().top;
+          if (uncorrectedTop < -2 && uncorrectedTop > -240) iosChromeTopCorrection = Math.round(-uncorrectedTop);
+        }
+        top = iosChromeTopCorrection;
+      } else if (typing && vv) {
+        top = Math.max(0, Math.round(vv.offsetTop || 0));
+      }
       // iOS standalone PWAs can retain a stale, keyboard-sized
       // visualViewport.height after a background/resume or rotation. A short
       // value shrinks #root and exposes the black body below the TabBar. Only
       // trust the visual viewport as the shell height while a text field is
       // actively using the keyboard; otherwise keep the shell at least as
-      // large as the layout viewport.
+      // large as the layout viewport. For regular Chrome, add the retained
+      // visual pan back before clamping to the layout height: a 760px viewport
+      // plus an 84px stale pan is the same full 844px page the user sees after
+      // dismissing the keyboard, while a collapsed browser toolbar (offset 0)
+      // still keeps the app at the actual 760px visible height.
       var height = typing
         ? Math.max(1, visualHeight || layout)
-        : Math.max(1, isStandalone ? Math.max(visualHeight, layout) : (visualHeight || layout));
-      var top = typing && vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
+        : (isIosChrome && !isStandalone)
+          ? Math.max(1, Math.min(layout, (visualHeight || layout) + iosChromeTopCorrection))
+          : Math.max(1, isStandalone ? Math.max(visualHeight, layout) : (visualHeight || layout));
       document.documentElement.style.setProperty('--app-viewport-top', top + 'px');
       document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
 

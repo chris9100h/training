@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zane, training, nutrition and coaching</title>
+  <meta name="application-name" content="Zane" />
+  <meta name="description" content="Zane is a fitness app for adaptive training, nutrition, health tracking and coaching. Coaches can optionally archive client check-ins as Google Sheets in their own Google Drive." />
+  <link rel="canonical" href="https://zane-wo.com/cloud.html" />
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #111016;
+      --panel: #1b1921;
+      --panel-strong: #28222a;
+      --text: #f4eee4;
+      --muted: #c7bdaf;
+      --accent: #d88b2c;
+      --line: #6c4a2b;
+      --green: #80d7ab;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: var(--bg);
+      color: var(--text);
+      font: 17px/1.6 Arial, Helvetica, sans-serif;
+    }
+    main { width: min(920px, calc(100% - 40px)); margin: 0 auto; padding: 56px 0 72px; }
+    header { border-top: 2px solid var(--accent); padding-top: 26px; margin-bottom: 42px; }
+    .brand { margin: 0; color: var(--accent); font-size: clamp(48px, 10vw, 88px); line-height: .95; letter-spacing: .04em; font-weight: 800; }
+    .tagline { margin: 14px 0 0; color: var(--muted); font-size: clamp(20px, 3vw, 28px); }
+    h2 { color: var(--accent); font-size: 24px; letter-spacing: .05em; margin: 0 0 12px; }
+    h3 { margin: 0 0 7px; font-size: 19px; }
+    p { margin: 0 0 17px; }
+    .lede { max-width: 760px; font-size: 21px; color: var(--text); }
+    .cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin: 30px 0; }
+    .card { padding: 22px; border: 1px solid #403a46; border-left: 4px solid var(--accent); border-radius: 9px; background: var(--panel); }
+    .card p { color: var(--muted); margin-bottom: 0; }
+    .drive { margin: 30px 0; padding: 26px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-strong); }
+    .drive strong { color: var(--green); }
+    a { color: #f1b461; }
+    a:focus-visible { outline: 3px solid var(--green); outline-offset: 3px; }
+    footer { border-top: 1px solid #403a46; padding-top: 22px; color: var(--muted); }
+    @media (max-width: 640px) {
+      main { width: min(100% - 28px, 920px); padding-top: 32px; }
+      .cards { grid-template-columns: 1fr; }
+      .lede { font-size: 18px; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 class="brand">Zane</h1>
+      <p class="tagline">Train with Zane or remain the same.</p>
+    </header>
+
+    <section aria-labelledby="purpose">
+      <h2 id="purpose">What Zane does</h2>
+      <p class="lede"><strong>Zane is an all-in-one fitness app for adaptive training, nutrition, health metrics, friends and coaching.</strong> It helps people plan workouts, log every set, track food and recovery, and adjust future training using the information from completed sessions.</p>
+      <p>The app runs in a browser and can be installed on a phone. Login is only needed to use the private app; this page is public so anyone can understand the product before signing in.</p>
+    </section>
+
+    <section class="cards" aria-label="Zane features">
+      <article class="card">
+        <h3>Adaptive training</h3>
+        <p>Create plans, run workouts, record sets, use rest timers and review progress over time.</p>
+      </article>
+      <article class="card">
+        <h3>Nutrition and health</h3>
+        <p>Log meals, recipes, calories, macros, water, steps, cardio and other daily health metrics.</p>
+      </article>
+      <article class="card">
+        <h3>Coaching</h3>
+        <p>Clients can submit structured weekly check-ins to their coach, including optional progress photos.</p>
+      </article>
+      <article class="card">
+        <h3>Friends and sharing</h3>
+        <p>Connect with friends, share selected progress and exchange lightweight workout feedback.</p>
+      </article>
+    </section>
+
+    <section class="drive" aria-labelledby="google-drive">
+      <h2 id="google-drive">Optional Google Drive archive</h2>
+      <p>Coaches may connect their own Google account to archive client check-ins. Zane creates a Google Sheet in the coach's Google Drive for each check-in and can include the check-in answers, summary metrics and optional photos when the coach enables that setting.</p>
+      <p><strong>Zane requests only the limited Google Drive <code>drive.file</code> permission.</strong> This lets Zane work with files created by Zane for the archive; it does not read unrelated files in the coach's Drive. Disconnecting Google Drive stops future exports and removes Zane's stored access token.</p>
+    </section>
+
+    <section aria-labelledby="privacy">
+      <h2 id="privacy">Privacy and data</h2>
+      <p>Zane uses account, training, nutrition, health and coaching data only to provide these features. Google Drive access is optional and is used only for the archive described above.</p>
+      <p>Read the full <a href="privacy">Zane Privacy Policy</a>. <a href="welcome">Learn more about Zane</a> or <a href="index.html">open the app</a>.</p>
+    </section>
+
+    <footer>
+      <p><strong>Zane</strong> · Training, nutrition and coaching · <a href="mailto:office@btc-prime.biz">office@btc-prime.biz</a> · © <span id="year">2026</span></p>
+    </footer>
+  </main>
+  <script src="cloud.js?v=2.839" defer></script>
+</body>
+</html>

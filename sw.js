@@ -1,10 +1,19 @@
-const CACHE = 'zane-v2.823';
+const CACHE = 'zane-v2.839';
 // Decorative background photos live in their own cache, deliberately decoupled
 // from CACHE's version. They are runtime-only: the worker never downloads the
 // whole VIP catalogue during install. The page tells the worker which one
 // background belongs to the currently loaded account; every other photo is
 // removed from this cache. The app shell remains fully precached and untouched.
 const PHOTOS_CACHE = 'zane-photos-v2';
+// CDN responses (Font Awesome's stylesheet and glyph fonts, the Google Fonts
+// stylesheet and its woff2 files) used to be written into the versioned CACHE,
+// which activate wipes on every update. CDN_ASSETS only re-precaches the three
+// JS libraries, so after a bump the fonts and icon glyphs were gone until the
+// next online load. A worker that activated in the background followed by an
+// offline open therefore gave a shell with no icons at all, turning every
+// icon-only button into an invisible tap target. Unversioned and exempt from
+// the sweep below, like PHOTOS_CACHE, so an update cannot orphan them again.
+const RUNTIME_CACHE = 'zane-runtime-v1';
 const CDN_HOSTS = ['unpkg.com', 'cdnjs.cloudflare.com', 'fonts.googleapis.com', 'fonts.gstatic.com', 'cdn.jsdelivr.net'];
 // Works at any base path (e.g. /training/ on GitHub Pages, / on custom domain)
 const BASE = self.registration.scope.replace(/\/$/, '');
@@ -44,6 +53,12 @@ const ASSETS = [
   BASE + '/icons/icon-192.png',
   BASE + '/icons/icon-512.png',
   BASE + '/icons/icon-180.png',
+  // Rendered by the boot LoadingScreen, the home hero, the sidebar, onboarding
+  // and every share card. Unlisted, it only reached the versioned cache through
+  // the runtime branch and was wiped by each update, so the first offline open
+  // after a bump showed a broken image on the boot screen itself.
+  BASE + '/icons/zane-logo.png',
+  BASE + '/icons/zane-logo-2.png',
 ];
 
 // Public pages that live outside the app shell (CLAUDE.md, "Public-Seiten"),
@@ -64,8 +79,12 @@ const ASSETS = [
 const BASE_PATH = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '');
 const PUBLIC_PAGES = [
   BASE_PATH + '/welcome.html',
+  BASE_PATH + '/cloud.html',
   BASE_PATH + '/features.html',
   BASE_PATH + '/autoreg.html',
+  BASE_PATH + '/privacy.html',
+  BASE_PATH + '/cloud.js',
+  BASE_PATH + '/privacy.js',
   BASE_PATH + '/src/autoreg-guide-page.js',
 ];
 
@@ -122,7 +141,7 @@ self.addEventListener('activate', e => {
     caches.keys().then(keys =>
       // PHOTOS_CACHE is versioned independently of CACHE (see its
       // declaration above), never swept here alongside old app-shell caches.
-      Promise.all(keys.filter(k => k !== CACHE && k !== PHOTOS_CACHE).map(k => caches.delete(k)))
+      Promise.all(keys.filter(k => k !== CACHE && k !== PHOTOS_CACHE && k !== RUNTIME_CACHE).map(k => caches.delete(k)))
     ).then(() => self.clients.claim())
   );
 });
@@ -167,7 +186,9 @@ async function pruneBackgroundCache(keepValue) {
   await Promise.all(keys.map(request => {
     const url = new URL(request.url);
     const basePath = new URL(BASE + '/', self.location.href).pathname.replace(/\/$/, '') + '/Background/';
-    const isPhoto = url.origin === self.location.origin && url.pathname.startsWith(basePath);
+    const isPhoto = url.origin === self.location.origin
+      && url.pathname.startsWith(basePath)
+      && !url.pathname.endsWith('/index.json');
     if (!isPhoto || (keepPath && url.pathname === keepPath)) return undefined;
     return cache.delete(request);
   }));
@@ -295,7 +316,10 @@ self.addEventListener('fetch', e => {
     // remains network-only and is what discovers a newer worker.
     const appAssetUrl = url.origin + url.pathname;
     const isAppAsset = !url.search && ASSETS.includes(appAssetUrl);
-    const isBackgroundPhoto = url.pathname.includes('/Background/');
+    // The catalogue is a normal JSON resource, not a VIP photo. Treating it
+    // as a photo made every catalogue fetch trigger pruneBackgroundCache(),
+    // which could delete the selected image (and the catalogue itself).
+    const isBackgroundPhoto = url.pathname.includes('/Background/') && !url.pathname.endsWith('/index.json');
     if (isAppAsset || isBackgroundPhoto) {
       e.respondWith(
         caches.match(e.request).then(cached => {
@@ -391,7 +415,7 @@ self.addEventListener('fetch', e => {
           // is served immediately, and without an extension the worker can be
           // torn down before the put lands, leaving the library uncached for
           // the next offline boot.
-          e.waitUntil(caches.open(CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
+          e.waitUntil(caches.open(RUNTIME_CACHE).then(c => c.put(e.request, clone)).catch(() => {}));
         }
         return res;
       }).catch(() => offlineResponse());

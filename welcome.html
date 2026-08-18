@@ -3,12 +3,13 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-<title>Zane · The all-in-one fitness app</title>
-<meta name="description" content="Training, nutrition, health metrics, Friends and coaching in one log. Adaptive plans, gym-floor logging, offline workouts and home-screen install." />
+<title>Zane · Training, nutrition and coaching</title>
+<meta name="application-name" content="Zane" />
+<meta name="description" content="Zane is an all-in-one fitness app for adaptive training plans, workout logging, nutrition, health metrics, friends and coaching. Workouts remain usable offline." />
 <meta name="theme-color" content="#141218" />
 <link rel="icon" href="icons/icon-192.png" />
 <link rel="apple-touch-icon" href="icons/icon-180.png" />
-<link rel="canonical" href="https://zane-wo.com/welcome.html" />
+<link rel="canonical" href="https://zane-wo.com/welcome" />
 
 <!-- Open Graph / Twitter. This is half the reason this page exists: the app at
      "/" ships no share metadata, so every link anyone pastes into WhatsApp,
@@ -19,14 +20,14 @@
      card expects; square art gets cropped or demoted to a thumbnail. -->
 <meta property="og:type" content="website" />
 <meta property="og:site_name" content="Zane" />
-<meta property="og:url" content="https://zane-wo.com/welcome.html" />
-<meta property="og:title" content="Zane · Train with Zane or remain the same" />
-<meta property="og:description" content="Training, nutrition, Health, Friends and coaching in one log. The plan adapts to how the last session felt, and full workout logging works offline." />
+<meta property="og:url" content="https://zane-wo.com/welcome" />
+<meta property="og:title" content="Zane · Training, nutrition and coaching" />
+<meta property="og:description" content="Zane is an all-in-one fitness app for adaptive training plans, workout logging, nutrition, health metrics, friends and coaching. Workouts remain usable offline." />
 <meta property="og:image" content="https://zane-wo.com/icons/og-card.jpg" />
 <meta property="og:image:alt" content="The Zane wordmark beside the app running on two phones" />
 <meta name="twitter:card" content="summary_large_image" />
-<meta name="twitter:title" content="Zane · Train with Zane or remain the same" />
-<meta name="twitter:description" content="Training, nutrition, Health, Friends and coaching in one log. The plan adapts to how the last session felt, and full workout logging works offline." />
+<meta name="twitter:title" content="Zane · Training, nutrition and coaching" />
+<meta name="twitter:description" content="Zane is an all-in-one fitness app for adaptive training plans, workout logging, nutrition, health metrics, friends and coaching. Workouts remain usable offline." />
 <meta name="twitter:image" content="https://zane-wo.com/icons/og-card.jpg" />
 
 <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -171,6 +172,10 @@
   h2.sec{font-family:var(--f-display);font-weight:800;text-transform:uppercase;letter-spacing:0.01em;font-size:clamp(28px,5vw,44px);line-height:0.98;margin:0;max-width:22ch;text-wrap:balance;}
   .sec-lede{margin:14px 0 0;max-width:62ch;color:var(--ink-soft);font-size:15.5px;line-height:1.6;}
   .sec-lede b{color:var(--ink);font-weight:600;}
+  .drive-note{margin-top:24px;max-width:72ch;padding:18px 20px;border:1px solid rgba(var(--accent-rgb),0.38);border-left:3px solid var(--accent);border-radius:7px;background:rgba(var(--accent-rgb),0.06);}
+  .drive-note h3{font-family:var(--f-display);font-weight:700;text-transform:uppercase;letter-spacing:0.02em;font-size:18px;line-height:1.05;margin:0 0 8px;color:var(--accent);}
+  .drive-note p{margin:0;color:var(--ink-soft);font-size:13.5px;line-height:1.6;}
+  .drive-note b{color:var(--ink);font-weight:600;}
 
   /* ---- pillars ---- */
   .pillars{margin-top:30px;display:grid;grid-template-columns:1fr;gap:12px;}
@@ -359,7 +364,7 @@
       <div class="eyebrow"><span class="dot"></span><span class="micro">The all-in-one fitness app</span><span class="rule"></span></div>
       <h1 class="wordmark">ZA<span class="k">N</span>E</h1>
       <p class="kicker">Train with Zane<br />or remain the same</p>
-      <p class="lede">Build the plan, log every set on the gym floor, and let the next session adjust to how the last one actually felt. Zane holds the whole picture in one place, <b>from the working set to the shopping list</b>, and syncs it across every device you own.</p>
+      <p class="lede"><b>Zane is an all-in-one fitness app for adaptive training, nutrition, health metrics, friends and coaching.</b> Build the plan, log every set on the gym floor, and let the next session adjust to how the last one actually felt. Zane holds the whole picture in one place, <b>from the working set to the shopping list</b>, and syncs it across every device you own.</p>
       <div class="cta">
         <a class="btn" href="index.html">
           Open the app
@@ -534,6 +539,10 @@
           <li><b>Live spectating.</b> While you are mid-workout your coach can drop into the session and follow it set by set, refreshing as your sets land.</li>
           <li><b>Or coach yourself.</b> The same dashboard, the same form builder, the same trend cards, pointed at your own data.</li>
         </ul>
+        <div class="drive-note" id="google-drive-data">
+          <h3>Optional Google Drive export</h3>
+          <p>Coaches can connect Google Drive to archive client check-ins as <b>Google Sheets</b> in their own Drive. Zane requests the limited <b>drive.file</b> permission and only works with files Zane creates for this archive; unrelated Drive files are never read. The connected Google account email is used only to identify the account. Check-in answers, summary metrics and optional attached photos are exported only when the coach enables the archive. Disconnecting stops future exports and removes Zane's access token.</p>
+        </div>
       </div>
       <div class="split-media">
         <div class="phone">
@@ -711,6 +720,7 @@
       <a href="index.html">Open the app</a>
       <a href="features.html">Feature overview</a>
       <a href="autoreg.html">Autoregulation guide</a>
+      <a href="privacy">Privacy policy</a>
     </div>
     <div class="col">
       <div class="h">On this page</div>
@@ -731,7 +741,7 @@
      from the browser cache even after a fresh deploy. tools/check-cache-version.cjs
      gates this. The catalog is loaded purely so the hero counters below state a
      real number instead of a marketing one that quietly goes stale. -->
-  <script src="src/feature-map-db.js?v=2.823"></script>
+<script src="src/feature-map-db.js?v=2.839"></script>
 <script>
 (function(){
   // ---- hero counters, straight from the bundled feature catalog ----

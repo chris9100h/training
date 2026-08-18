@@ -3,7 +3,8 @@
    Sheet, Empty, ChevronRight, ICON_HISTORY, ICON_BARBELL, ICON_CALENDAR,
    btnPrimary/Ghost, useConfirm, MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
    Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead,
-   NumInput, Field, TextInput, isLightCanvasActive. */
+   NumInput, Field, TextInput, isLightCanvasActive,
+   localViewportLayerPosition. */
 
 const UI = {
   bg:       'var(--bg)',
@@ -43,6 +44,18 @@ function isLightCanvasActive() {
   const parts = (getComputedStyle(document.documentElement).getPropertyValue('--bg-rgb') || '').trim().split(',').map(Number);
   if (parts.length !== 3 || parts.some(isNaN)) return false;
   return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
+}
+
+// Chrome on iOS has a WebKit viewport bug where fixed layers can be painted
+// against the browser's old toolbar/keyboard geometry while their hit-test
+// boxes use the current geometry. The app shell creates a local containing
+// block for those layers on that browser; portals mounted directly under body
+// need the same absolute-vs-fixed choice explicitly.
+function localViewportLayerPosition() {
+  return typeof document !== 'undefined'
+    && document.documentElement.classList.contains('ios-chrome')
+    ? 'absolute'
+    : 'fixed';
 }
 
 // ─── Screen ─────────────────────────────────────────────────────────
@@ -251,8 +264,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   ].map(t => {
     const healthSlot = t.id === 'health' ? (enabledSlots.includes(routeName) ? routeName : enabledSlots[0]) : null;
     const socialSlot = t.id === 'social' ? (enabledSocialSlots.includes(routeName) ? routeName : enabledSocialSlots[0]) : null;
+    // 'Coach', not 'Coaching': with five tabs each column is exactly a fifth of
+    // the bar, and at 11px/0.14em uppercase the longer word overran its column
+    // on a 320px screen. The long-press popup keeps the full word, it has room.
     const slotLabel = { health: 'Health', water: 'Water', food: 'Food', medications: 'Meds' }[healthSlot]
-      || { coaching: 'Coaching', friends: 'Friends' }[socialSlot]
+      || { coaching: 'Coach', friends: 'Friends' }[socialSlot]
       || t.label;
     return { ...t, healthSlot, socialSlot, iconKey: healthSlot || socialSlot || t.id, label: slotLabel };
   });
@@ -695,7 +711,11 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 5,
                 color: on ? UI.gold : UI.inkFaint,
                 fontFamily: UI.fontUi,
-                fontSize: 11, letterSpacing: '0.14em', textTransform: 'uppercase',
+                // Five tabs make every column a fifth of the bar, which is not
+                // enough for HISTORY at the roomier five-tab-and-under sizing.
+                // Shrinking beats truncating: an all-caps 4-8 char label reads
+                // worse clipped than one point smaller.
+                fontSize: tabs.length >= 5 ? 10 : 11, letterSpacing: tabs.length >= 5 ? '0.08em' : '0.14em', textTransform: 'uppercase',
                 fontWeight: on ? 700 : 500,
                 position: 'relative', zIndex: 1,
                 transition: 'color 0.25s',
@@ -729,7 +749,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
                 </div>
                 {/* -0.14em cancels the trailing letter-spacing after the last
                     glyph so the visible text is pixel-centred under the plate. */}
-                <span style={{ marginRight: '-0.14em' }}>{label}</span>
+                <span style={{ marginRight: tabs.length >= 5 ? '-0.08em' : '-0.14em' }}>{label}</span>
                 <div style={{ height: 4, display: 'flex', alignItems: 'center' }}>
                   {isHealthTab && healthDots(on, healthSlot, enabledSlots)}
                   {isSocialTab && socialDots(on, socialSlot, enabledSocialSlots)}
@@ -1234,6 +1254,14 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
   // the intensity chain sheets, just vertically centered. Opt-in, so no other
   // sheet changes.
   const cardLike = floating || center;
+  // Chrome iOS uses a layout-height root while its native keyboard is open.
+  // Keep the backdrop in the fixed coordinate space for that frame; the
+  // keyboard padding below is measured in the same layout coordinates. Using
+  // the normal iOS absolute layer here double-counts the keyboard gap and can
+  // move the sheet's hit targets hundreds of pixels away from the controls.
+  // Once the keyboard is gone, return to the local layer so embedded flows
+  // retain their correct stacking context.
+  const sheetPosition = effectiveKbHeight > 0 ? 'fixed' : localViewportLayerPosition();
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
   const shadowLayers = [cardLike ? '0 4px 18px rgba(0,0,0,0.4)' : '0 -10px 28px rgba(0,0,0,0.5)'];
   if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
@@ -1248,7 +1276,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
     <div onClick={onClose} aria-hidden={false} style={{
-      position: 'fixed', top: 0, left: 0, right: 0, bottom: keyboardHeight,
+      position: sheetPosition, top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
       paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
@@ -1362,7 +1390,7 @@ function ImageLightbox({ src, onClose }) {
   if (!src) return null;
   return (
     <div role="dialog" aria-modal="true" aria-label="Image preview" onClick={onClose} style={{
-      position: 'fixed', inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
+      position: localViewportLayerPosition(), inset: 0, zIndex: 500, background: 'rgba(0,0,0,0.92)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       cursor: 'zoom-out', animation: 'sheet-fade 0.18s ease',
     }}>
@@ -1442,8 +1470,11 @@ function useConfirm(zIndex = 100) {
   // user out on mobile. Strips straight and curly apostrophes on both sides.
   const normConfirmText = (s) => (s || '').trim().toLowerCase().replace(/[‘’ʼ']/g, '');
   const okLocked = !!state?.requireText && normConfirmText(typed) !== normConfirmText(state.requireText);
-  // Portal into document.body so the confirm sheet always sits above any other
-  // Sheet (both zIndex: 100) regardless of where confirmEl is placed in the tree.
+  // Portal into the app shell so iOS Chrome's local absolute viewport and the
+  // painted dialog share the same coordinate system. A body-level portal can
+  // be one visual-viewport correction away from the shell after keyboard use,
+  // which makes the visible buttons and their hit targets disagree. The zIndex
+  // still keeps the confirm sheet above ordinary sheets.
   const el = state && ReactDOM.createPortal(
     <Sheet open={true} onClose={state.preventBackdropClose ? null : () => close(false)} zIndex={zIndex}>
       <div style={{ fontFamily: UI.fontDisplay, fontSize: 26, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: UI.ink, marginBottom: 10, textAlign: 'center' }}>{state.title}</div>
@@ -1467,7 +1498,7 @@ function useConfirm(zIndex = 100) {
         }}>{state.ok}</Btn>
       </div>
     </Sheet>,
-    document.body
+    document.getElementById('root') || document.body
   );
   return [el, confirm];
 }
@@ -1806,7 +1837,10 @@ UI.formatMass = (g) => LB.formatMassG(g, UI.massInOz());
 // Returns a Promise that resolves when it's dismissed.
 UI.alert = (message, { title = null, ok = 'OK' } = {}) => new Promise(resolve => {
   const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;inset:0;z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)';
+  const local = localViewportLayerPosition() === 'absolute';
+  wrap.style.cssText = local
+    ? 'position:absolute;top:var(--app-viewport-top,0px);left:0;right:0;height:var(--app-viewport-height,100dvh);z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)'
+    : 'position:fixed;inset:0;z-index:12000;display:flex;align-items:center;justify-content:center;padding:24px;background:rgba(0,0,0,0.6);backdrop-filter:blur(2px);-webkit-backdrop-filter:blur(2px)';
   const box = document.createElement('div');
   box.style.cssText = `max-width:340px;width:100%;background:${UI.bg};border:1px solid ${UI.hairStrong};border-radius:8px;padding:22px;box-shadow:0 18px 50px rgba(0,0,0,0.45)`;
   if (title) {

@@ -794,7 +794,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
   return <>
     {toast && ReactDOM.createPortal(
       <div role="status" aria-live="polite" style={{
-        position: 'fixed', inset: 0, zIndex: 180, padding: 16,
+        position: localViewportLayerPosition(), inset: 0, zIndex: 180, padding: 16,
         pointerEvents: 'none', color: UI.ink,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
         animation: 'improvedFade 5.5s ease forwards', WebkitTapHighlightColor: 'transparent',
@@ -2582,7 +2582,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         // neither done nor skipped (what this used to do) is the ambiguous
         // third state that made the finish sheet's own count disagree with
         // what was actually written.
-        const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null;
+        // timeSec counts as a number here: a time-based set logs a duration
+        // instead of kg/reps, and the sheet's own copy promises that "sets
+        // that already hold numbers are logged as completed". Leaving it out
+        // meant Mark as done silently skipped every plank, hold and carry the
+        // user had actually timed. Matches the canonical has-values test in
+        // store.js (bestE1rm/session hydration). Checkbox sets are deliberately
+        // NOT included: they hold no numbers at all, so "the rest as skipped"
+        // is exactly what the same copy promises for them.
+        const hasValue = st.kg != null || st.reps != null || st.repsL != null || st.repsR != null || st.timeSec != null;
         return hasValue && sealMode === 'done' ? { ...st, done: true } : { ...st, skipped: true };
       }),
     };
@@ -2923,7 +2931,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [restModalOpen, setRestModalOpen] = useStateT(() => {
     const rs = session.restStart ?? null;
     const rd = session.restDuration ?? null;
-    return !!(rs && rd && Date.now() >= rs + rd * 1000);
+    // A rest persisted before the first working set is the large post-warmup
+    // countdown.  It must never reopen the ordinary Rest sheet after a reload;
+    // expiry will promote the session to startedAt below.
+    return !!(session.startedAt && rs && rd && Date.now() >= rs + rd * 1000);
   });
   const [confirmEl, confirm] = useConfirm();
   // Autoreg v2 P0: one-tap readiness prompt (Fresh / Normal / Rough), shown once
@@ -4665,7 +4676,15 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       // 0) or a rest that elapsed while backgrounded. fireRestDone's
       // restFiredRef guard makes this idempotent, so a session that MOUNTS
       // already-expired (restExpired init true) or a second resume won't re-beep.
-      if (!restExpiredRef.current) { setRestExpired(true); fireRestDone(); }
+      // On a cold mount an expired post-warmup rest already has
+      // restExpired=true, so the old guard skipped fireRestDone forever and
+      // left the workout stuck before its first working set. The synchronous
+      // restFiredRef guard inside fireRestDone keeps this one-shot even when a
+      // visibility resume and the mount effect arrive together.
+      if (!restExpiredRef.current || !sessionRef.current.startedAt) {
+        setRestExpired(true);
+        fireRestDone();
+      }
       return;
     }
     setRestExpired(false);
@@ -6562,12 +6581,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
           children to the screen box, capping the flash at the clock. */}
       {screenFlash && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
+        <div style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
         document.body
       )}
       {/* Block keyboard and content interaction while any overlay is visible */}
       {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
+        <div style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
 
@@ -6576,7 +6595,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* New best (personal record) overlay */}
       {newBestSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
+          position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -6604,7 +6623,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {improvedSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
+          position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -6630,7 +6649,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* Regression overlay */}
       {regressionSet && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
+          position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
           animationFillMode: 'forwards',
@@ -6658,7 +6677,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           the user, it never resolves itself silently. */}
       {progressionUnlocked && ReactDOM.createPortal(
         <div style={{
-          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
+          position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           gap: 8,
@@ -6702,7 +6721,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Outlier confirmation (reps / kg / both) */}
       {outlierConfirm && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
+        <div style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
           <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />
@@ -9353,13 +9372,20 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
           <div style={{ position: 'fixed', inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
-            <div className="micro-gold" style={{ letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
-            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: UI.inkSoft, letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
+            {/* Fixed light values, not theme tokens, for the same reason the
+                countdown digits use --accent-raw: this scrim is a hardcoded
+                near-black in every theme. On light and paper --ink-soft and
+                --hair-strong resolve to near-black too, which put these at
+                about 1.03:1 against the backdrop, so the exercise name, the
+                cheer and the Stop control were effectively invisible in two of
+                the four themes and Stop could only be hit blind. */}
+            <div className="micro" style={{ color: 'var(--accent-raw)', letterSpacing: '0.2em', marginBottom: 6, textAlign: 'center' }}>{entry.name}</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 12, color: 'rgba(236,228,208,0.66)', letterSpacing: '0.18em', marginBottom: 34, textTransform: 'uppercase', fontWeight: 600 }}>Go go go</div>
             <TimeCountdown startedAt={countdown.startedAt} total={countdown.total} />
             <button onClick={() => finishCountdown(false)} style={{
               marginTop: 44, padding: '12px 44px', borderRadius: 6,
-              background: 'transparent', border: `1px solid ${UI.hairStrong}`,
-              color: UI.inkSoft, cursor: 'pointer',
+              background: 'transparent', border: '1px solid rgba(236,228,208,0.16)',
+              color: 'rgba(236,228,208,0.66)', cursor: 'pointer',
               fontFamily: UI.fontUi, fontSize: 12, letterSpacing: '0.16em', textTransform: 'uppercase', fontWeight: 600,
               WebkitTapHighlightColor: 'transparent',
             }}>Stop</button>

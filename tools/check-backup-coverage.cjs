@@ -45,7 +45,7 @@ const BACKUP_ENUM = [
   'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_water_logs',
   'zane_adaptive_tdee_history',
   'zane_food_logs', 'zane_food_favorites', 'zane_food_recipes',
-  'zane_food_template_slots', 'zane_food_meal_plans', 'zane_food_shopping_prefs',
+  'zane_food_template_slots', 'zane_food_template_days', 'zane_food_meal_plans', 'zane_food_shopping_prefs',
   'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items',
   'zane_medication_schedule_slots', 'zane_medication_logs',
 ];
@@ -82,11 +82,22 @@ const EXCLUDED = {
   zane_social_workout_comments: 'friends workout comments and cheers reference other users, not personal workout backup data',
   zane_social_notification_deliveries: 'server-side Friends push delivery ledger, derived provider state rather than user content',
   zane_social_notification_attempts: 'server-side Friends rate-limit window, derived operational state rather than user content',
+  zane_notification_maintenance: 'global bounded notification-ledger cleanup marker, operational state rather than user content',
+  zane_push_schedule_claims: 'device notification timer deduplication state, not user content',
+  zane_invite_attempts: 'per-caller invite throttle for invite_client, operational state, never user content',
   zane_foods: 'shared/global reference cache (Open Food Facts/USDA), not per-user data',
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
-  zane_food_template_days: 'derived per-day auto-fill markers, device/sync state regenerated as needed (not user content)',
   zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
   zane_meal_reminder_deliveries: 'server-side reminder delivery ledger, derived provider state rather than user content',
+  zane_coaching_drive_connections: 'optional external Google Drive connection metadata; files remain in the coach-owned Drive archive',
+  zane_coaching_drive_tokens: 'encrypted OAuth refresh tokens; deliberately never exported to a user backup',
+  zane_coaching_drive_oauth_states: 'short-lived one-time OAuth CSRF state; regenerated and never exported',
+  zane_coaching_drive_exports: 'rebuildable Drive export outbox and links; check-in source data remains in zane_checkins',
+  zane_coaching_drive_photos: 'temporary Drive staging metadata and paths; image bytes are external archive material',
+  zane_coaching_drive_photo_reservations: 'short-lived upload reservations; expired rows and staged objects are janitored, never backup data',
+  zane_coaching_drive_photo_cleanup: 'service-only staging cleanup tombstones; operational rows rebuilt by the Drive janitor',
+  zane_coaching_drive_worker_leases: 'short-lived service-only Drive worker leases; operational coordination state, never user content',
+  zane_coaching_drive_maintenance: 'short-lived service-only Drive janitor lease; operational coordination state, never user content',
 };
 
 // Columns that legitimately never round-trip.
@@ -109,6 +120,9 @@ const PER_TABLE_ALLOW = {
   // NOT restorable: a backup file is user-editable, so importing it would be a
   // free "set tier = lifetime" for anyone willing to edit one line of JSON.
   zane_profiles: new Set(['tier', 'tier_granted_at']),
+  // Server-only transient CAS token for medication reminder compensation.
+  // Restoring it would make a backup impersonate an in-flight Edge claim.
+  zane_medication_logs: new Set(['reminder_claim_token', 'reminder_claimed_at']),
 };
 const allowed = (table, col) =>
   GLOBAL_ALLOW.has(col) || (PER_TABLE_ALLOW[table] && PER_TABLE_ALLOW[table].has(col));
@@ -172,7 +186,7 @@ function captureImportedColumns() {
     glucoseLogs: [{}], cardioPlans: [{}], statusPeriods: [{}], mesoStates: [{}],
     checkinSchemaTemplates: [{}], bloodPressureLogs: [{}], bodyTempLogs: [{}],
     waterLogs: [{}], adaptiveTdeeHistory: [{ asOfDate: '2026-01-01', windowStart: '2025-12-19', windowEnd: '2026-01-01', tdee: 2000, avgCalories: 1900, weightStartKg: 80, weightEndKg: 79.5, weightChangeKg: -0.5, weightRateKgWeek: -0.25, daySpan: 10, calorieDays: 5, weighIns: 6 }], foodLogs: [{}], foodFavorites: [{}], foodRecipes: [{}],
-    foodTemplateSlots: [{}], foodMealPlans: [{}], foodShoppingPrefs: [{}],
+    foodTemplateSlots: [{}], foodTemplateDays: [{}], foodMealPlans: [{}], foodShoppingPrefs: [{}],
     medicationPlans: [{}], medications: [{}], medicationPlanItems: [{}], medicationScheduleSlots: [{}], medicationLogs: [{}],
     activeScheduleId: null, activeMealTemplateId: null, cycleIndex: 0, customDayTypes: [],
   };
