@@ -185,6 +185,10 @@
     color: var(--ink);
     font-family: "Inter", system-ui, sans-serif;
     -webkit-font-smoothing: antialiased;
+    /* The app shell is fixed and owns the only legitimate scroll surface.
+       Keeping the document itself locked prevents Safari's body scrollbar
+       from appearing when a short Screen is swiped. */
+    overflow: hidden;
     overscroll-behavior: none;
     user-select: none;
     -webkit-user-select: none;
