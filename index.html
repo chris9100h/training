@@ -349,6 +349,11 @@
      is layer-only (no visual shift) and does not touch the custom numeric keypad,
      which uses divs, not native inputs. */
   input, textarea { transform: translateZ(0); }
+  /* Compact fields keep their normal size at rest. On iOS the focus handler
+     adds this class only when a field would otherwise trigger Safari's
+     automatic page zoom, so the keyboard can open without shifting the app's
+     layout. */
+  .zane-ios-input-zoom-guard { font-size: 16px !important; }
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {

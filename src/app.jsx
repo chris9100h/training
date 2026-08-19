@@ -1045,6 +1045,33 @@ function App() {
       window.removeEventListener('focusout', syncSheetAndFocus);
     };
   }, []);
+  // All native fields use one focus/viewport policy, including fixed editors
+  // that are not wrapped in Sheet. iOS can keep the keyboard at the same
+  // height while focus moves from one field to another, so a visualViewport
+  // resize alone is not enough; focusin is the primary trigger and viewport
+  // changes provide the delayed keyboard-settle pass.
+  useEffectA(() => {
+    let cancelScheduled = null;
+    const schedule = event => {
+      const target = event?.target?.tagName ? event.target : document.activeElement;
+      if (!isTextEntryElement(target)) return;
+      applyIOSInputZoomGuard(target);
+      cancelScheduled?.();
+      cancelScheduled = scheduleFocusedInputVisibility(target);
+    };
+    const releaseZoomGuard = event => removeIOSInputZoomGuard(event?.target);
+    document.addEventListener('focusin', schedule, true);
+    document.addEventListener('focusout', releaseZoomGuard, true);
+    window.visualViewport?.addEventListener('resize', schedule, { passive: true });
+    window.visualViewport?.addEventListener('scroll', schedule, { passive: true });
+    return () => {
+      cancelScheduled?.();
+      document.removeEventListener('focusin', schedule, true);
+      document.removeEventListener('focusout', releaseZoomGuard, true);
+      window.visualViewport?.removeEventListener('resize', schedule);
+      window.visualViewport?.removeEventListener('scroll', schedule);
+    };
+  }, []);
   useEffectA(() => {
     if (phase === 'ready') window.__startScreenWarmup?.();
   }, [phase]);

@@ -58,6 +58,99 @@ function localViewportLayerPosition() {
     : 'fixed';
 }
 
+// Keep a focused native field above the part of the viewport that is actually
+// visible while iOS is showing its keyboard. `scrollIntoView({block:'nearest'})`
+// is not reliable here: with the app shell, a Sheet panel, and a nested list
+// all potentially being scroll containers, WebKit may scroll the wrong layer
+// (or the locked document) and leave the field behind the keyboard. Walking
+// up to the nearest overflowing ancestor lets the field move in the surface
+// the user is actually looking at.
+function keepFocusedInputVisible(element = (typeof document !== 'undefined' ? document.activeElement : null), { margin = 14, boundary = null } = {}) {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return false;
+  const el = element;
+  if (!el || !el.isConnected || !(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return false;
+
+  const vv = window.visualViewport;
+  const viewportTop = vv ? vv.offsetTop : 0;
+  const viewportBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+  let scroller = null;
+  let parent = el.parentElement;
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent);
+    const overflowY = style.overflowY;
+    if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+      && parent.scrollHeight > parent.clientHeight + 1) {
+      scroller = parent;
+      break;
+    }
+    if (boundary && parent === boundary) break;
+    parent = parent.parentElement;
+  }
+
+  const fieldRect = el.getBoundingClientRect();
+  const containerRect = scroller?.getBoundingClientRect?.();
+  const visibleTop = Math.max(viewportTop, containerRect?.top ?? viewportTop) + margin;
+  const visibleBottom = Math.min(viewportBottom, containerRect?.bottom ?? viewportBottom) - margin;
+  let delta = 0;
+  if (fieldRect.bottom > visibleBottom) delta = fieldRect.bottom - visibleBottom;
+  else if (fieldRect.top < visibleTop) delta = fieldRect.top - visibleTop;
+  if (!delta) return false;
+
+  if (scroller) {
+    scroller.scrollTop += delta;
+    return true;
+  }
+  // A non-scrollable intermediate wrapper can still contain a Screen or
+  // Sheet that becomes scrollable after the keyboard settles.
+  try { el.scrollIntoView({ block: 'nearest', behavior: 'auto' }); } catch (_) { el.scrollIntoView(); }
+  return true;
+}
+
+// Keyboard animation and WebKit's layout pass do not finish in the same tick
+// as focusin. Run once immediately, once after the next paint, and once after
+// the keyboard has had time to settle. The repeated call is intentionally
+// bounded; it avoids an endless scroll/resize feedback loop while still
+// covering Safari's delayed visualViewport update.
+function scheduleFocusedInputVisibility(element = (typeof document !== 'undefined' ? document.activeElement : null)) {
+  if (typeof window === 'undefined') return () => {};
+  const target = element;
+  if (!target || !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return () => {};
+  let frame = 0;
+  const timers = [];
+  const run = () => {
+    if (document.activeElement !== target || !target.isConnected) return;
+    keepFocusedInputVisible(target);
+  };
+  frame = window.requestAnimationFrame(() => {
+    frame = 0;
+    run();
+    window.requestAnimationFrame(run);
+  });
+  [90, 220, 380].forEach(delay => timers.push(window.setTimeout(run, delay)));
+  return () => {
+    if (frame) window.cancelAnimationFrame(frame);
+    timers.forEach(timer => window.clearTimeout(timer));
+  };
+}
+
+// iOS Safari/Chrome zooms a field on focus when its computed text is below
+// 16px. Most of the app's compact controls intentionally use 12–15px, so the
+// guard is applied only while a small field is focused and removed on blur.
+// This prevents the zoom-induced layout jump without changing the resting
+// typography of the app.
+function applyIOSInputZoomGuard(element) {
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') return;
+  const ios = /iPad|iPhone|iPod/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+  if (!ios || !element || !element.isConnected || !(element.tagName === 'INPUT' || element.tagName === 'TEXTAREA')) return;
+  const size = Number.parseFloat(window.getComputedStyle(element).fontSize);
+  if (Number.isFinite(size) && size < 16) element.classList.add('zane-ios-input-zoom-guard');
+}
+
+function removeIOSInputZoomGuard(element) {
+  element?.classList?.remove('zane-ios-input-zoom-guard');
+}
+
 // ─── Screen ─────────────────────────────────────────────────────────
 function Screen({ children, scroll = true, style = {} }) {
   const screenRef = React.useRef(null);
@@ -1152,6 +1245,7 @@ function focusableIn(container) {
 function Sheet({ open, onClose, title, titleColor, titleRight, children, renderContent, keyboardHeight = 0, accent = false, center = false, zIndex = 100, panelRef }) {
   const [kbHeight, setKbHeight] = React.useState(0);
   const [vvHeight, setVvHeight] = React.useState(window.innerHeight);
+  const keyboardBaseHeightRef = React.useRef(Math.max(window.innerHeight, window.visualViewport?.height || 0));
   const panelNodeRef = React.useRef(null);
   const previousFocusRef = React.useRef(null);
   const titleIdRef = React.useRef(`sheet-title-${Math.random().toString(36).slice(2)}`);
@@ -1264,7 +1358,15 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       // gap below the sheet.
       const ae = document.activeElement;
       const typing = ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable);
-      const kb = typing ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+      const currentLayoutHeight = Math.max(window.innerHeight, document.documentElement?.clientHeight || 0);
+      // `interactive-widget=resizes-content` can shrink innerHeight together
+      // with visualViewport.height. Keep a keyboard-free baseline so that a
+      // real keyboard is still detected instead of being mistaken for a zero-
+      // height gap. Refresh the baseline only while no field is typing, which
+      // also lets rotation/toolbars settle naturally between edits.
+      if (!typing) keyboardBaseHeightRef.current = Math.max(currentLayoutHeight, vv.height);
+      const keyboardBaseHeight = Math.max(keyboardBaseHeightRef.current, currentLayoutHeight);
+      const kb = typing ? Math.max(0, keyboardBaseHeight - vv.height - vv.offsetTop) : 0;
       setKbHeight(kb);
       setVvHeight(vv.height);
       // When the native keyboard opens, the panel shrinks around it but nothing
@@ -1277,9 +1379,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
         clearTimeout(scrollTimer);
         scrollTimer = setTimeout(() => {
           const el = document.activeElement;
-          if (el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) {
-            el.scrollIntoView({ block: 'nearest', behavior: 'auto' });
-          }
+          keepFocusedInputVisible(el, { boundary: panelNodeRef.current });
         }, 120);
       }
       prevKb = kb;
