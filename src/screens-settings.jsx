@@ -3831,19 +3831,49 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       {/* ══ Data Sheet ══ */}
       <SettingsSheet open={dataSheet} onClose={() => setDataSheet(false)} title="Data">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            {/* backupOk is NOT reset here: it starts false and is only ever
-                set by exportData itself (true on success, false on failure),
-                so a backup already downloaded earlier this session still
-                counts, reopening this sheet shouldn't re-arm the "no backup
-                yet" warning under it for no reason. */}
-            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>BACKUP &amp; RESTORE</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                {/* backupOk is NOT reset here: it starts false and is only ever
+                    set by exportData itself (true on success, false on failure),
+                    so a backup already downloaded earlier this session still
+                    counts, reopening this sheet shouldn't re-arm the "no backup
+                    yet" warning under it for no reason. */}
+                <Btn kind="ghost" onClick={() => exportData()} style={{ width: '100%' }}>Download full backup</Btn>
+                <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+                  Save a complete copy of your Zane data to this device.
+                </div>
+              </div>
+              <div>
+                <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ width: '100%' }}>{importing ? 'Restoring…' : 'Restore from backup'}</Btn>
+                <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+                  Replace your current data with a previously saved backup.
+                </div>
+              </div>
+            </div>
           </div>
-          <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
-          <Btn kind="ghost" onClick={() => setMigrationSheet(true)}>Migrate from other apps</Btn>
-          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>SHARE OR ANALYSE TRAINING</div>
+            <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)} style={{ width: '100%' }}>Export workout history</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Download your training history as CSV, Excel, or PDF.
+            </div>
+          </div>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>MOVE TO ZANE</div>
+            <Btn kind="ghost" onClick={() => setMigrationSheet(true)} style={{ width: '100%' }}>Migrate from other apps</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Bring a workout history or training plan from another app.
+            </div>
+          </div>
+          <div>
+            <Btn kind="ghost" onClick={handleDeleteAll} style={{ width: '100%', color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Permanently remove all data from this account.
+            </div>
+          </div>
         </div>
       </SettingsSheet>
 
