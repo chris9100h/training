@@ -19,7 +19,7 @@
      tags      → Abs Ab/Adductors Back Biceps Calves Chest Forearms Glutes Hamstrings Quads Shoulders Triceps
      equipment → no_equipment bodyweight cable dumbbell barbell_dual machine barbell_single
      category  → big | medium | small
-     movement  → bilateral | unilateral | mobility */
+     movement  → bilateral | unilateral | assisted | mobility */
 window.SYSTEM_EXERCISES = [
   // ── Chest ──
   { id: 'sys_barbell_bench_press', name: 'Barbell Bench Press', tags: ['Chest', 'Triceps', 'Shoulders'], equipment: 'barbell_dual', category: 'medium' },
@@ -59,7 +59,12 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_machine_high_row', name: 'Machine High Row', tags: ['Back', 'Biceps'], equipment: 'machine', category: 'medium' },
   { id: 'sys_pull_up', name: 'Pull-Up', tags: ['Back', 'Biceps'], equipment: 'bodyweight', category: 'medium' },
   { id: 'sys_chin_up', name: 'Chin-Up', tags: ['Back', 'Biceps'], equipment: 'bodyweight', category: 'medium' },
+  { id: 'sys_assisted_pull_up', name: 'Assisted Pull-Up', tags: ['Back', 'Biceps'], equipment: 'machine', category: 'medium', movement: 'assisted' },
   { id: 'sys_inverted_row', name: 'Inverted Row', tags: ['Back', 'Biceps'], equipment: 'bodyweight', category: 'medium', logMode: 'reps' },
+  { id: 'sys_45_degree_back_extension', name: '45° Back Extension', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'bodyweight', category: 'medium', logMode: 'reps' },
+  { id: 'sys_loaded_45_degree_back_extension', name: 'Loaded 45° Back Extension', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'dumbbell', category: 'medium' },
+  { id: 'sys_45_degree_back_extension_machine', name: '45° Back Extension Machine', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'machine', category: 'medium' },
+  { id: 'sys_reverse_hyperextension', name: 'Reverse Hyperextension', tags: ['Back', 'Glutes', 'Hamstrings'], equipment: 'machine', category: 'medium' },
   { id: 'sys_dumbbell_pullover', name: 'Dumbbell Pullover', tags: ['Back', 'Chest'], equipment: 'dumbbell', category: 'small' },
   { id: 'sys_barbell_shrug', name: 'Barbell Shrug', tags: ['Back'], equipment: 'barbell_dual', category: 'small' },
   { id: 'sys_dumbbell_shrug', name: 'Dumbbell Shrug', tags: ['Back'], equipment: 'dumbbell', category: 'small' },
@@ -127,10 +132,12 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_leg_extension', name: 'Leg Extension', tags: ['Quads'], equipment: 'machine', category: 'small' },
   { id: 'sys_smith_squat', name: 'Smith Machine Squat', tags: ['Quads', 'Glutes'], equipment: 'machine', category: 'big' },
   { id: 'sys_goblet_squat', name: 'Goblet Squat', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', category: 'medium' },
+  { id: 'sys_bodyweight_squat', name: 'Bodyweight Squat', tags: ['Quads', 'Glutes'], equipment: 'bodyweight', category: 'medium', logMode: 'reps' },
   { id: 'sys_bulgarian_split_squat', name: 'Bulgarian Split Squat', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', category: 'medium', movement: 'unilateral' },
   { id: 'sys_walking_lunge', name: 'Walking Lunge', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', category: 'medium', movement: 'unilateral' },
   { id: 'sys_reverse_lunge', name: 'Reverse Lunge', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', category: 'medium', movement: 'unilateral' },
   { id: 'sys_dumbbell_step_up', name: 'Dumbbell Step-Up', tags: ['Quads', 'Glutes'], equipment: 'dumbbell', category: 'medium', movement: 'unilateral' },
+  { id: 'sys_bodyweight_step_up', name: 'Bodyweight Step-Up', tags: ['Quads', 'Glutes'], equipment: 'bodyweight', category: 'medium', movement: 'unilateral', logMode: 'reps' },
   { id: 'sys_sissy_squat', name: 'Sissy Squat', tags: ['Quads'], equipment: 'bodyweight', category: 'small', logMode: 'reps' },
   { id: 'sys_wall_sit', name: 'Wall Sit', tags: ['Quads'], equipment: 'bodyweight', category: 'small', logMode: 'checkbox' },
   { id: 'sys_single_leg_extension', name: 'Single-Leg Leg Extension', tags: ['Quads'], equipment: 'machine', category: 'small', movement: 'unilateral' },
@@ -149,6 +156,7 @@ window.SYSTEM_EXERCISES = [
   { id: 'sys_hip_thrust', name: 'Barbell Hip Thrust', tags: ['Glutes', 'Hamstrings'], equipment: 'barbell_dual', category: 'big' },
   { id: 'sys_machine_hip_thrust', name: 'Machine Hip Thrust', tags: ['Glutes'], equipment: 'machine', category: 'medium' },
   { id: 'sys_barbell_glute_bridge', name: 'Barbell Glute Bridge', tags: ['Glutes'], equipment: 'barbell_dual', category: 'medium' },
+  { id: 'sys_bodyweight_glute_bridge', name: 'Bodyweight Glute Bridge', tags: ['Glutes', 'Hamstrings'], equipment: 'bodyweight', category: 'medium', logMode: 'reps' },
   { id: 'sys_sumo_deadlift', name: 'Sumo Deadlift', tags: ['Glutes', 'Hamstrings', 'Quads'], equipment: 'barbell_dual', category: 'big' },
   { id: 'sys_cable_glute_kickback', name: 'Cable Glute Kickback', tags: ['Glutes'], equipment: 'cable', category: 'small', movement: 'unilateral' },
   { id: 'sys_kettlebell_swing', name: 'Kettlebell Swing', tags: ['Glutes', 'Hamstrings'], equipment: 'dumbbell', category: 'medium' },

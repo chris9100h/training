@@ -37,27 +37,55 @@ function MiniSheet({ zIndex = 300, dim = true, onClose, style, title, titleColor
   );
 }
 
-// Shared look for the two week-overlay buttons (Deload / Cleanup) that sit
-// side by side under the active plan's day strip. Dashed and muted while idle,
-// solid and accent-tinted while that overlay is running. Both labels stay one
-// word so the pair fits a phone width; what each one actually does is spelled
-// out in the confirm/sheet the tap opens, not on the button.
-// The pair has to survive a 320px screen, where the outer 22px screen padding
-// plus the card's own 22px leaves ~112px per button. A full "CLEANUP · 3D"
-// wants a bit more than that, so the label truncates with an ellipsis instead
-// of being clipped mid-glyph; every width from ~375px up shows it whole.
-function overlayBtnStyle(active) {
-  return {
-    flex: 1, minWidth: 0, padding: '10px 6px', borderRadius: 6, cursor: 'pointer',
-    display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
-    background: active ? 'rgba(var(--accent-rgb),0.12)' : 'transparent',
-    border: `1px ${active ? 'solid' : 'dashed'} ${active ? UI.goldSoft : UI.hairStrong}`,
-    color: active ? UI.gold : UI.inkSoft,
-    fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em',
-    textTransform: 'uppercase',
-  };
+// Centered action picker for the active plan. It deliberately follows the
+// UnitPromptModal pattern: three clear, tappable cards instead of three
+// always-visible controls competing for space on the plan card.
+function PlanActionsModal({ onClose, onDeload, onCleanup, onProgress, deloadLabel, cleanupLabel }) {
+  const options = [
+    { icon: 'fa-battery-quarter', label: deloadLabel || 'Deload', sub: 'Run or end a lighter recovery week.', onClick: onDeload },
+    { icon: 'fa-broom', label: cleanupLabel || 'Cleanup', sub: 'Reduce training loads while keeping the routine.', onClick: onCleanup },
+    { icon: 'fa-chart-line', label: 'Show progress', sub: 'See what this training block has built so far.', onClick: onProgress },
+  ];
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9998,
+      background: 'rgba(0,0,0,0.72)',
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 32,
+    }} onClick={onClose}>
+      <div style={{
+        width: '100%', maxWidth: 360, background: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
+        border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '28px 24px',
+        display: 'flex', flexDirection: 'column', gap: 16, boxShadow: '0 32px 80px rgba(0,0,0,0.6)',
+        animation: 'fadeUp 0.3s ease',
+      }} onClick={e => e.stopPropagation()}>
+        <div>
+          <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.gold, fontWeight: 400, marginBottom: 8, textTransform: 'uppercase' }}>Plan actions</div>
+          <div style={{ fontSize: 13, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
+            Recovery tools and your current progress, all in one place.
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {options.map(opt => (
+            <button key={opt.label} onClick={opt.onClick} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+              padding: '12px 14px', borderRadius: 6, cursor: 'pointer',
+              background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, textShadow: 'none',
+              textAlign: 'left', WebkitTapHighlightColor: 'transparent',
+            }}>
+              <i className={`fa-solid ${opt.icon}`} style={{ width: 20, textAlign: 'center', color: UI.gold, fontSize: 16, flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 15, fontWeight: 600, color: UI.ink, fontFamily: UI.fontUi }}>{opt.label}</div>
+                <div style={{ fontSize: 12, color: UI.inkSoft, marginTop: 2, fontFamily: UI.fontUi, lineHeight: 1.35 }}>{opt.sub}</div>
+              </div>
+              <ChevronRight />
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
 }
-const overlayBtnLabelStyle = { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' };
 
 const daysArr = s => Array.isArray(s?.days) ? s.days : [];
 
@@ -88,6 +116,7 @@ function planDescriptor(s) {
 function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
   const [archivedOpen, setArchivedOpen] = useStateS(false);
   const [newPlanPicker, setNewPlanPicker] = useStateS(false);
+  const [planActionsOpen, setPlanActionsOpen] = useStateS(false);
   const [confirmEl, confirm] = useConfirm();
   const importRef = React.useRef(null);
   // Coaches split their own Plan tab into "My Plans" (their own training) vs
@@ -169,6 +198,26 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
     // sit open across midnight, which would move the boundary.
     const sinceISO = LB.nextCleanupStartISO(store);
     await LB.startCleanup(userId, { ...store, settings: { ...store.settings, cleanupPercent: pct } }, setStore, sinceISO);
+  };
+
+  const showProgress = async (schedule) => {
+    setPlanActionsOpen(false);
+    const mesoCapable = !!(schedule?.mesocycle_weeks || schedule?.mesocycle_autoregulate);
+    if (!mesoCapable) {
+      await confirm('Progress recap is available once this plan has an active autoregulated or mesocycle block.', { title: 'Show progress', ok: 'Got it', cancel: null });
+      return;
+    }
+    const mesoState = LB.getMesoState(schedule?.id, store.mesoStates);
+    if (!mesoState) {
+      await confirm('Progress recap is available once this plan has an active autoregulated or mesocycle block.', { title: 'Show progress', ok: 'Got it', cancel: null });
+      return;
+    }
+    const recap = LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+    if (!recap || recap.sessionCount === 0) {
+      await confirm('There is no completed training in the current block yet. Keep training and your progress will appear here.', { title: 'Show progress', ok: 'Got it', cancel: null });
+      return;
+    }
+    await confirm(<BlockRecap recap={recap} />, { title: 'Your progress so far', ok: 'Done', cancel: null, preventBackdropClose: true });
   };
 
   const importPlan = (e) => {
@@ -255,6 +304,16 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
         }
       />
       {newPlanPicker && <NewPlanPickerModal onClose={() => setNewPlanPicker(false)} go={go} />}
+      {planActionsOpen && (
+        <PlanActionsModal
+          onClose={() => setPlanActionsOpen(false)}
+          deloadLabel={isDeload && deloadRemaining != null ? `Deload · ${deloadRemaining}d` : 'Deload'}
+          cleanupLabel={cleanupStartsOn ? `Cleanup · ${fmtStartDay(cleanupStartsOn).split(',')[0]}` : cleanupRunning && cleanupRemaining != null ? `Cleanup · ${cleanupRemaining}d` : 'Cleanup'}
+          onDeload={(e) => { setPlanActionsOpen(false); toggleDeload(e); }}
+          onCleanup={(e) => { setPlanActionsOpen(false); toggleCleanup(e); }}
+          onProgress={() => showProgress(store.schedules.find(s => s.id === store.activeScheduleId))}
+        />
+      )}
       {cleanupSheet && (
         <MiniSheet title="Cleanup week" onClose={() => setCleanupSheet(false)}>
           <CleanupStartBody
@@ -406,24 +465,18 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   );
                 })}
               </div>
-              {/* An active overlay reads from the fill + the reversed icon, and
-                  adds its days left where there is a countdown to show (flex
-                  plans end by session count, so they have none). Tapping an
-                  active one ends it, which the confirm spells out. */}
+              {/* Recovery and progress actions live behind one picker so the
+                  active plan card stays quiet and readable on small screens. */}
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-                <button onClick={toggleDeload} style={overlayBtnStyle(isDeload)}>
-                  <i className={`fa-solid ${isDeload ? 'fa-arrow-rotate-left' : 'fa-battery-quarter'}`} style={{ fontSize: 12, flexShrink: 0 }} />
-                  <span style={overlayBtnLabelStyle}>
-                    {isDeload && deloadRemaining != null ? `Deload · ${deloadRemaining}d` : 'Deload'}
-                  </span>
-                </button>
-                <button onClick={toggleCleanup} style={overlayBtnStyle(isCleanup)}>
-                  <i className={`fa-solid ${isCleanup ? 'fa-arrow-rotate-left' : 'fa-broom'}`} style={{ fontSize: 12, flexShrink: 0 }} />
-                  <span style={overlayBtnLabelStyle}>
-                    {cleanupStartsOn ? `Cleanup · ${fmtStartDay(cleanupStartsOn).split(',')[0]}`
-                      : cleanupRunning && cleanupRemaining != null ? `Cleanup · ${cleanupRemaining}d`
-                      : 'Cleanup'}
-                  </span>
+                <button onClick={(e) => { e.stopPropagation(); setPlanActionsOpen(true); }} style={{
+                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                  padding: '11px 14px', borderRadius: 6, cursor: 'pointer',
+                  background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkSoft,
+                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  WebkitTapHighlightColor: 'transparent',
+                }}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><i className="fa-solid fa-sliders" style={{ color: UI.gold, fontSize: 12 }} /> Plan actions</span>
+                  <ChevronRight />
                 </button>
               </div>
             </BracketFrame>

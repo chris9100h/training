@@ -4291,6 +4291,21 @@ async function testAsync(name, fn) {
     const bad = (dbSandbox.window.SYSTEM_EXERCISES || []).filter(e => !valid.has(e.category));
     assert.strictEqual(bad.length, 0, `entries without a valid category: ${bad.map(e => e.name).join(', ')}`);
   });
+  test('system exercise additions keep bodyweight, loaded, machine and assisted semantics', () => {
+    const dbSandbox = { window: {} };
+    vm.createContext(dbSandbox);
+    vm.runInContext(fs.readFileSync(path.join(__dirname, '../../src/exercise-db.js'), 'utf8'), dbSandbox, { filename: 'exercise-db.js' });
+    const byName = new Map((dbSandbox.window.SYSTEM_EXERCISES || []).map(e => [e.name, e]));
+    const bodyweight = byName.get('45° Back Extension');
+    assert.strictEqual(bodyweight?.equipment, 'bodyweight');
+    assert.strictEqual(bodyweight?.logMode, 'reps');
+    assert.deepStrictEqual([...bodyweight.tags], ['Back', 'Glutes', 'Hamstrings']);
+    assert.strictEqual(byName.get('Loaded 45° Back Extension')?.equipment, 'dumbbell');
+    assert.strictEqual(byName.get('45° Back Extension Machine')?.equipment, 'machine');
+    assert.strictEqual(byName.get('Assisted Pull-Up')?.equipment, 'machine');
+    assert.strictEqual(byName.get('Assisted Pull-Up')?.movement, 'assisted');
+    assert.strictEqual(byName.get('Bodyweight Step-Up')?.movement, 'unilateral');
+  });
   test('systemExerciseToRow: reps mode → no_weight_reps true; defaults when omitted', () => {
     const reps = LB.systemExerciseToRow({ id: 'sys_p', name: 'Push-Up', tags: ['Chest'], equipment: 'bodyweight', logMode: 'reps' });
     assert.strictEqual(reps.log_mode, 'reps');
