@@ -3804,11 +3804,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
             Bring your training history or a training plan into Zane. The file is analysed first and nothing is saved until you review and confirm it.
           </div>
-          <Btn kind="ghost" onClick={runWorkoutImport} style={{ width: '100%' }}>
-            <i className="fa-solid fa-clock-rotate-left" style={{ marginRight: 8 }} /> Import workout history
-          </Btn>
           <Btn kind="ghost" onClick={runPlanImport} style={{ width: '100%' }}>
             <i className="fa-solid fa-list-check" style={{ marginRight: 8 }} /> Import a training plan
+          </Btn>
+          <Btn kind="ghost" onClick={runWorkoutImport} style={{ width: '100%' }}>
+            <i className="fa-solid fa-clock-rotate-left" style={{ marginRight: 8 }} /> Import workout history
           </Btn>
           <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45 }}>
             Plans are added as a new flexible plan. Existing plans and history are never overwritten.
