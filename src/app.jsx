@@ -3575,7 +3575,10 @@ function App() {
     else probeSyncConnection(uid);
   };
 
-  const openPwaInstallGuide = useCallbackA(async () => {
+  // This helper lives after the phase returns below, so it must stay a plain
+  // function rather than a React hook. A hook here would make the number of
+  // hooks differ between the loading/login and ready renders (React #310).
+  const openPwaInstallGuide = async () => {
     zaneSnoozePwaPrompt();
     setPwaInstallPending(false);
     const platform = UI.pwaInstallPlatform();
@@ -3585,7 +3588,7 @@ function App() {
     // illustrated guide so the button works even on a cold boot.
     try { await window.__loadScreenModule?.('onboarding'); } catch (_) {}
     window.__startTour?.(tourKey);
-  }, []);
+  };
 
   // An update may be installed while the user is anywhere in the app, but a
   // reload is only safe on a quiet Home surface. Route checks protect editors;
