@@ -2385,10 +2385,13 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   // day rolls over (long-lived PWA session), but stay memoized within a day.
   const todayKey = LB.fmtISO(today);
 
-  // Monday of current week
-  const dow = today.getDay();
-  const monday = new Date(today); monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1));
-  const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
+  // The Stats tab's calendar-week cards use the same configurable reporting
+  // boundary as Health/Friends. Training-plan weekdays remain unchanged below.
+  const weekStartDay = LB.normalizeWeekStartDay(store.settings?.weekStartDay);
+  const reportingStartISO = LB.reportingWeekStartISO(today, weekStartDay);
+  const reportingEndISO = LB.reportingWeekEndISO(reportingStartISO);
+  const reportingStart = LB.parseDate(reportingStartISO);
+  const reportingEnd = LB.parseDate(reportingEndISO);
 
   // Determine whether we're in cycle mode and compute current cycle window
   const sch = store.schedules.find(s => s.id === store.activeScheduleId);
@@ -2445,8 +2448,8 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   const thisPeriodSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
     if (isCycleMode) return selectedCycleStart && selectedCycleEnd && d >= selectedCycleStart && d <= selectedCycleEnd;
-    return d >= monday && d <= sunday;
-  }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd]);
+    return d >= reportingStart && d <= reportingEnd;
+  }), [sessions, isCycleMode, selectedCycleStart, selectedCycleEnd, reportingStartISO, reportingEndISO]);
 
   // Sessions windowed out of the 70-day boot fetch carry rollup aggregates (aggExercises)
   // but no local entries. If just one of them gets lazy-loaded elsewhere (e.g. opening
@@ -2484,8 +2487,8 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   // Calendar-week sessions, used for consistency card ("This Week")
   const thisWeekSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
-    return d >= monday && d <= sunday;
-  }), [sessions, todayKey]);
+    return d >= reportingStart && d <= reportingEnd;
+  }), [sessions, todayKey, reportingStartISO, reportingEndISO]);
 
   const thisMonthSessions = useMemoL(() => sessions.filter(s => {
     const d = LB.parseDate(s.date);
@@ -2510,7 +2513,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
   const weeklyVolume = useMemoL(() => {
     const weeks = [];
     for (let w = 7; w >= 0; w--) {
-      const wMon = new Date(monday); wMon.setDate(monday.getDate() - w * 7);
+      const wMon = LB.parseDate(reportingStartISO); wMon.setDate(wMon.getDate() - w * 7);
       const wSun = new Date(wMon); wSun.setDate(wMon.getDate() + 6);
       const vol = sessions
         .filter(s => { const d = LB.parseDate(s.date); return d >= wMon && d <= wSun; })
@@ -2519,7 +2522,7 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
       weeks.push({ label, vol });
     }
     return weeks;
-  }, [sessions, todayKey]);
+  }, [sessions, todayKey, reportingStartISO, store.exercises, store.dailyLogs]);
 
   // All-time stats
   const totalVol = sessions.reduce((sum, s) => sum + LB.totalVolume(s, store.exercises, store.dailyLogs), 0);
@@ -2616,15 +2619,11 @@ function StatsTab({ store, setStore, sessions, go, userId }) {
     const oldest = relevant.reduce((min, s) =>
       s.date.slice(0, 10) < min ? s.date.slice(0, 10) : min, relevant[0].date.slice(0, 10));
     const anchor = planStart ?? LB.parseDate(oldest);
-    // Monday of the anchor week
-    const anchorDay = LB.isoWd(anchor);
-    const anchorMonday = new Date(anchor); anchorMonday.setDate(anchor.getDate() - anchorDay); anchorMonday.setHours(0,0,0,0);
-    // Monday of the current week
-    const todayDay = LB.isoWd(today);
-    const currentMonday = new Date(today); currentMonday.setDate(today.getDate() - todayDay); currentMonday.setHours(0,0,0,0);
-    const weeks = Math.round((currentMonday - anchorMonday) / (7 * 86400000)) + 1;
+    const anchorWeekStart = LB.parseDate(LB.reportingWeekStartISO(anchor, weekStartDay));
+    const currentWeekStart = LB.parseDate(reportingStartISO);
+    const weeks = Math.round((currentWeekStart - anchorWeekStart) / (7 * 86400000)) + 1;
     return (relevant.length / Math.max(1, weeks)).toFixed(1);
-  }, [sessions, planStart]);
+  }, [sessions, planStart, weekStartDay, reportingStartISO]);
 
   const { missedWorkouts, sickVacationMissed } = useMemoL(() => {
     if (!sch || !planStart) return { missedWorkouts: 0, sickVacationMissed: 0 };
@@ -2991,13 +2990,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
           )}
           {(() => {
             const now = new Date(); now.setHours(12,0,0,0);
-            const dow = now.getDay();
-            const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-            const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+            const weekStartDay = LB.normalizeWeekStartDay(store.settings?.weekStartDay);
+            const reportingWeekStart = LB.parseDate(LB.reportingWeekStartISO(now, weekStartDay));
+            const previousReportingWeekStart = new Date(reportingWeekStart);
+            previousReportingWeekStart.setDate(previousReportingWeekStart.getDate() - 7);
             const getGroup = (dateStr) => {
               const d = LB.parseDate(dateStr);
-              if (d >= monday) return 'THIS WEEK';
-              if (d >= lastMonday) return 'LAST WEEK';
+              if (d >= reportingWeekStart) return 'THIS WEEK';
+              if (d >= previousReportingWeekStart) return 'LAST WEEK';
               return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
             };
             const items = [];
@@ -3087,13 +3087,14 @@ function HistoryScreen({ store, setStore, go, userId, initialTab }) {
         const logs = [...(store.cardioLogs || [])].sort((a, b) => b.date.localeCompare(a.date));
         const du = LB.cardioDistUnit();
         const now = new Date(); now.setHours(12,0,0,0);
-        const dow = now.getDay();
-        const monday = new Date(now); monday.setDate(now.getDate() - (dow === 0 ? 6 : dow - 1));
-        const lastMonday = new Date(monday); lastMonday.setDate(monday.getDate() - 7);
+        const weekStartDay = LB.normalizeWeekStartDay(store.settings?.weekStartDay);
+        const reportingWeekStart = LB.parseDate(LB.reportingWeekStartISO(now, weekStartDay));
+        const previousReportingWeekStart = new Date(reportingWeekStart);
+        previousReportingWeekStart.setDate(previousReportingWeekStart.getDate() - 7);
         const getGroup = (dateStr) => {
           const d = LB.parseDate(dateStr);
-          if (d >= monday) return 'THIS WEEK';
-          if (d >= lastMonday) return 'LAST WEEK';
+          if (d >= reportingWeekStart) return 'THIS WEEK';
+          if (d >= previousReportingWeekStart) return 'LAST WEEK';
           return d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }).toUpperCase();
         };
         const paceLbl = ['', 'Easy', 'Light', 'Steady', 'Solid', 'Hard', 'Max'];

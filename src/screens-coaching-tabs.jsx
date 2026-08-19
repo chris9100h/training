@@ -122,6 +122,194 @@ function CoachingMultiView({ views, renderView, initialView }) {
   );
 }
 
+// ─── Coach review queue ──────────────────────────────────────────────────────
+// This stays inside My Clients rather than becoming another coaching role.
+// Check-in notifications already use a device-local seen marker; the queue
+// adds a small local dismissal map for due items so it remains useful without
+// introducing a new table before we know how coaches use it.
+const COACH_REVIEW_QUEUE_KEY = 'logbook-coach-review-queue';
+
+function readCoachReviewQueue() {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(COACH_REVIEW_QUEUE_KEY) || '{}');
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_) { return {}; }
+}
+
+function writeCoachReviewQueue(value) {
+  try {
+    const entries = Object.entries(value || {});
+    localStorage.setItem(COACH_REVIEW_QUEUE_KEY, JSON.stringify(Object.fromEntries(entries.slice(-200))));
+  } catch (_) {}
+}
+
+function CoachNeedsAttention({ clients, checkinMap, checkinWeekMap, unreadNotes, go, onRequestCheckin, weekStartDay = 0 }) {
+  const [dismissed, setDismissed] = useStateC(readCoachReviewQueue);
+  const [expanded, setExpanded] = useStateC(false);
+  const [requested, setRequested] = useStateC({});
+  const activeClients = (clients || []).filter(c => c.status === 'active');
+  const clientById = new Map(activeClients.map(c => [c.clientId, c]));
+  const coachWeekStart = LB.checkinWeekStart?.(weekStartDay) || new Date().toISOString().slice(0, 10);
+  const items = [];
+
+  const isDismissed = key => !!dismissed[key];
+  const clientLabel = c => c.clientName || c.clientEmail || 'Client';
+
+  activeClients.forEach(client => {
+    const checkinAt = Object.prototype.hasOwnProperty.call(checkinMap || {}, client.id)
+      ? checkinMap[client.id]
+      : undefined;
+    const submittedSeen = typeof checkinAt === 'string' && (() => {
+      try { return localStorage.getItem(`logbook-coach-ci-seen-${client.id}`) === checkinAt; } catch (_) { return false; }
+    })();
+    if (typeof checkinAt === 'string' && !submittedSeen) {
+      items.push({
+        key: `submitted:${client.id}:${checkinAt}`,
+        type: 'submitted',
+        icon: 'fa-clipboard-check',
+        label: 'CHECK-IN SUBMITTED',
+        detail: `${clientLabel(client)} sent a new weekly check-in`,
+        client,
+        checkinAt,
+        initialTab: 'checkins',
+      });
+    }
+
+    if (checkinAt === null && client.checkinEnabled !== false) {
+      // The RPC resolves the boundary with the client's own setting and
+      // timezone. Use that exact server-provided week for the local dismissal
+      // key; falling back to the coach's setting keeps old/partial responses
+      // compatible while the new column rolls out.
+      const weekStart = checkinWeekMap?.[client.id] || coachWeekStart;
+      const key = `due:${client.id}:${weekStart}`;
+      if (!isDismissed(key)) {
+        items.push({
+          key,
+          type: 'due',
+          icon: 'fa-bell',
+          label: 'CHECK-IN DUE',
+          detail: `${clientLabel(client)} has not submitted this week`,
+          client,
+          initialTab: 'checkins',
+        });
+      }
+    }
+  });
+
+  const notesByClient = new Map();
+  (unreadNotes || []).forEach(note => {
+    const client = clientById.get(note.authorId);
+    if (!client) return;
+    const list = notesByClient.get(client.clientId) || [];
+    list.push(note);
+    notesByClient.set(client.clientId, list);
+  });
+  notesByClient.forEach((notes, clientId) => {
+    const client = clientById.get(clientId);
+    const sorted = notes.slice().sort((a, b) => String(b.createdAt || '').localeCompare(String(a.createdAt || '')));
+    const visibleNotes = sorted.filter(note => !isDismissed(`note:${note.id}`));
+    if (!visibleNotes.length) return;
+    const latest = visibleNotes[0];
+    const count = visibleNotes.length;
+    items.push({
+      key: `notes:${client.id}:${latest.id}`,
+      type: 'notes',
+      icon: 'fa-comment',
+      label: count === 1 ? 'NEW MESSAGE' : `${count} NEW MESSAGES`,
+      detail: `${clientLabel(client)}${latest.body ? ` · ${String(latest.body).replace(/\s+/g, ' ').slice(0, 72)}` : ''}`,
+      client,
+      noteIds: visibleNotes.map(note => note.id),
+      initialTab: 'notes',
+    });
+  });
+
+  const priority = { submitted: 0, notes: 1, due: 2 };
+  items.sort((a, b) => (priority[a.type] - priority[b.type]) || String(a.detail).localeCompare(String(b.detail)));
+  const visibleItems = expanded ? items : items.slice(0, 3);
+
+  const dismiss = async item => {
+    if (item.type === 'submitted' && item.checkinAt) {
+      try { localStorage.setItem(`logbook-coach-ci-seen-${item.client.id}`, item.checkinAt); } catch (_) {}
+    }
+    if (item.type === 'notes' && item.noteIds?.length) {
+      try { await LB.markCoachingNotesRead(item.noteIds); }
+      catch (_) { UI.alert('Could not mark the message as reviewed.'); return false; }
+    }
+    const next = { ...dismissed, [item.key]: new Date().toISOString() };
+    setDismissed(next);
+    writeCoachReviewQueue(next);
+    return true;
+  };
+
+  const openItem = async item => {
+    if (item.type !== 'due') await dismiss(item);
+    go({
+      name: 'coaching-client',
+      coachingId: item.client.id,
+      clientId: item.client.clientId,
+      clientName: item.client.clientName,
+      initialTab: item.initialTab,
+      checkinAt: item.checkinAt,
+      backRoute: 'coaching',
+    });
+  };
+
+  const handleRemind = async (event, item) => {
+    event.stopPropagation();
+    if (requested[item.client.id]) return;
+    try {
+      await onRequestCheckin(item.client.id);
+      setRequested(current => ({ ...current, [item.client.id]: true }));
+      setTimeout(() => setRequested(current => ({ ...current, [item.client.id]: false })), 4000);
+    } catch (_) {
+      UI.alert('Could not send the reminder. Please try again.');
+    }
+  };
+
+  if (!activeClients.length) return null;
+
+  return (
+    <div style={{ margin: '4px 12px 4px', padding: '12px 14px', background: UI.bgInset, border: `var(--hair-width) solid ${items.length ? 'rgba(var(--accent-rgb),0.28)' : UI.hair}`, borderRadius: 8 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: visibleItems.length ? 10 : 0 }}>
+        <i className="fa-solid fa-inbox" style={{ color: 'var(--accent)', fontSize: 13 }} />
+        <span style={{ flex: 1, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.1em', color: UI.inkSoft }}>NEEDS ATTENTION</span>
+        <span style={{ fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', color: items.length ? 'var(--accent)' : UI.inkFaint }}>{items.length ? items.length : 'ALL CLEAR'}</span>
+      </div>
+      {visibleItems.map(item => (
+        <div
+          key={item.key}
+          onClick={() => openItem(item)}
+          style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '9px 0', borderTop: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+        >
+          <i className={`fa-solid ${item.icon}`} style={{ width: 18, textAlign: 'center', color: 'var(--accent)', fontSize: 12, flexShrink: 0 }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 600 }}>{item.detail}</div>
+            <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 9, letterSpacing: '0.07em', marginTop: 2 }}>{item.label}</div>
+          </div>
+          {item.type === 'due' && (
+            <button
+              onClick={event => handleRemind(event, item)}
+              style={{ background: requested[item.client.id] ? 'rgba(var(--accent-rgb),0.15)' : 'transparent', border: `var(--hair-width) solid ${requested[item.client.id] ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: requested[item.client.id] ? 'var(--accent)' : UI.inkFaint, borderRadius: 4, padding: '5px 7px', fontFamily: UI.fontUi, fontSize: 9, fontWeight: 700, letterSpacing: '0.05em', cursor: requested[item.client.id] ? 'default' : 'pointer', flexShrink: 0 }}
+            >{requested[item.client.id] ? 'SENT' : 'REMIND'}</button>
+          )}
+          <button
+            aria-label="Mark reviewed"
+            onClick={async event => { event.stopPropagation(); await dismiss(item); }}
+            style={{ background: 'transparent', border: 'none', color: UI.inkFaint, padding: '5px 3px', cursor: 'pointer', flexShrink: 0 }}
+          ><i className="fa-solid fa-check" style={{ fontSize: 12 }} /></button>
+          <ChevronRight />
+        </div>
+      ))}
+      {items.length > 3 && (
+        <button
+          onClick={() => setExpanded(value => !value)}
+          style={{ width: '100%', marginTop: 8, padding: '7px 0 2px', background: 'transparent', border: 'none', borderTop: `var(--hair-width) solid ${UI.hair}`, color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.08em', cursor: 'pointer' }}
+        >{expanded ? 'SHOW LESS' : `VIEW ALL ${items.length}`}</button>
+      )}
+    </div>
+  );
+}
+
 // ─── CoachingTabCoachView ─────────────────────────────────────────────────────
 
 function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false }) {
@@ -133,6 +321,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   // card would announce a status the client has not entered yet.
   const [statusSinceMap, setStatusSinceMap] = useStateC({});
   const [checkinMap, setCheckinMap] = useStateC({});
+  const [checkinWeekMap, setCheckinWeekMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
@@ -155,8 +344,13 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           setStatusMap(sm);
           setStatusSinceMap(ssm);
           const cm = {};
-          checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
+          const cwm = {};
+          checkinData.forEach(r => {
+            cm[r.coachingId] = r.checkedInAt;
+            if (r.reportingWeekStart) cwm[r.coachingId] = r.reportingWeekStart;
+          });
           setCheckinMap(cm);
+          setCheckinWeekMap(cwm);
         })
         .catch(() => {});
     };
@@ -322,6 +516,16 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           })}
         </div>
       </Sheet>
+
+      <CoachNeedsAttention
+        clients={allClients}
+        checkinMap={checkinMap}
+        checkinWeekMap={checkinWeekMap}
+        unreadNotes={unreadNotes.filter(n => !n.coachingId?.startsWith('support_'))}
+        go={go}
+        onRequestCheckin={handleRequestCheckin}
+        weekStartDay={store.settings?.weekStartDay}
+      />
 
       {allClients.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '60px 24px', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>
@@ -765,7 +969,12 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
           <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Week of {fmtWeek(ci.weekStart)}</div>
           {has(wToday) && (
             <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
-              {wToday} {wUnit}{has(wAvg) ? ` · avg ${wAvg} ${wUnit}` : ''}
+              {wToday} {wUnit}{has(wAvg) ? ` · avg ${wAvg} ${wUnit}` : ''}{ci.photos?.length ? ` · ${ci.photos.length} photo${ci.photos.length === 1 ? '' : 's'}` : ''}
+            </div>
+          )}
+          {!has(wToday) && ci.photos?.length > 0 && (
+            <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
+              {ci.photos.length} photo{ci.photos.length === 1 ? '' : 's'} attached
             </div>
           )}
         </div>
@@ -863,6 +1072,40 @@ function CheckInCard({ ci, prevCi, schema, defaultOpen = false, embedded = false
               <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>ADDITIONAL</div>
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 8 }}>
                 {extraKeys.map(k => <StatPill key={k} label={k.replace(/_/g, ' ')} value={String(responses[k])} />)}
+              </div>
+            </div>
+          )}
+
+          {Array.isArray(ci.photos) && ci.photos.length > 0 && (
+            <div>
+              <div className="knurl" style={{ margin: '0 0 6px' }} />
+              <div className="micro" style={{ color: UI.inkFaint, marginBottom: 8 }}>
+                PHOTOS · {ci.photos.length}
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                {ci.photos.map(photo => (
+                  photo.previewUrl ? (
+                    <a key={photo.id} href={photo.previewUrl} target="_blank" rel="noreferrer"
+                      style={{ display: 'block', background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, overflow: 'hidden' }}>
+                      <img src={photo.previewUrl} alt={photo.fileName || 'Check-in photo'}
+                        style={{ display: 'block', width: '100%', aspectRatio: '4 / 3', objectFit: 'cover' }} />
+                    </a>
+                  ) : photo.driveUrl ? (
+                    <a key={photo.id} href={photo.driveUrl} target="_blank" rel="noreferrer"
+                      style={{ minWidth: 0, minHeight: 82, padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, color: UI.inkSoft, textDecoration: 'none', fontFamily: UI.fontUi, textAlign: 'center' }}>
+                      <i className="fa-brands fa-google-drive" style={{ color: 'var(--accent)', fontSize: 18 }} />
+                      <span style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>{photo.fileName || 'Photo'}</span>
+                      <span style={{ fontSize: 9, color: UI.inkFaint, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Open in Drive</span>
+                    </a>
+                  ) : (
+                    <div key={photo.id}
+                      style={{ minWidth: 0, minHeight: 82, padding: '12px 10px', boxSizing: 'border-box', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6, background: UI.bgRaised, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center' }}>
+                      <i className="fa-solid fa-cloud-arrow-up" style={{ fontSize: 17 }} />
+                      <span style={{ width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 11 }}>{photo.fileName || 'Photo'}</span>
+                      <span style={{ fontSize: 9, letterSpacing: '0.06em', textTransform: 'uppercase' }}>Uploading</span>
+                    </div>
+                  )
+                ))}
               </div>
             </div>
           )}
@@ -1455,15 +1698,16 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const deleteCheckinTemplate = (id) => {
     setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).filter(t => t.id !== id) }));
   };
-  const weekStart = LB.checkinWeekStart();
-  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet, only
-  // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
-  const canSubmitToday = new Date().getDay() !== 0;
-  // Monday of the current training week (what's accumulating right now for the upcoming check-in)
-  const previewWeekStart = (() => {
-    const t = new Date(); const d = t.getDay();
-    const m = new Date(t); m.setDate(t.getDate() - (d === 0 ? 6 : d - 1));
-    return LB.fmtISO(m);
+  const weekStartDay = LB.normalizeWeekStartDay(store?.settings?.weekStartDay);
+  const weekStart = LB.checkinWeekStart(weekStartDay);
+  // The configured last day is still part of the current week, so the form
+  // opens from the boundary day onward. On that boundary day the preview shows
+  // the newly started week while the submitted form covers the previous one.
+  const canSubmitToday = !LB.reportingWeekEndsToday(new Date(), weekStartDay);
+  const previewWeekStart = LB.reportingWeekStartISO(new Date(), weekStartDay);
+  const reportingWeekLabel = (() => {
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return `${names[weekStartDay]}–${names[(weekStartDay + 6) % 7]}`;
   })();
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [photosEnabled, setPhotosEnabled] = useStateC(false);
@@ -1557,7 +1801,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
             {isNew
-              ? <>Week of <strong>{fmtWeek(formWeek)}</strong>. Covers Mon–Sun of last week.</>
+              ? <>Week of <strong>{fmtWeek(formWeek)}</strong>. Covers {reportingWeekLabel} of last week.</>
               : <>Editing <strong>week of {fmtWeek(formWeek)}</strong>. The change is logged to your coach.</>}
           </div>
           <button onClick={() => setEditTarget(null)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
@@ -1601,19 +1845,17 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               Submit this week's check-in
             </button>
           )}
-          {/* Sunday only (!canSubmitToday). The preview shows previewWeekStart,
-              the CURRENT in-progress week, which is independent of weekStart's
-              submission status, so it must NOT be gated on !thisWeek: since
-              checkinWeekStart now correctly points weekStart at last week on
-              Sunday (already submitted → thisWeek truthy), gating on !thisWeek
-              would wrongly hide the preview whenever last week was checked in. */}
+          {/* The reporting week's last day only (!canSubmitToday). The preview
+              shows previewWeekStart, the CURRENT in-progress week, which is
+              independent of weekStart's submission status, so it must NOT be
+              gated on !thisWeek. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'none', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
-          {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
+          {previewResponses && canSubmitToday && LB.isoWd(new Date()) !== weekStartDay && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : 'var(--hair-width)'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />

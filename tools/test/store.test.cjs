@@ -289,6 +289,21 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.todayISO(), expected);
   });
 
+  test('reporting week helpers support a configurable boundary without changing plan math', () => {
+    assert.strictEqual(LB.normalizeWeekStartDay(5), 5);
+    assert.strictEqual(LB.normalizeWeekStartDay('6'), 6);
+    assert.strictEqual(LB.normalizeWeekStartDay(-1), 0);
+    assert.strictEqual(LB.normalizeWeekStartDay(9), 0);
+    assert.strictEqual(LB.reportingWeekStartISO('2026-08-15', 5), '2026-08-15', 'Saturday starts Saturday–Friday');
+    assert.strictEqual(LB.reportingWeekEndISO('2026-08-15'), '2026-08-21');
+    assert.strictEqual(LB.reportingWeekStartISO('2026-08-20', 5), '2026-08-15');
+    assert.strictEqual(LB.previousReportingWeekStartISO('2026-08-15', 5), '2026-08-08');
+    assert.strictEqual(LB.reportingWeekEndsToday('2026-08-21', 5), true);
+    assert.strictEqual(LB.reportingWeekEndsToday('2026-08-22', 5), false);
+    assert.strictEqual(LB.checkinWeekStart(5, new Date('2026-08-22T12:00:00Z')), '2026-08-15');
+    assert.strictEqual(LB.checkinWeekStart(0, new Date('2026-08-17T12:00:00Z')), '2026-08-10', 'Monday remains the default');
+  });
+
   test('saveSyncedState stores one atomic pair entry and loadLocalState reuses it as the base', () => {
     const state = { user: { name: 'A' }, sessions: [] };
     assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);
@@ -1757,6 +1772,18 @@ async function testAsync(name, fn) {
     for (const k of ['entries', 'aggVolume', 'aggDoneSets', 'aggExercises']) {
       assert.ok(!(k in row), `${k} must not be written to zane_sessions`);
     }
+  });
+
+  test('sessionToRow strips workout-import preview metadata', () => {
+    const row = LB.sessionToRow({
+      id: 'import_s_0', date: '2026-08-17T12:00:00.000Z', ended: '2026-08-17T12:00:00.000Z',
+      _index: 0, fingerprint: 'abc', duplicate: false,
+      entries: [{ name: 'Bench Press', sourceName: 'Bench' }],
+    }, 'u1');
+    for (const key of ['_index', 'fingerprint', 'duplicate', 'entries']) {
+      assert.ok(!(key in row), `${key} must not be written to zane_sessions`);
+    }
+    assert.strictEqual(row.imported, true);
   });
 
   // ── historyWindowCutoffISO ────────────────────────────────────────────────
@@ -6956,6 +6983,190 @@ async function testAsync(name, fn) {
     const imperial = LB.roundShoppingQty(248, true);
     assert.strictEqual(imperial.text, '8.5 oz');
     assert.ok(Math.abs(imperial.grams - LB.ozToG(8.5)) < 0.001, 'grams matches the label it printed');
+  });
+
+  // ── AI workout CSV import: local parser/build/duplicate primitives ────────
+  test('wiParseCsv: keeps quoted commas and normalizes BOM/CRLF rows', () => {
+    const rows = LB.wiParseCsv('\uFEFFDate,Exercise,Weight,Notes\r\n2026-08-17,"Bench, Press",80,"felt good, no pain"\r\n');
+    assert.strictEqual(JSON.stringify(rows), JSON.stringify([
+      ['Date', 'Exercise', 'Weight', 'Notes'],
+      ['2026-08-17', 'Bench, Press', '80', 'felt good, no pain'],
+    ]));
+  });
+
+  test('wiParseCsv: accepts semicolon exports with comma decimals', () => {
+    const rows = LB.wiParseCsv('Datum;Übung;Gewicht;Wiederholungen\n17.08.2026;Kniebeuge;27,5;8\n');
+    assert.strictEqual(JSON.stringify(rows), JSON.stringify([
+      ['Datum', 'Übung', 'Gewicht', 'Wiederholungen'],
+      ['17.08.2026', 'Kniebeuge', '27,5', '8'],
+    ]));
+  });
+
+  test('workout import primitives: locale dates and decimal commas are safe', () => {
+    assert.strictEqual(LB.wiDate('17/08/2026', 'dd/mm/yyyy'), '2026-08-17');
+    assert.strictEqual(LB.wiDate('2026-02-30', 'yyyy-mm-dd'), null);
+    const epochMs = 1781557953970;
+    const localEpochDate = new Date(epochMs);
+    const expectedLocalDate = `${localEpochDate.getFullYear()}-${String(localEpochDate.getMonth() + 1).padStart(2, '0')}-${String(localEpochDate.getDate()).padStart(2, '0')}`;
+    assert.strictEqual(LB.wiDate(String(epochMs), ''), expectedLocalDate, 'Unix milliseconds use the local calendar date');
+    assert.strictEqual(LB.wiDate(String(Math.floor(epochMs / 1000)), ''), expectedLocalDate, 'Unix seconds use the local calendar date');
+    assert.strictEqual(LB.wiNumber('27,5 kg'), 27.5);
+    assert.strictEqual(LB.wiNumber(''), null);
+  });
+
+  test('wiBuildSessions: discards value-less rows before creating empty entries', () => {
+    const mapping = {
+      columns: { date: 'Date', session: 'Workout', exercise: 'Exercise', weight: 'Weight', reps: 'Reps', set: 'Set' },
+      dateFormat: 'yyyy-mm-dd', defaultWeightUnit: 'kg', exerciseMappings: [],
+    };
+    const out = LB.wiBuildSessions([
+      ['2026-08-17', 'Push', 'Bench Press', '', '', '1'],
+      ['2026-08-17', 'Push', 'Bench Press', '80', '5', '1'],
+    ], ['Date', 'Workout', 'Exercise', 'Weight', 'Reps', 'Set'], mapping, [], 'kg');
+    assert.strictEqual(out.invalidRows.length, 1);
+    assert.strictEqual(out.sessions.length, 1);
+    assert.strictEqual(out.sessions[0].entries.length, 1);
+    assert.strictEqual(out.sessions[0].entries[0].sets.length, 1);
+  });
+
+  test('wiBuildSessions: imports Unix-millisecond workout dates', () => {
+    const mapping = {
+      columns: { date: 'start', session: 'workout', exercise: 'exercise', weight: 'weight', reps: 'reps' },
+      dateFormat: null, defaultWeightUnit: 'kg', exerciseMappings: [],
+    };
+    const out = LB.wiBuildSessions([
+      ['PHUL', '1781557953970', '1781561477527', 'Band Pull-Apart', '60', '20'],
+    ], ['workout', 'start', 'end', 'exercise', 'weight', 'reps'], mapping, [], 'kg');
+    assert.strictEqual(out.invalidRows.length, 0);
+    assert.strictEqual(out.sessions.length, 1);
+    const localDate = new Date(1781557953970);
+    const expectedDate = `${localDate.getFullYear()}-${String(localDate.getMonth() + 1).padStart(2, '0')}-${String(localDate.getDate()).padStart(2, '0')}`;
+    assert.strictEqual(out.sessions[0].date, expectedDate);
+    assert.strictEqual(out.sessions[0].entries[0].name, 'Band Pull-Apart');
+    assert.strictEqual(out.sessions[0].entries[0].sets[0].kg, 60);
+  });
+
+  test('wiBuildSessions: imports time-only rows from an unlabelled time column', () => {
+    const mapping = {
+      columns: { date: 'start', session: 'workout', exercise: 'exercise' },
+      dateFormat: null, defaultWeightUnit: 'kg', exerciseMappings: [],
+    };
+    const out = LB.wiBuildSessions([
+      ['Walking', '1781557953970', '1781561477527', 'Walking', '', '', '', '00:15:00'],
+    ], ['workout', 'start', 'end', 'exercise', 'weight', 'reps', 'time-per-500', 'time'], mapping, [], 'kg');
+    assert.strictEqual(out.invalidRows.length, 0);
+    assert.strictEqual(out.sessions[0].entries[0].sets[0].timeSec, 900);
+  });
+
+  test('wiBuildSessions: accepts an AI mapping only as a display/library match', () => {
+    const mapping = {
+      columns: { date: 'Date', exercise: 'Exercise', weight: 'Load', reps: 'Reps' },
+      dateFormat: 'yyyy-mm-dd', defaultWeightUnit: 'lb',
+      exerciseMappings: [{ source: 'DB Bench', existingName: 'Dumbbell Bench Press', confidence: 0.98 }],
+    };
+    const out = LB.wiBuildSessions([
+      ['2026-08-17', 'DB Bench', '44', '8'],
+    ], ['Date', 'Exercise', 'Load', 'Reps'], mapping, [{ id: 'ex-1', name: 'Dumbbell Bench Press' }], 'kg');
+    const entry = out.sessions[0].entries[0];
+    assert.strictEqual(entry.exId, 'ex-1');
+    assert.strictEqual(entry.name, 'Dumbbell Bench Press');
+    assert.ok(Math.abs(entry.sets[0].kg - 19.96) < 0.01);
+  });
+
+  test('wiRepValues: parses ranges, ladders, and decimal commas', () => {
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('8-12')), JSON.stringify([8, 12]));
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('8/10/12 reps')), JSON.stringify([8, 10, 12]));
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('27,5')), JSON.stringify([28]), 'rep targets are whole repetitions');
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('')), JSON.stringify([]));
+  });
+
+  test('wiBuildPlan: groups days, maps exercises, and keeps ranges/time targets', () => {
+    const mapping = {
+      planName: 'Imported PPL',
+      columns: { day: 'Day', order: 'Order', exercise: 'Exercise', sets: 'Sets', reps: 'Reps', repsMax: 'Max', timeSec: 'Seconds' },
+      exerciseMappings: [{ source: 'DB Bench', existingName: 'Dumbbell Bench Press', confidence: 0.98 }],
+    };
+    const out = LB.wiBuildPlan([
+      ['Push', '1', 'DB Bench', '3', '8', '12', ''],
+      ['Push', '2', 'Lateral Raise', '3', '12', '', ''],
+      ['Conditioning', '1', 'Plank', '2', '', '', '1:30'],
+    ], ['Day', 'Order', 'Exercise', 'Sets', 'Reps', 'Max', 'Seconds'], mapping, [
+      { id: 'ex-1', name: 'Dumbbell Bench Press' },
+    ]);
+    assert.strictEqual(out.planName, 'Imported PPL');
+    assert.strictEqual(JSON.stringify(out.days.map(d => d.name)), JSON.stringify(['Push', 'Conditioning']));
+    assert.strictEqual(out.days[0].items[0].exId, 'ex-1');
+    assert.strictEqual(out.days[0].items[0].sets, 3);
+    assert.strictEqual(out.days[0].items[0].reps, 8);
+    assert.strictEqual(out.days[0].items[0].repsMax, 12);
+    assert.strictEqual(out.days[1].items[0].timeSecPerSet[0], 90);
+    assert.strictEqual(out.invalidRows.length, 0);
+  });
+
+  test('wiBuildPlan: without a day column keeps all rows on Day 1', () => {
+    const out = LB.wiBuildPlan([
+      ['Bench Press', '3', '8'],
+      ['Squat', '3', '5'],
+    ], ['Exercise', 'Sets', 'Reps'], {
+      columns: { exercise: 'Exercise', sets: 'Sets', reps: 'Reps' },
+      exerciseMappings: [],
+    }, []);
+    assert.strictEqual(out.days.length, 1);
+    assert.strictEqual(out.days[0].name, 'Day 1');
+    assert.strictEqual(out.days[0].items.length, 2);
+  });
+
+  test('wiImportTable: skips spreadsheet title rows before the real header', () => {
+    const table = LB.wiImportTable('Program: PPL\nBlock 1\nCycle 1,Exercise,Notes\nPush,Bench,\n');
+    assert.strictEqual(JSON.stringify(table.headers), JSON.stringify(['Cycle 1', 'Exercise', 'Notes']));
+    assert.strictEqual(JSON.stringify(table.rows[0]), JSON.stringify(['Push', 'Bench', '']));
+    assert.strictEqual(LB.wiImportPlanName(table.preamble, 'fallback'), 'PPL');
+  });
+
+  test('wiImportTable: history mode requires the real date and exercise header', () => {
+    const table = LB.wiImportTable('Workout exercise export\nGenerated by App\nDate,Exercise,Weight,Reps\n2026-08-17,Squat,100,5\n', 'history');
+    assert.strictEqual(JSON.stringify(table.headers), JSON.stringify(['Date', 'Exercise', 'Weight', 'Reps']));
+    assert.strictEqual(JSON.stringify(table.rows[0]), JSON.stringify(['2026-08-17', 'Squat', '100', '5']));
+  });
+
+  test('wiImportTable: history mode recognizes a start timestamp as the date header', () => {
+    const table = LB.wiImportTable('workout,start,end,exercise,weight,reps\nWorkout A,1781557953970,1781561477527,Squat,100,5\n', 'history');
+    assert.strictEqual(JSON.stringify(table.headers), JSON.stringify(['workout', 'start', 'end', 'exercise', 'weight', 'reps']));
+    assert.strictEqual(table.rows.length, 1);
+  });
+
+  test('wiImportTable: detects a delimiter after a title/preamble row', () => {
+    const table = LB.wiImportTable('Workout export, generated by Example\nDate;Exercise;Weight;Reps\n2026-08-17;Squat;100;5\n', 'history');
+    assert.strictEqual(JSON.stringify(table.headers), JSON.stringify(['Date', 'Exercise', 'Weight', 'Reps']));
+    assert.strictEqual(JSON.stringify(table.rows[0]), JSON.stringify(['2026-08-17', 'Squat', '100', '5']));
+  });
+
+  test('wiBuildPlan: carries forward day labels and derives repeated set columns', () => {
+    const headers = ['Cycle 1', 'Exercise', 'Skipped', 'Set 1 Type', 'Set 1 Rep Range', 'Set 2 Type', 'Set 2 Rep Range', 'Set 3 Type', 'Set 3 Rep Range'];
+    // The AI may not call a column named "Cycle 1" a day column. The local
+    // fallback must still preserve the split instead of flattening to Day 1.
+    const mapping = { columns: { exercise: 'Exercise' }, exerciseMappings: [] };
+    const out = LB.wiBuildPlan([
+      ['Push 1', 'Bench Press', 'No', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12'],
+      ['', 'Incline Press', 'No', 'Standard Set', '10 - 15', 'Standard Set', '10 - 15', '', ''],
+      ['Rest', '', '', '', '', '', '', '', ''],
+      ['Pull 1', 'Cable Row', 'No', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12', '', ''],
+    ], headers, mapping, []);
+    assert.strictEqual(JSON.stringify(out.days.map(d => d.name)), JSON.stringify(['Push 1', 'Pull 1']));
+    assert.strictEqual(out.days[0].items[0].sets, 3);
+    assert.strictEqual(out.days[0].items[0].reps, 8);
+    assert.strictEqual(out.days[0].items[0].repsMax, 12);
+    assert.strictEqual(out.days[0].items[1].sets, 2);
+    assert.strictEqual(out.days[1].items[0].sets, 2);
+  });
+
+  test('wiSessionFingerprint: exact duplicate identity ignores entry order', () => {
+    const a = { date: '2026-08-17', entries: [
+      { name: 'Squat', sets: [{ kg: 100, reps: 5, done: true, skipped: false, warmup: false }] },
+      { name: 'Bench', sets: [{ kg: 80, reps: 5, done: true, skipped: false, warmup: false }] },
+    ] };
+    const b = { date: '2026-08-17', entries: [a.entries[1], a.entries[0]] };
+    assert.strictEqual(LB.wiSessionFingerprint(a), LB.wiSessionFingerprint(b));
   });
 
 

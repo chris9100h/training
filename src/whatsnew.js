@@ -22,6 +22,16 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.852',
+    date: '2026-08-19',
+    title: 'Your training data just found a new home 🚀',
+    items: [
+      '🚀 Moving to Zane has never been easier. Go to Settings → Data → Migrate from other apps, export your training plan from your current app as CSV or Excel, bring it into Zane, review it, and get ready to train.',
+      '🏋️ Missing your workout history? Import that too. Zane maps your dates, workouts, exercises, sets and reps, then shows you a preview before anything is saved.',
+      '🛡️ Your existing plans and history stay untouched. You choose exactly what gets added.',
+    ],
+  },
+  {
     id: 'v2.839',
     date: '2026-08-18',
     title: 'Share your week, celebrate your progress ✨',

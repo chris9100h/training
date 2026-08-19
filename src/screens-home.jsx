@@ -2529,12 +2529,15 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!hasCoaching) { setCheckinDue(false); return; }
     const coachingId = asClient?.id || asSelf?.id;
     if (!coachingId) { setCheckinDue(false); return; }
-    LB.loadCheckins(coachingId).then(rows => {
-      const weekStart = LB.checkinWeekStart();
+    // The home-screen due check only needs the week row. Avoid fetching/signing
+    // optional coaching photos here; the coach/client Check-ins tab loads them
+    // when it actually renders the check-in card.
+    LB.loadCheckins(coachingId, { includePhotos: false }).then(rows => {
+      const weekStart = LB.checkinWeekStart(store.settings?.weekStartDay);
       const thisWeek = rows.find(r => r.weekStart === weekStart);
       setCheckinDue(!thisWeek);
     }).catch(() => setCheckinDue(false));
-  }, [store.coaching]);
+  }, [store.coaching, store.settings?.weekStartDay]);
 
   useEffect(() => {
     const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;

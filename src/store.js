@@ -23,6 +23,7 @@ const SCAN_LABEL_URL        = `${SUPABASE_URL}/functions/v1/scan-label`;
 const AI_DAILY_SUMMARY_URL  = `${SUPABASE_URL}/functions/v1/ai-daily-summary`;
 const AI_CHECKIN_OPINION_URL = `${SUPABASE_URL}/functions/v1/ai-checkin-opinion`;
 const PARSE_MEAL_URL        = `${SUPABASE_URL}/functions/v1/parse-meal`;
+const WORKOUT_IMPORT_URL    = `${SUPABASE_URL}/functions/v1/parse-workout-import`;
 
 const VAPID_PUBLIC_KEY = 'BD14GEr1JXGYdRwx6kiqpZMTvbialpruEJnHUmcbxjOshGZvULZ10xqayRTt3iVCyTBWRIR5nsXNVSsP0YdKQDI';
 
@@ -83,6 +84,7 @@ const AI_FUNCTION_URLS = new Set([
   PARSE_MEAL_URL,
   AI_DAILY_SUMMARY_URL,
   AI_CHECKIN_OPINION_URL,
+  WORKOUT_IMPORT_URL,
 ]);
 const _httpRequestQueue = [];
 let _httpRequestsActive = 0;
@@ -640,6 +642,676 @@ function nowHHMM() {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
 }
 
+// ─── CSV workout import ─────────────────────────────────────────────────────
+// The CSV itself is parsed locally. Only the header, a bounded sample and the
+// unique exercise names go to the AI mapper, so a five-year export does not
+// become one enormous model response and can be reviewed before any DB write.
+function wiNormalizeName(value) {
+  return String(value ?? '').normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase().replace(/&/g, ' and ').replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+}
+
+function wiParseCsv(text) {
+  const source = String(text ?? '').replace(/^\uFEFF/, '');
+  if (!source.trim()) throw new Error('The CSV is empty.');
+  // Spreadsheet exports in German locales commonly use semicolons because the
+  // comma is the decimal separator. Do not inspect only the first physical
+  // line: many exports prepend a title, report date, or app name before the
+  // actual header. Score the first few logical rows while ignoring separators
+  // inside quoted cells, preferring the delimiter that appears consistently.
+  let delimiter = ','; let quotedHeader = false; let rowCounts = { ',': 0, ';': 0, '\t': 0 }; const delimiterRows = [];
+  for (let i = 0; i < source.length && delimiterRows.length < 40; i++) {
+    const ch = source[i];
+    if (quotedHeader) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') i++;
+        else quotedHeader = false;
+      }
+      continue;
+    }
+    if (ch === '"') { quotedHeader = true; continue; }
+    if (ch === '\n' || ch === '\r') {
+      if (Object.values(rowCounts).some(count => count > 0)) delimiterRows.push(rowCounts);
+      rowCounts = { ',': 0, ';': 0, '\t': 0 };
+      if (ch === '\r' && source[i + 1] === '\n') i++;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(rowCounts, ch)) rowCounts[ch]++;
+  }
+  if (Object.values(rowCounts).some(count => count > 0)) delimiterRows.push(rowCounts);
+  const bestDelimiter = Object.keys(rowCounts).map(candidate => {
+    const rows = delimiterRows.filter(counts => counts[candidate] > 0).length;
+    const total = delimiterRows.reduce((sum, counts) => sum + counts[candidate], 0);
+    return [candidate, rows * 1000 + total];
+  }).sort((a, b) => b[1] - a[1])[0];
+  if (bestDelimiter?.[1] > 0) delimiter = bestDelimiter[0];
+  const rows = [];
+  let row = [], cell = '', quoted = false;
+  for (let i = 0; i < source.length; i++) {
+    const ch = source[i];
+    if (quoted) {
+      if (ch === '"') {
+        if (source[i + 1] === '"') { cell += '"'; i++; }
+        else quoted = false;
+      } else cell += ch;
+      continue;
+    }
+    if (ch === '"' && cell === '') { quoted = true; continue; }
+    if (ch === delimiter) { row.push(cell); cell = ''; continue; }
+    if (ch === '\n' || ch === '\r') {
+      if (ch === '\r' && source[i + 1] === '\n') i++;
+      row.push(cell); cell = '';
+      if (row.some(v => String(v).trim() !== '')) rows.push(row);
+      row = [];
+      continue;
+    }
+    cell += ch;
+  }
+  if (quoted) throw new Error('The CSV contains an unfinished quoted cell.');
+  if (cell !== '' || row.length) { row.push(cell); if (row.some(v => String(v).trim() !== '')) rows.push(row); }
+  if (rows.length < 2) throw new Error('CSV needs a header row and at least one data row.');
+  const width = Math.max(...rows.map(r => r.length));
+  return rows.map(r => Array.from({ length: width }, (_, i) => String(r[i] ?? '').trim()));
+}
+
+function wiGuessColumn(headers, preferred) {
+  const scores = headers.map((h, i) => {
+    const n = wiNormalizeName(h);
+    return { i, score: preferred.some((p, rank) => n.includes(p) ? 100 - rank : 0) };
+  });
+  scores.sort((a, b) => b.score - a.score);
+  return scores[0]?.score ? scores[0].i : -1;
+}
+
+function wiNumber(value) {
+  if (value == null || String(value).trim() === '') return null;
+  const raw = String(value).trim().replace(/\s/g, '').replace(',', '.').replace(/[^0-9.+-]/g, '');
+  if (!raw || raw === '-' || raw === '+') return null;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : null;
+}
+
+function wiDurationSeconds(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parts = raw.split(':');
+  if (parts.length === 2 || parts.length === 3) {
+    const numbers = parts.map(part => Number(part.replace(',', '.')));
+    const valid = numbers.every(Number.isFinite)
+      && numbers.every(n => n >= 0)
+      && numbers.slice(1).every(n => n < 60);
+    if (valid) {
+      const seconds = parts.length === 3
+        ? numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+        : numbers[0] * 60 + numbers[1];
+      return Math.round(seconds);
+    }
+  }
+  return wiNumber(raw);
+}
+
+function wiDurationIndex(headers, mappedIndex) {
+  const mappedName = mappedIndex >= 0 ? wiNormalizeName(headers[mappedIndex]) : '';
+  if (mappedIndex >= 0 && !/(?:per 500|pace|split)/.test(mappedName)) return mappedIndex;
+  const exact = new Set(['time', 'duration', 'duration seconds', 'duration sec', 'elapsed', 'elapsed time', 'seconds']);
+  return headers.findIndex(header => exact.has(wiNormalizeName(header)));
+}
+
+function wiRepValues(value) {
+  const matches = String(value ?? '').match(/\d+(?:[.,]\d+)?/g) || [];
+  return matches.map(v => Number(v.replace(',', '.'))).filter(Number.isFinite).map(v => Math.max(0, Math.round(v)));
+}
+
+function wiPlanNameFromFilename(fileName) {
+  const name = String(fileName ?? '').replace(/\.[^.]+$/, '').replace(/[_.-]+/g, ' ').trim();
+  return (name || 'Imported plan').slice(0, 120);
+}
+
+function wiDate(value, format) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  // Workout apps often export start/end as Unix timestamps instead of
+  // formatted dates. Accept both seconds (10 digits) and milliseconds (13
+  // digits), using the device's local calendar date so an evening workout
+  // does not move to the previous UTC day for users outside Greenwich.
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw);
+    const epochMs = raw.length === 10 ? numeric * 1000 : numeric;
+    const epochDate = new Date(epochMs);
+    if (Number.isFinite(epochMs) && !Number.isNaN(epochDate.getTime())) return fmtISO(epochDate);
+  }
+  let y, m, d;
+  let match = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (match) [, y, m, d] = match.map(Number);
+  else {
+    match = raw.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})/);
+    if (!match) return null;
+    const a = Number(match[1]), b = Number(match[2]);
+    const year = Number(match[3]) < 100 ? 2000 + Number(match[3]) : Number(match[3]);
+    if (/d\s*[/.-]\s*m|dd|day/i.test(format || '')) { d = a; m = b; } else { m = a; d = b; }
+    y = year;
+  }
+  y = Number(y); m = Number(m); d = Number(d);
+  if (!Number.isInteger(y) || !Number.isInteger(m) || !Number.isInteger(d) || y < 1970 || y > new Date().getFullYear() + 1 || m < 1 || m > 12 || d < 1 || d > 31) return null;
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  if (dt.getUTCFullYear() !== y || dt.getUTCMonth() !== m - 1 || dt.getUTCDate() !== d) return null;
+  return `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+}
+
+function wiUnit(value, fallback) {
+  const n = String(value ?? '').toLowerCase();
+  if (/lb|lbs|pound/.test(n)) return 'lb';
+  if (/kg|kilo/.test(n)) return 'kg';
+  return fallback === 'lbs' || fallback === 'lb' ? 'lb' : 'kg';
+}
+
+function wiBool(value, fallback) {
+  const n = String(value ?? '').trim().toLowerCase();
+  if (!n) return fallback;
+  if (/^(1|true|yes|y|warm|warmup|done|complete|completed)$/.test(n)) return true;
+  if (/^(0|false|no|n|working|planned|skipped)$/.test(n)) return false;
+  return fallback;
+}
+
+function wiHash(value) {
+  let h = 2166136261;
+  for (const ch of String(value)) { h ^= ch.charCodeAt(0); h = Math.imul(h, 16777619); }
+  return (h >>> 0).toString(36);
+}
+
+function wiWeightInTarget(value, from, targetUnit) {
+  if (value == null) return null;
+  const fromLbs = from === 'lb'; const targetLbs = targetUnit === 'lbs';
+  if (fromLbs === targetLbs) return Math.round(value * 100) / 100;
+  const converted = fromLbs ? value / 2.20462 : value * 2.20462;
+  return Math.round(converted * 100) / 100;
+}
+
+function wiHeaderIndex(headers, name) {
+  const idx = headers.indexOf(name);
+  return idx >= 0 ? idx : -1;
+}
+
+// Some spreadsheet exports put a title and program metadata above the actual
+// header row. Find the first header-like row instead of assuming row one is
+// the table header. This is deliberately conservative: a real header must
+// name an exercise/movement/lift column, so a program title cannot win.
+function wiFindImportHeaderRow(rows) {
+  let best = -1; let bestScore = -1;
+  rows.slice(0, 40).forEach((row, rowIndex) => {
+    const names = row.map(wiNormalizeName);
+    const hasExercise = names.some(name => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(name) || name.includes(' exercise'));
+    if (!hasExercise) return;
+    const score = 20 + names.filter(name => /(^| )(date|session|workout|day|cycle|set|sets|rep|reps|weight|load|range|time)( |$)/.test(name)).length;
+    if (score > bestScore) { best = rowIndex; bestScore = score; }
+  });
+  return best >= 0 ? best : 0;
+}
+
+function wiFindHistoryHeaderRow(rows) {
+  let best = -1; let bestScore = -1;
+  rows.slice(0, 40).forEach((row, rowIndex) => {
+    const names = row.map(wiNormalizeName);
+    const hasExercise = names.some(name => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(name) || name.includes(' exercise'));
+    const hasDate = names.some(name => /(^| )(date|workout date|session date|performed|logged|training date|started|start|timestamp|epoch)( |$)/.test(name));
+    if (!hasExercise || !hasDate) return;
+    const score = 40 + names.filter(name => /(^| )(session|workout|set|sets|rep|reps|weight|load|time|unit|done)( |$)/.test(name)).length;
+    if (score > bestScore) { best = rowIndex; bestScore = score; }
+  });
+  return best >= 0 ? best : wiFindImportHeaderRow(rows);
+}
+
+function wiImportTable(csvText, mode = 'plan') {
+  const allRows = wiParseCsv(csvText);
+  const headerRow = mode === 'history' ? wiFindHistoryHeaderRow(allRows) : wiFindImportHeaderRow(allRows);
+  return { headers: allRows[headerRow], rows: allRows.slice(headerRow + 1), preamble: allRows.slice(0, headerRow) };
+}
+
+function wiImportPlanName(preamble, fallback) {
+  const programCell = (preamble || []).flat().map(v => String(v || '').trim()).find(v => /^(program|plan|routine)\s*:/i.test(v));
+  const named = programCell?.replace(/^(program|plan|routine)\s*:\s*/i, '').trim();
+  return (named || fallback || 'Imported plan').slice(0, 120);
+}
+
+function wiSetSeries(headers) {
+  const bySet = new Map();
+  headers.forEach((header, index) => {
+    const normalized = wiNormalizeName(header);
+    const match = normalized.match(/^(?:set|series)\s+(\d+)\s+(.+)$/);
+    if (!match) return;
+    const setNumber = Number(match[1]);
+    if (!Number.isInteger(setNumber) || setNumber < 1) return;
+    const entry = bySet.get(setNumber) || { setNumber, repsIndex: -1, typeIndex: -1 };
+    if (/rep range|reps?|repetitions?/.test(match[2])) entry.repsIndex = index;
+    if (/type|mode/.test(match[2])) entry.typeIndex = index;
+    bySet.set(setNumber, entry);
+  });
+  return [...bySet.values()].sort((a, b) => a.setNumber - b.setNumber);
+}
+
+// Some exports call the day/split column "Cycle 1" or "Workout" instead of
+// "Day". If the mapper leaves that field empty, recover it locally from the
+// header and the sparse, repeated group labels rather than flattening the
+// whole plan into Day 1.
+function wiGuessPlanDayIndex(rows, headers, exerciseIndex) {
+  const exerciseRows = rows.filter(row => String(row[exerciseIndex] ?? '').trim());
+  if (!exerciseRows.length) return -1;
+  let best = -1; let bestScore = 0;
+  headers.forEach((header, index) => {
+    if (index === exerciseIndex) return;
+    const normalized = wiNormalizeName(header);
+    if (!/(^| )(day|cycle|block|phase|split|workout|session)( |$)/.test(normalized)) return;
+    const values = exerciseRows.map(row => String(row[index] ?? '').trim()).filter(Boolean);
+    if (!values.length) return;
+    const uniqueCount = new Set(values.map(wiNormalizeName)).size;
+    const sparsity = 1 - (values.length / exerciseRows.length);
+    const score = 12 + (Math.max(0, sparsity) * 8) + Math.min(uniqueCount, 12) * 0.5;
+    if (score > bestScore) { best = index; bestScore = score; }
+  });
+  return best;
+}
+
+function wiIsRepLadder(value) {
+  return /[\/]\s*\d/.test(String(value ?? ''));
+}
+
+function wiIsRepRange(value) {
+  return /\d\s*(?:-|[\u2013\u2014]|to)\s*\d/i.test(String(value ?? ''));
+}
+
+function wiBuildSessions(rows, headers, mapping, existingExercises, targetUnit) {
+  const columns = mapping?.columns || {};
+  const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
+  const durationIndex = wiDurationIndex(headers, idx.timeSec);
+  const dateIndex = idx.date; const exerciseIndex = idx.exercise;
+  if (dateIndex < 0 || exerciseIndex < 0) throw new Error('The AI could not identify both a date and an exercise column.');
+  const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
+  const aiMap = new Map((mapping.exerciseMappings || []).map(m => [m.source, m]));
+  const grouped = new Map();
+  const invalidRows = [];
+  rows.forEach((row, rowIndex) => {
+    const date = wiDate(row[dateIndex], mapping.dateFormat);
+    const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
+    if (!date || !sourceName) { invalidRows.push(rowIndex + 2); return; }
+    const rowSet = idx.set >= 0 ? wiNumber(row[idx.set]) : null;
+    const weight = idx.weight >= 0 ? wiNumber(row[idx.weight]) : null;
+    const reps = idx.reps >= 0 ? wiNumber(row[idx.reps]) : null;
+    const repsL = idx.repsLeft >= 0 ? wiNumber(row[idx.repsLeft]) : null;
+    const repsR = idx.repsRight >= 0 ? wiNumber(row[idx.repsRight]) : null;
+    const timeSec = durationIndex >= 0 ? wiDurationSeconds(row[durationIndex]) : null;
+    const hasValue = weight != null || reps != null || repsL != null || repsR != null || timeSec != null;
+    if (!hasValue) { invalidRows.push(rowIndex + 2); return; }
+    const sessionLabel = idx.session >= 0 && row[idx.session] ? String(row[idx.session]).trim().slice(0, 120) : 'Imported workout';
+    const sessionKey = `${date}|${wiNormalizeName(sessionLabel) || 'imported workout'}`;
+    let session = grouped.get(sessionKey);
+    if (!session) { session = { date, dayName: sessionLabel || 'Imported workout', entries: [], _entries: new Map() }; grouped.set(sessionKey, session); }
+    const sourceNorm = wiNormalizeName(sourceName);
+    const aiMatch = aiMap.get(sourceName);
+    const existing = (aiMatch?.existingName && existingByName.get(wiNormalizeName(aiMatch.existingName))) || existingByName.get(sourceNorm) || null;
+    const entryKey = sourceNorm || sourceName.toLowerCase();
+    let entry = session._entries.get(entryKey);
+    if (!entry) {
+      entry = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: [], note: '' };
+      session._entries.set(entryKey, entry); session.entries.push(entry);
+    }
+    const sourceUnit = wiUnit(idx.unit >= 0 ? row[idx.unit] : '', mapping.defaultWeightUnit);
+    const warmup = wiBool(idx.warmup >= 0 ? row[idx.warmup] : '', false);
+    const done = wiBool(idx.done >= 0 ? row[idx.done] : '', true);
+    entry.sets.push({ _setNumber: rowSet, kg: wiWeightInTarget(weight, sourceUnit, targetUnit), reps: reps != null ? Math.max(0, Math.round(reps)) : null, repsL: repsL != null ? Math.max(0, Math.round(repsL)) : null, repsR: repsR != null ? Math.max(0, Math.round(repsR)) : null, timeSec: timeSec != null ? Math.max(0, Math.round(timeSec)) : null, done, skipped: false, warmup, _sourceUnit: sourceUnit });
+    if (idx.notes >= 0 && row[idx.notes] && !entry.note) entry.note = String(row[idx.notes]).slice(0, 500);
+  });
+  const sessions = [...grouped.values()].map(s => {
+    delete s._entries;
+    s.entries = s.entries.map(e => ({ ...e, sets: e.sets.sort((a, b) => (a._setNumber ?? 999999) - (b._setNumber ?? 999999)).map(({ _setNumber, _sourceUnit, ...set }) => set) }));
+    return s;
+  });
+  return { sessions, invalidRows };
+}
+
+function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName = 'Imported plan') {
+  const columns = mapping?.columns || {};
+  const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
+  const exerciseIndex = idx.exercise;
+  if (exerciseIndex < 0) throw new Error('The AI could not identify an exercise column in this plan.');
+  const dayIndex = idx.day >= 0 ? idx.day : wiGuessPlanDayIndex(rows, headers, exerciseIndex);
+  const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
+  const aiMap = new Map((mapping.exerciseMappings || []).map(m => [m.source, m]));
+  const series = wiSetSeries(headers);
+  const groups = new Map();
+  const invalidRows = [];
+  let previousDayName = '';
+  rows.forEach((row, rowIndex) => {
+    const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
+    if (!sourceName) {
+      // A row containing only a day/rest label is a valid plan separator. A
+      // row with values in any other column is malformed and should be shown
+      // in the preview's skipped-row count instead of disappearing silently.
+      const hasNonDayValue = row.some((value, index) => index !== dayIndex && String(value ?? '').trim() !== '');
+      if (hasNonDayValue) invalidRows.push(rowIndex + 2);
+      return;
+    }
+    const rawDay = dayIndex >= 0 && row[dayIndex] ? String(row[dayIndex]).trim() : '';
+    if (rawDay) previousDayName = rawDay;
+    const dayRaw = rawDay || previousDayName || 'Day 1';
+    const dayName = (dayRaw || 'Day 1').slice(0, 80);
+    const dayKey = wiNormalizeName(dayName) || 'day 1';
+    let group = groups.get(dayKey);
+    if (!group) { group = { name: dayName, order: idx.order >= 0 ? wiNumber(row[idx.order]) : null, items: [], _items: new Map() }; groups.set(dayKey, group); }
+    const sourceNorm = wiNormalizeName(sourceName);
+    const aiMatch = aiMap.get(sourceName);
+    const existing = (aiMatch?.existingName && existingByName.get(wiNormalizeName(aiMatch.existingName))) || existingByName.get(sourceNorm) || null;
+    const itemKey = sourceNorm || sourceName.toLowerCase();
+    const repsRaw = idx.reps >= 0 ? row[idx.reps] : '';
+    const setValues = wiRepValues(repsRaw);
+    const rangeValues = wiRepValues(idx.repsMax >= 0 ? row[idx.repsMax] : '');
+    const ladderValues = wiRepValues(idx.repsPerSet >= 0 ? row[idx.repsPerSet] : '');
+    const reps = setValues[0] ?? 8;
+    const repsMax = rangeValues[0] ?? (wiIsRepRange(repsRaw) && setValues.length > 1 ? setValues[setValues.length - 1] : null);
+    const repsPerSet = ladderValues.length > 1 ? ladderValues : (wiIsRepLadder(repsRaw) && setValues.length > 1 ? setValues : null);
+    const hasSetColumn = idx.set >= 0 && String(row[idx.set] ?? '').trim() !== '';
+    const requestedSets = idx.sets >= 0 ? wiNumber(row[idx.sets]) : null;
+    const seriesValues = series.map(s => ({
+      reps: s.repsIndex >= 0 ? String(row[s.repsIndex] ?? '').trim() : '',
+      type: s.typeIndex >= 0 ? String(row[s.typeIndex] ?? '').trim() : '',
+    }));
+    const seriesCount = seriesValues.filter(value => value.reps || value.type).length;
+    const setCount = Math.max(1, Math.round(hasSetColumn ? 1 : (seriesCount || requestedSets || 3)));
+    const seriesFirst = seriesValues.find(value => value.reps);
+    const seriesFirstValues = wiRepValues(seriesFirst?.reps || '');
+    const seriesReps = seriesFirstValues[0] ?? null;
+    const seriesMax = seriesFirstValues.length > 1 && wiIsRepRange(seriesFirst.reps) ? seriesFirstValues[seriesFirstValues.length - 1] : null;
+    const plannedReps = seriesReps ?? reps;
+    const plannedRepsMax = seriesMax ?? repsMax;
+    const timeValue = idx.timeSec >= 0 ? wiDurationSeconds(row[idx.timeSec]) : null;
+    let item = group._items.get(itemKey);
+    if (!item) {
+      item = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: setCount, reps: plannedReps };
+      if (repsPerSet) { item.repsPerSet = repsPerSet; delete item.reps; }
+      else if (plannedRepsMax != null && plannedRepsMax > plannedReps) item.repsMax = plannedRepsMax;
+      if (timeValue != null) item.timeSecPerSet = Array.from({ length: setCount }, () => Math.max(0, Math.round(timeValue)));
+      group._items.set(itemKey, item); group.items.push(item);
+    } else if (hasSetColumn) {
+      item.sets += setCount;
+      if (item.timeSecPerSet && timeValue != null) item.timeSecPerSet.push(Math.max(0, Math.round(timeValue)));
+      if (item.repsPerSet && repsPerSet) item.repsPerSet.push(...repsPerSet);
+    }
+  });
+  const days = [...groups.values()]
+    .sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999))
+    .map(group => ({ name: group.name, items: group.items.map(({ sourceName, ...item }) => item) }));
+  return { planName: String(mapping?.planName || fallbackPlanName || 'Imported plan').trim().slice(0, 120) || 'Imported plan', days, invalidRows };
+}
+
+function wiSessionFingerprint(session) {
+  const entries = (session.entries || []).map(e => `${wiNormalizeName(e.name)}:${(e.sets || []).map(s => [s.kg ?? '', s.reps ?? '', s.repsL ?? '', s.repsR ?? '', s.timeSec ?? '', s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join(',')).join(';')}`).sort();
+  return `${session.date}|${wiNormalizeName(session.dayName || '')}|${entries.join('|')}`;
+}
+
+async function wiFetchAllRows(table, select, userId, refine = null) {
+  const out = []; const page = 1000;
+  for (let from = 0; ; from += page) {
+    const res = await scheduleDbTask(
+      () => {
+        let query = _supabase.from(table).select(select).eq('user_id', userId);
+        if (typeof refine === 'function') query = refine(query);
+        return query.range(from, from + page - 1);
+      },
+      { priority: 'foreground', kind: 'read' },
+    );
+    if (res?.error) throw res.error;
+    const rows = res?.data || []; out.push(...rows);
+    if (rows.length < page) break;
+    if (out.length > 250000) throw new Error('This account has too much history to compare in one import.');
+  }
+  return out;
+}
+
+async function wiFetchRowsByIds(table, select, userId, column, ids) {
+  const out = []; const chunk = 100;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const res = await scheduleDbTask(
+      () => _supabase.from(table).select(select).eq('user_id', userId).in(column, ids.slice(i, i + chunk)),
+      { priority: 'foreground', kind: 'read' },
+    );
+    if (res?.error) throw res.error;
+    out.push(...(res?.data || []));
+  }
+  return out;
+}
+
+async function wiExistingFingerprints(userId, dates = []) {
+  const normalizedDates = [...new Set((dates || []).map(date => String(date || '').slice(0, 10)).filter(Boolean))].sort();
+  const sessions = await wiFetchAllRows('zane_sessions', 'id,date,day_name,ended', userId, normalizedDates.length
+    ? query => query.gte('date', `${normalizedDates[0]}T00:00:00.000Z`).lte('date', `${normalizedDates[normalizedDates.length - 1]}T23:59:59.999Z`)
+    : null);
+  const sessionIds = sessions.map(session => session.id);
+  const entries = sessionIds.length ? await wiFetchRowsByIds('zane_session_entries', 'id,session_id,entry_idx,name', userId, 'session_id', sessionIds) : [];
+  const entryIds = entries.map(entry => entry.id);
+  const sets = entryIds.length ? await wiFetchRowsByIds('zane_sets', 'entry_id,session_id,set_idx,kg,reps,reps_l,reps_r,time_sec,done,skipped,warmup', userId, 'entry_id', entryIds) : [];
+  const entriesBySession = new Map(); const setsByEntry = new Map();
+  entries.forEach(e => { if (!entriesBySession.has(e.session_id)) entriesBySession.set(e.session_id, []); entriesBySession.get(e.session_id).push({ ...e, sets: [] }); });
+  sets.forEach(s => { if (!setsByEntry.has(s.entry_id)) setsByEntry.set(s.entry_id, []); setsByEntry.get(s.entry_id).push(s); });
+  const index = new Set();
+  for (const s of sessions) {
+    if (!s.ended) continue;
+    const date = String(s.date || '').slice(0, 10); const sessionEntries = (entriesBySession.get(s.id) || []).sort((a, b) => a.entry_idx - b.entry_idx).map(e => ({ name: e.name, sets: (setsByEntry.get(e.id) || []).sort((a, b) => a.set_idx - b.set_idx).map(st => ({ kg: st.kg == null ? null : Number(st.kg), reps: st.reps == null ? null : Number(st.reps), repsL: st.reps_l == null ? null : Number(st.reps_l), repsR: st.reps_r == null ? null : Number(st.reps_r), timeSec: st.time_sec == null ? null : Number(st.time_sec), done: !!st.done, skipped: !!st.skipped, warmup: !!st.warmup })) }));
+    index.add(wiSessionFingerprint({ date, dayName: s.day_name, entries: sessionEntries }));
+  }
+  return index;
+}
+
+async function previewWorkoutImport(csvText, userId, targetUnit, existingExercises = [], onProgress = null) {
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(8, 'Reading the workout rows…');
+  const table = wiImportTable(csvText, 'history');
+  const { headers, rows } = table;
+  report(18, `Found ${rows.length.toLocaleString('en-US')} rows. Preparing the mapping…`);
+  const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
+  if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this CSV.');
+  const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
+  const existingExerciseNames = [...new Set((existingExercises || []).map(e => String(e?.name || '').trim()).filter(Boolean))].slice(0, 800);
+  const sampleRows = rows.slice(0, 120);
+  report(28, 'Mapping exercises and columns with Qwen…');
+  const res = await fnFetch(WORKOUT_IMPORT_URL, { headers, sampleRows, exerciseNames, existingExerciseNames });
+  if (!res) throw new Error('Network error while mapping the CSV.');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Workout mapping failed (${res.status})`);
+  report(62, 'Mapping complete. Building your workout history…');
+  const built = wiBuildSessions(rows, headers, data, existingExercises, targetUnit === 'lbs' ? 'lbs' : 'kg');
+  report(76, 'Checking for duplicate workouts…');
+  const existing = await wiExistingFingerprints(userId, built.sessions.map(session => session.date));
+  const sessions = built.sessions.map((s, i) => ({ ...s, _index: i, fingerprint: wiSessionFingerprint(s), duplicate: existing.has(wiSessionFingerprint(s)) }));
+  const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
+  const unknown = [];
+  const seenUnknown = new Set();
+  sessions.forEach(s => s.entries.forEach(e => { if (!known.has(wiNormalizeName(e.name)) && !seenUnknown.has(wiNormalizeName(e.name))) { seenUnknown.add(wiNormalizeName(e.name)); unknown.push({ name: e.name, count: sessions.reduce((n, x) => n + x.entries.filter(y => wiNormalizeName(y.name) === wiNormalizeName(e.name)).reduce((m, y) => m + y.sets.length, 0), 0) }); } }));
+  const batchId = `import_${uid()}`;
+  report(100, 'Preview ready. Nothing has been saved yet.');
+  return { batchId, mapping: data, sessions, unknownExercises: unknown, stats: { sourceRows: rows.length, sessions: sessions.length, sets: sessions.reduce((n, s) => n + s.entries.reduce((m, e) => m + e.sets.length, 0), 0), duplicates: sessions.filter(s => s.duplicate).length, invalidRows: built.invalidRows.length }, targetUnit: targetUnit === 'lbs' ? 'lbs' : 'kg' };
+}
+
+async function previewWorkoutPlanImport(csvText, userId, targetUnit, existingExercises = [], fileName = '') {
+  const table = wiImportTable(csvText);
+  const { headers, rows } = table;
+  const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
+  if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this plan CSV.');
+  const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
+  const existingExerciseNames = [...new Set((existingExercises || []).map(e => String(e?.name || '').trim()).filter(Boolean))].slice(0, 800);
+  const sampleRows = rows.slice(0, 120);
+  const res = await fnFetch(WORKOUT_IMPORT_URL, { mode: 'plan', headers, sampleRows, exerciseNames, existingExerciseNames });
+  if (!res) throw new Error('Network error while mapping the plan.');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Plan mapping failed (${res.status})`);
+  const built = wiBuildPlan(rows, headers, data, existingExercises, wiImportPlanName(table.preamble, wiPlanNameFromFilename(fileName)));
+  const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
+  const unknown = [];
+  const seenUnknown = new Set();
+  built.days.forEach(day => day.items.forEach(item => {
+    if (!known.has(wiNormalizeName(item.name)) && !seenUnknown.has(wiNormalizeName(item.name))) {
+      seenUnknown.add(wiNormalizeName(item.name));
+      unknown.push({ name: item.name, days: built.days.filter(d => d.items.some(x => wiNormalizeName(x.name) === wiNormalizeName(item.name))).length });
+    }
+  }));
+  const batchId = `plan_import_${uid()}`;
+  return {
+    batchId, planName: built.planName, mapping: data, days: built.days, unknownExercises: unknown,
+    stats: { sourceRows: rows.length, days: built.days.length, exercises: built.days.reduce((n, d) => n + d.items.length, 0), invalidRows: built.invalidRows.length },
+    targetUnit: targetUnit === 'lbs' ? 'lbs' : 'kg',
+  };
+}
+
+async function commitWorkoutImport(preview, userId, options = {}) {
+  if (!preview?.batchId || !Array.isArray(preview.sessions)) throw new Error('Invalid import preview.');
+  const onProgress = options.onProgress;
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(4, 'Preparing the selected workouts…');
+  const duplicateMode = options.duplicateMode === 'import' ? 'import' : 'skip';
+  const unknownMode = options.unknownMode === 'text' ? 'text' : 'create';
+  const sessions = preview.sessions.filter(s => duplicateMode === 'import' || !s.duplicate);
+  const existingExercises = options.existingExercises || [];
+  const existingByName = new Map(existingExercises.map(e => [wiNormalizeName(e.name), e]));
+  const newExerciseByName = new Map(); const exerciseRows = [];
+  for (const session of sessions) for (const entry of session.entries || []) {
+    const norm = wiNormalizeName(entry.name);
+    if (entry.exId || unknownMode === 'text' || !norm || existingByName.has(norm) || newExerciseByName.has(norm)) continue;
+    const id = `${preview.batchId}_ex_${wiHash(norm)}`;
+    const hasTime = (entry.sets || []).some(s => s.timeSec != null);
+    const hasWeight = (entry.sets || []).some(s => s.kg != null);
+    const row = { id, user_id: userId, name: String(entry.name).slice(0, 120), tags: ['imported'], note: 'Imported from workout CSV', category: 'Imported', unilateral: false, equipment: null, progression_reps: null, movement_type: null, no_weight_reps: !hasWeight && !hasTime, log_mode: hasTime && !hasWeight ? 'time' : hasWeight ? 'weight_reps' : 'reps', pull_bodyweight: false, bodyweight_mode: null, youtube_url: null, note_pinned: false, progression_increment: null, horn_labels: null };
+    newExerciseByName.set(norm, row); exerciseRows.push(row);
+  }
+  report(15, `Preparing ${sessions.length} workout${sessions.length === 1 ? '' : 's'} for import…`);
+  const toWrite = sessions.map((s, index) => {
+    // Preview-only fields are useful for the confirmation UI, but are not
+    // columns in zane_sessions. Strip them before the normal session mapper
+    // ever sees the import payload (otherwise PostgREST rejects `_index`,
+    // `fingerprint`, or `duplicate` as unknown columns).
+    const { _index, fingerprint, duplicate, ...session } = s;
+    return {
+      ...session,
+      id: `${preview.batchId}_s_${index}`,
+      imported: true,
+      ended: `${session.date}T12:00:00.000Z`,
+      date: `${session.date}T12:00:00.000Z`,
+      startedAt: `${session.date}T12:00:00.000Z`,
+      isFreestyle: true,
+      entries: (session.entries || []).map(e => {
+        const { sourceName, ...entry } = e;
+        return { ...entry, exId: entry.exId || newExerciseByName.get(wiNormalizeName(entry.name))?.id || null };
+      }),
+    };
+  });
+  const sessionIds = toWrite.map(session => session.id);
+  // A retry may encounter rows from an earlier attempt. Only remove rows that
+  // this attempt creates, so a later network failure cannot delete a complete
+  // import that is being retried with the same deterministic IDs.
+  const [existingSessionRes, existingExerciseRes] = await Promise.all([
+    sessionIds.length
+      ? scheduleDbTask(() => _supabase.from('zane_sessions').select('id').eq('user_id', userId).in('id', sessionIds), { priority: 'foreground', kind: 'read' })
+      : Promise.resolve({ data: [] }),
+    exerciseRows.length
+      ? scheduleDbTask(() => _supabase.from('zane_exercises').select('id').eq('user_id', userId).in('id', exerciseRows.map(row => row.id)), { priority: 'foreground', kind: 'read' })
+      : Promise.resolve({ data: [] }),
+  ]);
+  if (existingSessionRes?.error) throw existingSessionRes.error;
+  if (existingExerciseRes?.error) throw existingExerciseRes.error;
+  const existingSessionIds = new Set((existingSessionRes?.data || []).map(row => row.id));
+  const existingExerciseIds = new Set((existingExerciseRes?.data || []).map(row => row.id));
+  const cleanupSessionIds = sessionIds.filter(id => !existingSessionIds.has(id));
+  const cleanupExerciseIds = exerciseRows.map(row => row.id).filter(id => !existingExerciseIds.has(id));
+  const cleanupImport = async () => {
+    try {
+      if (cleanupSessionIds.length) await scheduleDbTask(() => unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId).in('id', cleanupSessionIds)), { priority: 'critical', kind: 'write' });
+    } catch (_) { /* preserve the original import error; janitor can retry */ }
+    try {
+      if (cleanupExerciseIds.length) await scheduleDbTask(() => unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId).in('id', cleanupExerciseIds)), { priority: 'critical', kind: 'write' });
+    } catch (_) { /* preserve the original import error; janitor can retry */ }
+  };
+  const chunk = 100;
+  try {
+    for (let i = 0; i < exerciseRows.length; i += chunk) {
+      await scheduleDbTask(
+        () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + chunk), { onConflict: 'id' })),
+        { priority: 'critical', kind: 'write' },
+      );
+      report(15 + (exerciseRows.length ? Math.min(15, ((i + Math.min(chunk, exerciseRows.length - i)) / exerciseRows.length) * 15) : 15), 'Saving imported exercises…');
+    }
+    for (let i = 0; i < toWrite.length; i += 50) {
+      await scheduleDbTask(
+        () => unwrap(_supabase.from('zane_sessions').upsert(toWrite.slice(i, i + 50).map(s => sessionToRow(s, userId)), { onConflict: 'id' })),
+        { priority: 'critical', kind: 'write' },
+      );
+      report(30 + (toWrite.length ? Math.min(30, ((i + Math.min(50, toWrite.length - i)) / toWrite.length) * 30) : 30), 'Saving imported workouts…');
+    }
+    report(65, 'Saving sets and workout details…');
+    // Keep the whole relational child write inside the app's write lane. The
+    // helper performs several ordered FK requests, but no other foreground
+    // action should be squeezed between them while an import is in progress.
+    let detailPct = 65;
+    await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null, message => {
+      const match = /\((\d+)\/(\d+)\)/.exec(String(message || ''));
+      const current = match ? Number(match[1]) : 0;
+      const total = match ? Math.max(1, Number(match[2])) : 1;
+      const entries = String(message || '').startsWith('Uploading entries');
+      const base = entries ? 65 : 80;
+      const span = entries ? 15 : 19;
+      detailPct = Math.max(detailPct, base + Math.min(1, current / total) * span);
+      report(detailPct, message);
+    }), { priority: 'critical', kind: 'write' });
+  } catch (error) {
+    await cleanupImport();
+    throw error;
+  }
+  report(100, 'Import complete. Reloading your history…');
+  return { importedSessions: toWrite.length, skippedDuplicates: preview.sessions.length - toWrite.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
+}
+
+async function commitWorkoutPlanImport(preview, userId, options = {}) {
+  if (!preview?.batchId || !Array.isArray(preview.days) || !preview.days.length) throw new Error('Invalid plan preview.');
+  const onProgress = options.onProgress;
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(5, 'Preparing the imported plan…');
+  const existingExercises = options.existingExercises || [];
+  const existingByName = new Map(existingExercises.map(e => [wiNormalizeName(e.name), e]));
+  const newExerciseByName = new Map(); const exerciseRows = [];
+  for (const day of preview.days) for (const item of day.items || []) {
+    const norm = wiNormalizeName(item.name);
+    if (item.exId || !norm || existingByName.has(norm) || newExerciseByName.has(norm)) continue;
+    const id = `${preview.batchId}_ex_${wiHash(norm)}`;
+    const row = { id, user_id: userId, name: String(item.name).slice(0, 120), tags: ['imported'], note: 'Imported from workout plan', category: 'Imported', unilateral: false, equipment: null, progression_reps: item.reps ?? 8, movement_type: null, no_weight_reps: false, log_mode: 'weight_reps', pull_bodyweight: false, bodyweight_mode: null, youtube_url: null, note_pinned: false, progression_increment: null, horn_labels: null };
+    newExerciseByName.set(norm, row); exerciseRows.push(row);
+  }
+  const customDays = preview.days.map((day, index) => ({
+    name: String(day.name || `Day ${index + 1}`).slice(0, 80),
+    items: (day.items || []).map(item => ({ ...item, exId: item.exId || newExerciseByName.get(wiNormalizeName(item.name))?.id || null })).filter(item => item.exId),
+  }));
+  if (!customDays.some(day => day.items.length)) throw new Error('The plan has no usable exercises.');
+  const schedule = buildPlanSkeleton({ name: preview.planName || 'Imported plan', type: 'flex', presetKey: 'custom', customCount: customDays.length, customDays });
+  // Deterministic ids make a retry safe after a network interruption.
+  schedule.id = `${preview.batchId}_plan`;
+  schedule.days = schedule.days.map((day, index) => ({ ...day, id: `${preview.batchId}_day_${index}` }));
+  for (let i = 0; i < exerciseRows.length; i += 100) {
+    await scheduleDbTask(
+      () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + 100), { onConflict: 'id' })),
+      { priority: 'critical', kind: 'write' },
+    );
+    report(10 + (exerciseRows.length ? Math.min(35, ((i + Math.min(100, exerciseRows.length - i)) / exerciseRows.length) * 35) : 35), 'Saving private exercises…');
+  }
+  report(55, 'Saving the new flexible plan…');
+  await scheduleDbTask(
+    () => unwrap(_supabase.from('zane_schedules').upsert({ ...schedule, user_id: userId }, { onConflict: 'id' })),
+    { priority: 'critical', kind: 'write' },
+  );
+  report(100, 'Plan import complete. Reloading your plans…');
+  return { planId: schedule.id, planName: schedule.name, days: schedule.days.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
+}
+
 // Manual Health edits replace a day's detailed Water Tracker rows with one
 // canonical total. Keeping that total in waterLogs prevents the Health card
 // and Water screen from disagreeing until the next drink is logged.
@@ -1123,6 +1795,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     pushover_user_key: sett.pushoverUserKey ?? null,
     use_pushover: sett.usePushover ?? false,
     cycle_week_view: sett.cycleWeekView ?? false,
+    week_start_day: normalizeWeekStartDay(sett.weekStartDay),
     accent_color: sett.accentColor ?? 'copper',
     dark_mode: sett.darkMode ?? 'dark',
     custom_day_types: backup.customDayTypes ?? [],
@@ -1931,6 +2604,9 @@ function mapUserSettings(sett = {}) {
     pushoverUserKey: sett.pushover_user_key ?? null,
     usePushover: sett.use_pushover ?? false,
     cycleWeekView: sett.cycle_week_view ?? false,
+    // Reporting-only week boundary. Training plan weekdays and cycle math stay
+    // calendar-based; this setting affects weekly summaries and check-ins.
+    weekStartDay: normalizeWeekStartDay(sett.week_start_day),
     accentColor: sett.accent_color ?? 'copper',
     darkMode: sett.dark_mode ?? 'dark',
     tempoEnabled: sett.tempo_enabled ?? false,
@@ -2045,6 +2721,7 @@ function buildEssentialLoadResult({
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload ? { isDeload: true } : {}),
         ...(s.is_cleanup ? { isCleanup: true } : {}),
+        ...(s.imported ? { imported: true } : {}),
         ...(s.meso_recap ? { mesoRecap: s.meso_recap } : {}),
         ...(s.readiness ? { readiness: s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight: s.signal_weight } : {}),
@@ -2199,7 +2876,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, meso_recap, readiness, signal_weight, cycle_pos')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, imported, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -2580,6 +3257,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
         ...(s.is_cleanup   ? { isCleanup:   true } : {}),
+        ...(s.imported     ? { imported:    true } : {}),
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
@@ -3064,7 +3742,7 @@ function sessionToRow(s, userId) {
   // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
   // Cache-only metadata must never be sent to Postgres as if it were a column.
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, imported, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, _index, fingerprint, duplicate, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -3073,6 +3751,7 @@ function sessionToRow(s, userId) {
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
   row.is_cleanup = !!isCleanup;
+  row.imported = !!imported || String(s.id || '').startsWith('import_');
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;
@@ -3602,6 +4281,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.usePushover      !== next.settings?.usePushover      ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
+    prev.settings?.weekStartDay    !== next.settings?.weekStartDay    ||
     prev.settings?.accentColor      !== next.settings?.accentColor      ||
     prev.settings?.darkMode         !== next.settings?.darkMode          ||
     prev.settings?.tempoEnabled       !== next.settings?.tempoEnabled       ||
@@ -3683,6 +4363,7 @@ async function syncStore(prev, next, userId) {
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
       use_pushover: next.settings?.usePushover ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
+      week_start_day: normalizeWeekStartDay(next.settings?.weekStartDay),
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
       tempo_enabled: next.settings?.tempoEnabled ?? false,
@@ -3992,6 +4673,47 @@ function parseDate(s) {
 
 // ISO weekday from a Date: 0=Mon … 6=Sun
 function isoWd(d) { return (d.getDay() + 6) % 7; }
+
+// User-facing reporting weeks are configurable, but always use the same
+// ISO-indexed representation as isoWd: 0 = Monday … 6 = Sunday.  Keep this
+// separate from training-plan/cycle boundaries: a plan's real weekdays and
+// mesocycle windows must never move just because a user reports to a coach on
+// a different day.
+function normalizeWeekStartDay(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 0;
+}
+
+// Most recent configured reporting-week boundary containing `date`.
+// `date` may be a Date or a local YYYY-MM-DD string. Noon anchoring keeps the
+// calculation stable across DST transitions and deliberately follows the
+// app's local-calendar-date convention rather than UTC.
+function reportingWeekStartISO(date = new Date(), weekStartDay = 0) {
+  const candidate = date instanceof Date ? new Date(date.getTime()) : parseDate(String(date || ''));
+  const parsed = candidate && !Number.isNaN(candidate.getTime()) ? candidate : new Date();
+  parsed.setHours(12, 0, 0, 0);
+  const start = normalizeWeekStartDay(weekStartDay);
+  const offset = (isoWd(parsed) - start + 7) % 7;
+  parsed.setDate(parsed.getDate() - offset);
+  return fmtISO(parsed);
+}
+
+function reportingWeekEndISO(weekStart) {
+  return shiftDate(weekStart, 6);
+}
+
+// The check-in submitted on the configured boundary day represents the week
+// that just ended. This is the generalized form of the old Monday–Sunday
+// behaviour: Saturday reporters submit the previous Saturday–Friday window.
+function previousReportingWeekStartISO(date = new Date(), weekStartDay = 0) {
+  return shiftDate(reportingWeekStartISO(date, weekStartDay), -7);
+}
+
+function reportingWeekEndsToday(date = new Date(), weekStartDay = 0) {
+  const candidate = date instanceof Date ? new Date(date.getTime()) : parseDate(String(date || ''));
+  const d = candidate && !Number.isNaN(candidate.getTime()) ? candidate : new Date();
+  return isoWd(d) === ((normalizeWeekStartDay(weekStartDay) + 6) % 7);
+}
 
 // Sunday of the week that starts on weekStart (YYYY-MM-DD) → YYYY-MM-DD
 function weekEnd(weekStart) {
@@ -7037,12 +7759,8 @@ function normalizeSocialMetricSlots(raw) {
 
 window.SocialMetricCatalog = SOCIAL_METRIC_CATALOG;
 
-function socialWeekStartISO(date = new Date()) {
-  const d = new Date(date);
-  d.setHours(12, 0, 0, 0);
-  const mondayOffset = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - mondayOffset);
-  return fmtISO(d);
+function socialWeekStartISO(date = new Date(), weekStartDay = 0) {
+  return reportingWeekStartISO(date, weekStartDay);
 }
 
 function mapSocialProfile(p) {
@@ -8394,7 +9112,11 @@ async function addCoachingMacros(coachingId, macros, userId) {
 async function loadCoachCheckinStatus() {
   const { data, error } = await _supabase.rpc('get_coach_checkin_status');
   if (error) throw error;
-  return (data || []).map(r => ({ coachingId: r.coaching_id, checkedInAt: r.checked_in_at ?? null }));
+  return (data || []).map(r => ({
+    coachingId: r.coaching_id,
+    checkedInAt: r.checked_in_at ?? null,
+    reportingWeekStart: r.reporting_week_start ?? null,
+  }));
 }
 
 async function setCheckinEnabled(coachingId, enabled) {
@@ -8412,20 +9134,12 @@ async function requestCheckin(coachingId, userId) {
   await unwrap(_supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId));
 }
 
-function checkinWeekStart() {
-  const today = new Date();
-  // Check-ins cover Mon–Sun. Sunday is the LAST day of its week, not a fresh
-  // start, treating it as day 0 (like plain getDay() does) flipped this to
-  // the not-yet-finished current week a full day early, before that Sunday's
-  // own daily log (macros/steps) even exists. isoWd(today)+1 keeps Sunday
-  // counted as day 7 of its own week, so the "due" week only advances once
-  // Monday actually arrives.
-  const daysSinceSunday = isoWd(today) + 1;
-  const lastSunday = new Date(today);
-  lastSunday.setDate(today.getDate() - daysSinceSunday);
-  const monday = new Date(lastSunday);
-  monday.setDate(lastSunday.getDate() - 6);
-  return fmtISO(monday);
+function checkinWeekStart(weekStartDay = 0, date = new Date()) {
+  // The boundary day is the first day of a new reporting week, so a check-in
+  // submitted on that day covers the reporting week that just ended. This is
+  // the old Monday–Sunday rule generalized for users who report on another
+  // day (for example Saturday–Friday).
+  return previousReportingWeekStartISO(date, weekStartDay);
 }
 
 // responses = plain object with snake_case keys matching the form schema fields.
@@ -8561,14 +9275,63 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   return id;
 }
 
-async function loadCheckins(coachingId) {
-  const { data, error } = await _supabase
-    .from('zane_checkins')
-    .select('*')
-    .eq('coaching_id', coachingId)
-    .order('week_start', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(r => {
+async function loadCheckins(coachingId, { includePhotos = true } = {}) {
+  const [checkinsRes, photosRes] = await Promise.all([
+    _supabase
+      .from('zane_checkins')
+      .select('*')
+      .eq('coaching_id', coachingId)
+      .order('week_start', { ascending: false }),
+    // Photos are kept as metadata after the Drive worker removes the private
+    // staging object.  Loading them here makes the coach dashboard aware of
+    // attachments without putting image bytes into check-in JSON.
+    (includePhotos ? _supabase
+      .from('zane_coaching_drive_photos')
+      .select('id, checkin_id, file_name, mime_type, byte_size, status, drive_file_id, staging_path, created_at, uploaded_at')
+      .eq('coaching_id', coachingId)
+      .in('status', ['staged', 'uploaded'])
+      .order('created_at', { ascending: true })
+      : Promise.resolve({ data: [], error: null })),
+  ]);
+  if (checkinsRes.error) throw checkinsRes.error;
+  // A deployment that has the check-in table but not the optional Drive photo
+  // migration must still be able to load the dashboard.  Treat that one
+  // auxiliary query as best-effort; the check-in itself remains authoritative.
+  const photoRows = photosRes.error ? [] : (photosRes.data || []);
+  const checkinIds = new Set((checkinsRes.data || []).map(r => r.id));
+  const photosByCheckin = new Map();
+  for (const p of photoRows) {
+    if (!checkinIds.has(p.checkin_id)) continue;
+    const list = photosByCheckin.get(p.checkin_id) || [];
+    list.push({
+      id: p.id,
+      checkinId: p.checkin_id,
+      fileName: p.file_name,
+      mimeType: p.mime_type,
+      byteSize: p.byte_size,
+      status: p.status,
+      driveFileId: p.drive_file_id || null,
+      driveUrl: p.drive_file_id ? `https://drive.google.com/file/d/${encodeURIComponent(p.drive_file_id)}/view` : null,
+      stagingPath: p.staging_path,
+      previewUrl: null,
+      createdAt: p.created_at,
+      uploadedAt: p.uploaded_at || null,
+    });
+    photosByCheckin.set(p.checkin_id, list);
+  }
+  // Staged objects are private and short-lived.  Sign only those rows; an
+  // uploaded row normally has already been removed from Storage and is
+  // represented by its coach-owned Drive link instead.
+  const staged = [...photosByCheckin.values()].flat().filter(p => p.status === 'staged' && p.stagingPath);
+  if (staged.length) {
+    await Promise.all(staged.map(async p => {
+      try {
+        const signed = await _supabase.storage.from('coaching-drive-staging').createSignedUrl(p.stagingPath, 300);
+        if (!signed.error && signed.data?.signedUrl) p.previewUrl = signed.data.signedUrl;
+      } catch (_) {}
+    }));
+  }
+  return (checkinsRes.data || []).map(r => {
     // Prefer the responses jsonb (written by new code); fall back to fixed columns
     // for rows that predate the migration and weren't backfilled.
     const resp = r.responses || {
@@ -8597,6 +9360,7 @@ async function loadCheckins(coachingId) {
       lifeStress: resp.life_stress, workStress: resp.work_stress, tiredness: resp.tiredness,
       issuesNotes: resp.issues_notes, generalNote: resp.general_note,
       aiOpinion: r.ai_opinion ?? null, aiOpinionGeneratedAt: r.ai_opinion_generated_at ?? null,
+      photos: photosByCheckin.get(r.id) || [],
     };
   });
 }
@@ -13282,18 +14046,19 @@ window.LB = {
   supabase: _supabase,
   PLANNABLE_TECHNIQUES, plannedTechniqueLabel, plannedTechniqueShort,
   clearPrecompileCaches, clearCachesAndReload,
-  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, fnFetch,
+  SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, WORKOUT_IMPORT_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
   signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
   loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   resignSocialAttachment,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, normalizeWeekStartDay, reportingWeekStartISO, reportingWeekEndISO, previousReportingWeekStartISO, reportingWeekEndsToday, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
+  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiImportTable, wiFindImportHeaderRow, wiFindHistoryHeaderRow, wiImportPlanName, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
@@ -13306,7 +14071,7 @@ window.LB = {
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
-  normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
+  normSet, stableJson, syncValuesEqual, sessionToRow, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,

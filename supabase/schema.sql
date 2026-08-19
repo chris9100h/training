@@ -232,7 +232,8 @@ CREATE TABLE public.zane_sessions (
   -- zane_sessions_stamp_completion, immutable afterwards, never accepted from
   -- the client: it is the only session timestamp a client cannot forge, and the
   -- founding-member day-spread check depends on that.
-  completed_server_at timestamptz
+  completed_server_at timestamptz,
+  imported boolean NOT NULL DEFAULT false -- historical import; never counts as a live completion
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -393,6 +394,9 @@ CREATE TABLE public.zane_user_settings (
   rest_small integer DEFAULT 90,
   auto_open_rest_timer boolean NOT NULL DEFAULT false,
   cycle_week_view boolean DEFAULT false,
+  -- Reporting-only boundary for weekly summaries, Friends metrics and coach check-ins.
+  -- 0 = Monday ... 6 = Sunday; training-plan weekdays are unaffected.
+  week_start_day smallint NOT NULL DEFAULT 0 CHECK (week_start_day BETWEEN 0 AND 6),
   accent_color text DEFAULT 'gold'::text,
   dark_mode text DEFAULT 'dark'::text,
   pushover_user_key text,
@@ -1181,28 +1185,43 @@ AS $function$
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
- RETURNS TABLE(coaching_id text, checked_in_at timestamptz)
+ RETURNS TABLE(coaching_id text, checked_in_at timestamptz, reporting_week_start date)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
 AS $function$
 declare
-  v_week_start date;
 begin
-  v_week_start := current_date
-    - (extract(isodow from current_date)::int) * interval '1 day'
-    - interval '6 days';
-
+  /* Each client may report on a different week boundary. Keep this scoped
+     to reporting; plan/cycle weekdays use their own existing calculations.
+     Resolve today's date in the client's own zone so a boundary-day report
+     is not delayed until the database's UTC midnight. */
   return query
   select
     c.id as coaching_id,
     (
       select ci.checked_in_at from zane_checkins ci
       where ci.coaching_id = c.id
-        and ci.week_start = v_week_start
+        and ci.week_start = cfg.client_today
+          - ((extract(isodow from cfg.client_today)::int - 1
+              - cfg.week_start_day + 7) % 7)
       limit 1
-    ) as checked_in_at
+    ) as checked_in_at,
+    cfg.client_today
+      - ((extract(isodow from cfg.client_today)::int - 1
+          - cfg.week_start_day + 7) % 7) as reporting_week_start
   from zane_coaching c
+  left join zane_user_settings us on us.user_id = c.client_id
+  cross join lateral (
+    select
+      case
+        when nullif(trim(us.time_zone), '') is not null
+         and exists (select 1 from pg_timezone_names where name = trim(us.time_zone))
+          then (now() at time zone trim(us.time_zone))::date
+        else ((now() at time zone 'UTC') + make_interval(mins => coalesce(us.tz_offset_minutes, 0)))::date
+      end as client_today,
+      greatest(0, least(6, coalesce(us.week_start_day, 0)))::integer as week_start_day
+  ) cfg
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
     and c.status = 'active'
@@ -1920,6 +1939,20 @@ CREATE OR REPLACE FUNCTION public.zane_sessions_stamp_completion()
  SET search_path TO 'public'
 AS $function$
 BEGIN
+  -- Imported history is data, not a new completion. The deterministic import
+  -- id prefix is authoritative so a normal client cannot opt a live workout
+  -- out of the founding-member rules by merely setting a boolean column.
+  IF TG_OP = 'UPDATE' AND OLD.imported THEN
+    NEW.imported := true;
+  ELSIF NEW.id LIKE 'import\_%' ESCAPE '\' THEN
+    NEW.imported := true;
+  ELSE
+    NEW.imported := false;
+  END IF;
+  IF NEW.imported THEN
+    NEW.completed_server_at := NULL;
+    RETURN NEW;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     NEW.completed_server_at := CASE WHEN NEW.ended IS NOT NULL THEN now() ELSE NULL END;
     RETURN NEW;
@@ -1962,7 +1995,7 @@ DECLARE
   v_taken     int;
   v_total     int;
 BEGIN
-  IF NEW.ended IS NULL THEN
+  IF NEW.ended IS NULL OR NEW.imported THEN
     RETURN NEW;
   END IF;
 
@@ -1971,10 +2004,10 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL),
+  SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL AND NOT imported),
          COALESCE(SUM(LEAST(COALESCE(duration_minutes, 0), 120))
-                  FILTER (WHERE ended IS NOT NULL), 0),
-         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL)
+                  FILTER (WHERE ended IS NOT NULL AND NOT imported), 0),
+         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL AND NOT imported)
     INTO v_workouts, v_minutes, v_days
     FROM zane_sessions
    WHERE user_id = NEW.user_id;
@@ -4600,6 +4633,7 @@ DECLARE
   v_value jsonb;
   v_zone text;
   v_offset integer;
+  v_week_start_day integer;
   v_owner_today date;
   v_week_start date;
   v_week_end date;
@@ -4607,8 +4641,10 @@ DECLARE
 BEGIN
   IF p_user_id IS NULL THEN RETURN NULL; END IF;
 
-  SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes
-    INTO v_zone, v_offset
+  v_week_start_day := 0;
+  SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes,
+         greatest(0, least(6, coalesce(us.week_start_day, 0)))
+    INTO v_zone, v_offset, v_week_start_day
     FROM zane_user_settings us
    WHERE us.user_id = p_user_id;
 
@@ -4617,7 +4653,8 @@ BEGIN
   ELSE
     v_owner_today := ((now() AT TIME ZONE 'UTC') + make_interval(mins => coalesce(v_offset, 0)))::date;
   END IF;
-  v_week_start := date_trunc('week', v_owner_today)::date;
+  v_week_start := v_owner_today
+    - ((extract(isodow from v_owner_today)::int - 1 - v_week_start_day + 7) % 7);
   v_week_end := v_week_start + 7;
   v_adherence_end := least(v_week_end, v_owner_today);
 

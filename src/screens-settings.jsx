@@ -894,6 +894,25 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [migrationSheet, setMigrationSheet] = useStateSet(false);
+  const [workoutImportSheet, setWorkoutImportSheet] = useStateSet(false);
+  const [workoutImportLoading, setWorkoutImportLoading] = useStateSet(false);
+  const [workoutImportProgress, setWorkoutImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [workoutImportPreview, setWorkoutImportPreview] = useStateSet(null);
+  const [workoutImportError, setWorkoutImportError] = useStateSet(null);
+  const [workoutImportStep, setWorkoutImportStep] = useStateSet(1);
+  const [workoutImportPreviewIndex, setWorkoutImportPreviewIndex] = useStateSet(0);
+  const [workoutImportDuplicateMode, setWorkoutImportDuplicateMode] = useStateSet('skip');
+  const [workoutImportUnknownMode, setWorkoutImportUnknownMode] = useStateSet('create');
+  const [workoutImportSaving, setWorkoutImportSaving] = useStateSet(false);
+  const [planImportSheet, setPlanImportSheet] = useStateSet(false);
+  const [planImportLoading, setPlanImportLoading] = useStateSet(false);
+  const [planImportProgress, setPlanImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [planImportPreview, setPlanImportPreview] = useStateSet(null);
+  const [planImportError, setPlanImportError] = useStateSet(null);
+  const [planImportStep, setPlanImportStep] = useStateSet(1);
+  const [planImportDayIndex, setPlanImportDayIndex] = useStateSet(0);
+  const [planImportSaving, setPlanImportSaving] = useStateSet(false);
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
   const [exportingTraining, setExportingTraining] = useStateSet(false);
@@ -985,6 +1004,9 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   // localStorage tri-state itself.
   const [gridEnabled, setGridEnabled] = useStateSet(() => !!window.__gridEnabled);
   useEffectSet(() => { setGridEnabled(!!window.__gridEnabled); }, [darkMode]);
+  // Larger text is deliberately device-local. It changes presentation only,
+  // so it never enters the synced settings row or a backup.
+  const [largerText, setLargerText] = useStateSet(() => localStorage.getItem('logbook-larger-text') === 'true');
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -1059,7 +1081,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     let live = true;
     setSocialProfileLoading(true);
     setSocialProfileLoadError(null);
-    LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force: socialProfileRetry > 0 }).then(friends => {
+    LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force: socialProfileRetry > 0 }).then(friends => {
       if (live) setStore(s => s ? {
         ...s,
         friends: {
@@ -1074,7 +1096,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (live) setSocialProfileLoading(false);
     });
     return () => { live = false; };
-  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends?.loadedAt, userId, socialProfileRetry]);
+  }, [friendsSheet, store.settings?.showFriendsTab, store.settings?.weekStartDay, !!store.friends?.loadedAt, userId, socialProfileRetry]);
 
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
@@ -1886,6 +1908,134 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
+  const readMigrationFile = async (file, mode = 'plan') => {
+    if (!/\.xlsx$/i.test(file.name || '')) return file.text();
+    if (typeof window.__ensureXLSX !== 'function') throw new Error('XLSX support could not be loaded. Connect once and try again.');
+    const ExcelJS = await window.__ensureXLSX();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
+    const csvCell = (cell) => {
+      let value = cell?.text;
+      if (value == null || value === '') {
+        const raw = cell?.value;
+        if (raw && typeof raw === 'object') {
+          if (Array.isArray(raw.richText)) value = raw.richText.map(part => part?.text || '').join('');
+          else if (raw.result != null) value = raw.result;
+          else if (raw.text != null) value = raw.text;
+          else if (raw.hyperlink != null) value = raw.hyperlink;
+        } else value = raw;
+      }
+      const text = value == null ? '' : String(value);
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const normalizeHeader = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+    const worksheetRows = worksheet => {
+      const columnCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0);
+      const rows = [];
+      worksheet.eachRow({ includeEmpty: false }, row => {
+        rows.push(Array.from({ length: columnCount }, (_, index) => csvCell(row.getCell(index + 1))).join(','));
+      });
+      return rows;
+    };
+    const scoreWorksheet = worksheet => {
+      const sample = [];
+      let rowCount = 0;
+      worksheet.eachRow({ includeEmpty: false }, row => {
+        rowCount += 1;
+        if (sample.length < 40) sample.push(Array.from({ length: Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0) }, (_, index) => String(csvCell(row.getCell(index + 1))).replace(/^"|"$/g, '')));
+      });
+      const values = sample.flat().map(normalizeHeader);
+      const hasExercise = values.some(value => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(value));
+      const hasDate = values.some(value => /(^| )(date|workout date|session date|performed|logged|training date|started|start|timestamp|epoch|unix)( |$)/.test(value));
+      const requiredScore = mode === 'history' ? (hasExercise && hasDate ? 60 : 0) : (hasExercise ? 40 : 0);
+      return { worksheet, rowCount, score: requiredScore + Math.min(rowCount, 200) / 200 };
+    };
+    const candidates = (workbook.worksheets || []).map(scoreWorksheet).filter(candidate => candidate.rowCount > 0);
+    const selected = candidates.sort((a, b) => b.score - a.score || b.rowCount - a.rowCount)[0];
+    if (!selected) throw new Error('The XLSX file does not contain a worksheet with rows.');
+    const rows = worksheetRows(selected.worksheet);
+    if (!rows.length) throw new Error('The XLSX file does not contain any rows.');
+    return rows.join('\n');
+  };
+  const runWorkoutImport = () => {
+    // Keep input.click synchronous for iOS Safari. CSV and XLSX are parsed
+    // locally; only a bounded sample is sent to Qwen/Claude for mapping.
+    setMigrationSheet(false);
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0); setWorkoutImportProgress({ pct: 3, phase: 'Reading the file…' }); setWorkoutImportLoading(true);
+      try {
+        if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller date range and import it in two batches.');
+        const text = await readMigrationFile(file, 'history');
+        setWorkoutImportProgress({ pct: 12, phase: 'Reading the file complete. Preparing the mapping…' });
+        const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], progress => setWorkoutImportProgress(progress));
+        setWorkoutImportPreview(preview); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0);
+      } catch (err) {
+        setWorkoutImportError(err?.message || 'Could not read this CSV or XLSX file.');
+      } finally { setWorkoutImportLoading(false); }
+    };
+    input.click();
+  };
+  const closePlanImport = () => {
+    setPlanImportSheet(false);
+    setPlanImportPreview(null);
+    setPlanImportError(null);
+    setPlanImportProgress({ pct: 0, phase: '' });
+    setPlanImportStep(1);
+    setPlanImportDayIndex(0);
+  };
+  const runPlanImport = () => {
+    // Keep input.click synchronous for iOS Safari, just like the history
+    // importer. The browser sends only a bounded sample to the AI mapper.
+    setMigrationSheet(false);
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportProgress({ pct: 3, phase: 'Reading the plan…' }); setPlanImportLoading(true);
+      try {
+        if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller plan and try again.');
+        const text = await readMigrationFile(file, 'plan');
+        const preview = await LB.previewWorkoutPlanImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], file.name);
+        setPlanImportPreview(preview); setPlanImportStep(1); setPlanImportDayIndex(0);
+      } catch (err) {
+        setPlanImportError(err?.message || 'Could not read this plan CSV or XLSX file.');
+      } finally { setPlanImportLoading(false); }
+    };
+    input.click();
+  };
+  const commitWorkoutImport = async () => {
+    if (!workoutImportPreview || workoutImportSaving) return;
+    setWorkoutImportSaving(true); setWorkoutImportError(null); setWorkoutImportProgress({ pct: 2, phase: 'Preparing the selected workouts…' });
+    try {
+      await LB.commitWorkoutImport(workoutImportPreview, userId, {
+        duplicateMode: workoutImportDuplicateMode,
+        unknownMode: workoutImportUnknownMode,
+        existingExercises: store.exercises || [],
+        onProgress: progress => setWorkoutImportProgress(progress),
+      });
+      // Direct import writes bypass the normal in-memory diff. Rebooting after
+      // the commit gives the user the same authoritative server view as any
+      // other large restore, and the deterministic batch ids make a retry safe.
+      LB.clearLocal(userId); window.location.reload();
+    } catch (err) {
+      setWorkoutImportError(`The workout import stopped part-way through: ${err?.message || 'unknown error'}. You can retry this preview safely; already written rows use the same import IDs.`);
+      setWorkoutImportSaving(false);
+    }
+  };
+  const commitPlanImport = async () => {
+    if (!planImportPreview || planImportSaving) return;
+    setPlanImportSaving(true); setPlanImportError(null); setPlanImportProgress({ pct: 2, phase: 'Preparing the imported plan…' });
+    try {
+      await LB.commitWorkoutPlanImport(planImportPreview, userId, { existingExercises: store.exercises || [], onProgress: progress => setPlanImportProgress(progress) });
+      // Direct schedule/exercise writes bypass the normal in-memory diff. A
+      // fresh load gives the user the same authoritative view as any restore.
+      LB.clearLocal(userId); window.location.reload();
+    } catch (err) {
+      setPlanImportError(`The plan import stopped before completion: ${err?.message || 'unknown error'}. You can retry this preview safely.`);
+      setPlanImportSaving(false);
+    }
+  };
   // Flush BEFORE arming the latch: markIntentionalSignOut() is what allows
   // SIGNED_OUT to run LB.clearLocal, which drops the local cache, the pending
   // diff and syncBase in one go. If the final sync did not land (slow network,
@@ -2452,6 +2602,31 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   // from the Water tracker itself.
   const patchSettings = (patch) => setStore(s => ({ ...s, settings: { ...s.settings, ...patch } }));
 
+  const workoutImportSessions = workoutImportPreview?.sessions || [];
+  const workoutImportSample = workoutImportSessions[Math.min(workoutImportPreviewIndex, Math.max(0, workoutImportSessions.length - 1))] || null;
+  const workoutImportFormatSet = (set) => {
+    const load = set?.kg != null ? `${Number(set.kg).toLocaleString('en-US', { maximumFractionDigits: 2 })} ${workoutImportPreview?.targetUnit === 'lbs' ? 'lbs' : 'kg'}` : null;
+    const reps = set?.reps != null ? `${set.reps} reps` : (set?.repsL != null || set?.repsR != null ? `${set.repsL ?? '–'} / ${set.repsR ?? '–'} reps` : null);
+    const time = set?.timeSec != null ? `${set.timeSec}s` : null;
+    return [load, reps, time].filter(Boolean).join(' · ') || 'No measurable value';
+  };
+  const planImportDays = planImportPreview?.days || [];
+  const planImportSampleDay = planImportDays[Math.min(planImportDayIndex, Math.max(0, planImportDays.length - 1))] || null;
+  const planImportFormatItem = (item) => {
+    if (Array.isArray(item?.repsPerSet) && item.repsPerSet.length > 1) return `${item.sets} sets · ${item.repsPerSet.join('/')}`;
+    if (item?.repsMax != null) return `${item.sets} sets · ${item.reps}-${item.repsMax} reps`;
+    if (Array.isArray(item?.timeSecPerSet) && item.timeSecPerSet.length) return `${item.sets} sets · ${item.timeSecPerSet[0]}s`;
+    return `${item?.sets ?? 0} sets · ${item?.reps ?? 0} reps`;
+  };
+  const closeWorkoutImport = () => {
+    setWorkoutImportSheet(false);
+    setWorkoutImportPreview(null);
+    setWorkoutImportError(null);
+    setWorkoutImportStep(1);
+    setWorkoutImportPreviewIndex(0);
+    setWorkoutImportProgress({ pct: 0, phase: '' });
+  };
+
   return (
     <Screen scroll={false}>
       <TopBar title="Settings" onBack={() => go({ name: 'home' })} />
@@ -2814,6 +2989,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
             These four share one tab slot in the nav bar. Turn on whichever you actually use, any combination works: tap the slot to cycle through them, or long-press it to jump straight to one.
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <Row label="Reporting week starts" first>
+              <select
+                value={LB.normalizeWeekStartDay(store.settings?.weekStartDay)}
+                onChange={e => patchSettings({ weekStartDay: LB.normalizeWeekStartDay(e.target.value) })}
+                aria-label="Reporting week starts"
+                style={{
+                  minWidth: 118,
+                  background: UI.bgInset,
+                  border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  borderRadius: 5,
+                  color: UI.ink,
+                  padding: '7px 8px',
+                  fontFamily: UI.fontUi,
+                  fontSize: 12,
+                  colorScheme: 'dark',
+                }}
+              >
+                {[
+                  ['Monday', 0], ['Tuesday', 1], ['Wednesday', 2], ['Thursday', 3],
+                  ['Friday', 4], ['Saturday', 5], ['Sunday', 6],
+                ].map(([label, value]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Row>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Sets the week used by Health summaries, Training stats, History groups, Friends metrics and coach check-ins. Training-plan days stay unchanged.
+            </div>
           </div>
           <NavRow label="Health" first hint={store.settings?.showHealthTab ? 'On' : 'Off'} onTap={() => setHealthSubSheet(true)} />
           <NavRow label="Water" hint={store.settings?.showWaterTab ? 'On' : 'Off'} onTap={() => setWaterSubSheet(true)} />
@@ -3628,6 +3831,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               window.applyGridPreference(n);
             }} />
           </Row>
+          <Row label="Larger text">
+            <Toggle on={largerText} onToggle={() => {
+              const n = !largerText;
+              setLargerText(n);
+              try { localStorage.setItem('logbook-larger-text', String(n)); } catch (_) {}
+              window.applyLargeTextPreference(n);
+            }} />
+          </Row>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '-2px 0 8px', lineHeight: 1.4 }}>
+            Increases text and controls on this device only.
+          </div>
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">
               <Toggle on={paperAccentEnabled} onToggle={() => {
@@ -3651,18 +3865,67 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       {/* ══ Data Sheet ══ */}
       <SettingsSheet open={dataSheet} onClose={() => setDataSheet(false)} title="Data">
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <Btn kind="ghost" onClick={() => exportData()} style={{ flex: 1 }}>Export JSON</Btn>
-            {/* backupOk is NOT reset here: it starts false and is only ever
-                set by exportData itself (true on success, false on failure),
-                so a backup already downloaded earlier this session still
-                counts, reopening this sheet shouldn't re-arm the "no backup
-                yet" warning under it for no reason. */}
-            <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>BACKUP &amp; RESTORE</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div>
+                {/* backupOk is NOT reset here: it starts false and is only ever
+                    set by exportData itself (true on success, false on failure),
+                    so a backup already downloaded earlier this session still
+                    counts, reopening this sheet shouldn't re-arm the "no backup
+                    yet" warning under it for no reason. */}
+                <Btn kind="ghost" onClick={() => exportData()} style={{ width: '100%' }}>Download full backup</Btn>
+                <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+                  Save a complete copy of your Zane data to this device.
+                </div>
+              </div>
+              <div>
+                <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ width: '100%' }}>{importing ? 'Restoring…' : 'Restore from backup'}</Btn>
+                <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+                  Replace your current data with a previously saved backup.
+                </div>
+              </div>
+            </div>
           </div>
-          <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
-          <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>SHARE OR ANALYSE TRAINING</div>
+            <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)} style={{ width: '100%' }}>Export workout history</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Download your training history as CSV, Excel, or PDF.
+            </div>
+          </div>
+          <div>
+            <div className="label" style={{ color: UI.gold, marginBottom: 8 }}>MOVE TO ZANE</div>
+            <Btn kind="ghost" onClick={() => setMigrationSheet(true)} style={{ width: '100%' }}>Migrate from other apps</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Bring a workout history or training plan from another app.
+            </div>
+          </div>
+          <div>
+            <Btn kind="ghost" onClick={handleDeleteAll} style={{ width: '100%', color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+            <div className="micro" style={{ color: UI.inkFaint, margin: '5px 2px 0', lineHeight: 1.4 }}>
+              Permanently remove all data from this account.
+            </div>
+          </div>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Migration picker ══ */}
+      <SettingsSheet open={migrationSheet} onClose={() => setMigrationSheet(false)} title="Migrate from other apps">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
+            Bring your training history or a training plan into Zane from a CSV or Excel file. The file is analysed first and nothing is saved until you review and confirm it.
+          </div>
+          <Btn kind="ghost" onClick={runPlanImport} style={{ width: '100%' }}>
+            <i className="fa-solid fa-list-check" style={{ marginRight: 8 }} /> Import a training plan
+          </Btn>
+          <Btn kind="ghost" onClick={runWorkoutImport} style={{ width: '100%' }}>
+            <i className="fa-solid fa-clock-rotate-left" style={{ marginRight: 8 }} /> Import workout history
+          </Btn>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45 }}>
+            Plans are added as a new flexible plan. Existing plans and history are never overwritten.
+          </div>
         </div>
       </SettingsSheet>
 
@@ -3781,6 +4044,243 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
           </div>
         )}
+      </SettingsSheet>
+
+      {/* ══ AI plan CSV/XLSX import ══ */}
+      <SettingsSheet open={planImportSheet} onClose={planImportSaving ? () => {} : closePlanImport} title="Import a training plan">
+        {planImportLoading || planImportSaving ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <div style={{ color: UI.inkSoft, fontSize: 13, minHeight: 20 }}>{planImportProgress.phase || (planImportSaving ? 'Importing your plan…' : 'Reading the plan…')}</div>
+              <div className="num" style={{ color: UI.inkFaint, fontSize: 12, flexShrink: 0 }}>{planImportProgress.pct}%</div>
+            </div>
+            <div role="progressbar" aria-label="Training plan import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={planImportProgress.pct} style={{ background: UI.bgInset, borderRadius: 999, height: 8, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${planImportProgress.pct}%`, transition: 'width 0.45s ease' }} />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>{planImportSaving ? 'Keep this sheet open while Zane saves the plan.' : 'Qwen prepares a preview. Your existing plans are not changed.'}</div>
+          </div>
+        ) : planImportError && !planImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: UI.danger, fontSize: 13, lineHeight: 1.5 }}>{planImportError}</div>
+            <Btn kind="ghost" onClick={closePlanImport}>Close</Btn>
+          </div>
+        ) : planImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+              {['DETECTED', 'PLAN PREVIEW', 'REVIEW'].map((label, index) => {
+                const step = index + 1;
+                const active = planImportStep === step;
+                const completed = planImportStep > step;
+                return <button key={label} onClick={() => completed && setPlanImportStep(step)} disabled={!completed && !active} style={{ minWidth: 0, padding: '7px 3px', borderRadius: 4, border: `var(--hair-width) solid ${active || completed ? 'var(--accent)' : UI.hair}`, background: active ? 'var(--accent)' : UI.bgInset, color: active ? 'var(--accent-ink)' : completed ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', cursor: completed ? 'pointer' : 'default', textShadow: 'none' }}><span style={{ display: 'block', fontSize: 9, marginBottom: 2 }}>{completed ? '✓' : step}</span>{label}</button>;
+              })}
+            </div>
+            {planImportStep === 1 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 1 · Detected</div>
+                  <span style={{ color: UI.ink }}>{planImportPreview.planName}</span><br />
+                  {planImportPreview.stats.days} training days · {planImportPreview.stats.exercises} exercises found. Nothing is saved yet.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>WHAT ZANE DETECTED</div>
+                  <div style={{ background: UI.bgInset, borderRadius: 6, padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {Object.entries(planImportPreview.mapping?.columns || {}).filter(([, header]) => header).map(([field, header]) => (
+                      <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: UI.inkSoft, fontSize: 12 }}>
+                        <span style={{ color: UI.inkFaint, textTransform: 'capitalize' }}>{field.replace(/([A-Z])/g, ' $1')}</span>
+                        <span style={{ color: UI.ink, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{header}</span>
+                      </div>
+                    ))}
+                    <div style={{ color: UI.inkFaint, fontSize: 11, marginTop: 2 }}>
+                      {planImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0} exercise name{(planImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0) === 1 ? '' : 's'} matched to your library.
+                    </div>
+                  </div>
+                </div>
+                {planImportPreview.stats.invalidRows > 0 && <div className="micro" style={{ color: UI.gold }}>{planImportPreview.stats.invalidRows} row{planImportPreview.stats.invalidRows === 1 ? '' : 's'} had no usable exercise and will be skipped.</div>}
+                {planImportPreview.mapping?.warnings?.length > 0 && <div className="micro" style={{ color: UI.gold, lineHeight: 1.45 }}>{planImportPreview.mapping.warnings.join(' ')}</div>}
+                <Btn onClick={() => setPlanImportStep(2)} disabled={!planImportPreview.days.length} style={{ width: '100%' }}>See the plan preview</Btn>
+                <Btn kind="ghost" onClick={closePlanImport}>Cancel</Btn>
+              </>
+            )}
+            {planImportStep === 2 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.45 }}>
+                  <div className="label" style={{ color: UI.gold, marginBottom: 5 }}>STEP 2 · PLAN PREVIEW</div>
+                  <div style={{ color: UI.ink, fontSize: 17, fontWeight: 600, fontFamily: UI.fontUi }}>{planImportSampleDay?.name || 'Training day'}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Day {Math.min(planImportDayIndex + 1, planImportDays.length)} of {planImportDays.length} · {planImportPreview.planName}</div>
+                </div>
+                {planImportSampleDay ? (
+                  <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {planImportSampleDay.items.map((item, itemIndex) => (
+                      <div key={`${item.name}-${itemIndex}`} style={{ background: UI.bgInset, borderRadius: 5, padding: '10px 11px', borderLeft: `2px solid ${UI.gold}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                        <span style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                        <span className="num" style={{ color: UI.inkSoft, fontSize: 12, flexShrink: 0 }}>{planImportFormatItem(item)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="micro" style={{ color: UI.inkFaint }}>No training day rows were found.</div>}
+                {planImportDays.length > 1 && <div style={{ display: 'flex', gap: 7 }}>
+                  <Btn kind="ghost" disabled={planImportDayIndex <= 0} onClick={() => setPlanImportDayIndex(i => Math.max(0, i - 1))} style={{ flex: 1 }}>Previous day</Btn>
+                  <Btn kind="ghost" disabled={planImportDayIndex >= planImportDays.length - 1} onClick={() => setPlanImportDayIndex(i => Math.min(planImportDays.length - 1, i + 1))} style={{ flex: 1 }}>Next day</Btn>
+                </div>}
+                <Btn onClick={() => setPlanImportStep(3)} style={{ width: '100%' }}>Continue to review</Btn>
+                <Btn kind="ghost" onClick={() => setPlanImportStep(1)}>Back</Btn>
+              </>
+            )}
+            {planImportStep === 3 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 3 · Review and import</div>
+                  <span style={{ color: UI.ink }}>{planImportPreview.planName}</span> will be added as a new flexible plan with {planImportPreview.stats.days} days.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>EXERCISE NAMES</div>
+                  {planImportPreview.unknownExercises.length === 0 ? (
+                    <div className="micro" style={{ color: UI.ok }}>All exercises match your library.</div>
+                  ) : <>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 7 }}>{planImportPreview.unknownExercises.length} exercise name{planImportPreview.unknownExercises.length === 1 ? '' : 's'} are new. They will be created as private exercises so the imported plan is usable immediately.</div>
+                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {planImportPreview.unknownExercises.slice(0, 30).map(x => <div key={x.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: UI.inkSoft, fontSize: 12, fontFamily: UI.fontUi }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span><span className="num" style={{ color: UI.inkFaint, flexShrink: 0 }}>{x.days} day{x.days === 1 ? '' : 's'}</span></div>)}
+                      {planImportPreview.unknownExercises.length > 30 && <div className="micro" style={{ color: UI.inkFaint }}>+ {planImportPreview.unknownExercises.length - 30} more</div>}
+                    </div>
+                  </>}
+                </div>
+                {planImportError && <div style={{ color: UI.danger, fontSize: 12 }}>{planImportError}</div>}
+                <Btn onClick={commitPlanImport} disabled={planImportSaving || !planImportPreview.days.length} style={{ width: '100%' }}>{planImportSaving ? 'Importing...' : `Import ${planImportPreview.planName}`}</Btn>
+                <Btn kind="ghost" onClick={() => setPlanImportStep(2)}>Back to plan preview</Btn>
+                <Btn kind="ghost" onClick={closePlanImport}>Cancel</Btn>
+              </>
+            )}
+          </div>
+        ) : null}
+      </SettingsSheet>
+
+      {/* ══ AI workout CSV/XLSX import ══ */}
+      <SettingsSheet open={workoutImportSheet} onClose={workoutImportSaving ? () => {} : closeWorkoutImport} title="Import workout history">
+        {workoutImportLoading || workoutImportSaving ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <div style={{ color: UI.inkSoft, fontSize: 13, minHeight: 20 }}>{workoutImportProgress.phase || (workoutImportSaving ? 'Importing your history…' : 'Reading the file…')}</div>
+              <div className="num" style={{ color: UI.inkFaint, fontSize: 12, flexShrink: 0 }}>{workoutImportProgress.pct}%</div>
+            </div>
+            <div role="progressbar" aria-label="Workout import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={workoutImportProgress.pct} style={{ background: UI.bgInset, borderRadius: 999, height: 8, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${workoutImportProgress.pct}%`, transition: 'width 0.45s ease' }} />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>{workoutImportSaving ? 'Keep this sheet open while Zane saves the workouts and sets.' : 'Zane analyses the file and prepares a preview. Nothing is saved during this step.'}</div>
+          </div>
+        ) : workoutImportError && !workoutImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: UI.danger, fontSize: 13, lineHeight: 1.5 }}>{workoutImportError}</div>
+            <Btn kind="ghost" onClick={closeWorkoutImport}>Close</Btn>
+          </div>
+        ) : workoutImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+              {['DETECTED', 'WORKOUT', 'REVIEW'].map((label, index) => {
+                const step = index + 1;
+                const active = workoutImportStep === step;
+                const completed = workoutImportStep > step;
+                return <button key={label} onClick={() => completed && setWorkoutImportStep(step)} disabled={!completed && !active} style={{ minWidth: 0, padding: '7px 3px', borderRadius: 4, border: `var(--hair-width) solid ${active || completed ? 'var(--accent)' : UI.hair}`, background: active ? 'var(--accent)' : UI.bgInset, color: active ? 'var(--accent-ink)' : completed ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.06em', cursor: completed ? 'pointer' : 'default', textShadow: 'none' }}><span style={{ display: 'block', fontSize: 9, marginBottom: 2 }}>{completed ? '✓' : step}</span>{label}</button>;
+              })}
+            </div>
+
+            {workoutImportStep === 1 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 1 · Detected</div>
+                  {workoutImportPreview.stats.sessions} workouts · {workoutImportPreview.stats.sets} sets found. Nothing is saved yet.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>WHAT ZANE DETECTED</div>
+                  <div style={{ background: UI.bgInset, borderRadius: 6, padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {Object.entries(workoutImportPreview.mapping?.columns || {}).filter(([, header]) => header).map(([field, header]) => (
+                      <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: UI.inkSoft, fontSize: 12 }}>
+                        <span style={{ color: UI.inkFaint, textTransform: 'capitalize' }}>{field.replace(/([A-Z])/g, ' $1')}</span>
+                        <span style={{ color: UI.ink, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{header}</span>
+                      </div>
+                    ))}
+                    <div style={{ color: UI.inkFaint, fontSize: 11, marginTop: 2 }}>
+                      {workoutImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0} exercise name{(workoutImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0) === 1 ? '' : 's'} matched to your library.
+                    </div>
+                  </div>
+                </div>
+                {workoutImportPreview.stats.invalidRows > 0 && <div className="micro" style={{ color: UI.gold }}>{workoutImportPreview.stats.invalidRows} row{workoutImportPreview.stats.invalidRows === 1 ? '' : 's'} had no usable date or completed value and will be skipped.</div>}
+                {workoutImportPreview.mapping?.warnings?.length > 0 && <div className="micro" style={{ color: UI.gold, lineHeight: 1.45 }}>{workoutImportPreview.mapping.warnings.join(' ')}</div>}
+                <Btn onClick={() => setWorkoutImportStep(2)} disabled={!workoutImportPreview.sessions.length} style={{ width: '100%' }}>See a workout preview</Btn>
+                <Btn kind="ghost" onClick={closeWorkoutImport}>Cancel</Btn>
+              </>
+            )}
+
+            {workoutImportStep === 2 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.45 }}>
+                  <div className="label" style={{ color: UI.gold, marginBottom: 5 }}>STEP 2 · WORKOUT PREVIEW</div>
+                  <div style={{ color: UI.ink, fontSize: 17, fontWeight: 600, fontFamily: UI.fontUi }}>{workoutImportSample?.dayName || 'Imported workout'}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>{workoutImportSample?.date || 'Unknown date'} · workout {Math.min(workoutImportPreviewIndex + 1, workoutImportSessions.length)} of {workoutImportSessions.length}</div>
+                </div>
+                {workoutImportSample ? (
+                  <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {workoutImportSample.entries.map((entry, entryIndex) => (
+                      <div key={`${entry.name}-${entryIndex}`} style={{ background: UI.bgInset, borderRadius: 5, padding: '9px 11px', borderLeft: `2px solid ${UI.gold}` }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, alignItems: 'baseline', marginBottom: 5 }}>
+                          <span style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.name}</span>
+                          <span className="micro" style={{ color: UI.inkFaint, flexShrink: 0 }}>{entry.sets.length} set{entry.sets.length === 1 ? '' : 's'}</span>
+                        </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+                          {entry.sets.map((set, setIndex) => <div key={setIndex} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: UI.inkSoft, fontSize: 12 }}><span className="micro" style={{ color: UI.inkFaint }}>SET {setIndex + 1}</span><span className="num" style={{ textAlign: 'right' }}>{workoutImportFormatSet(set)}</span></div>)}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="micro" style={{ color: UI.inkFaint }}>No workout rows were found.</div>}
+                {workoutImportSessions.length > 1 && <div style={{ display: 'flex', gap: 7 }}>
+                  <Btn kind="ghost" disabled={workoutImportPreviewIndex <= 0} onClick={() => setWorkoutImportPreviewIndex(i => Math.max(0, i - 1))} style={{ flex: 1 }}>Previous</Btn>
+                  <Btn kind="ghost" disabled={workoutImportPreviewIndex >= workoutImportSessions.length - 1} onClick={() => setWorkoutImportPreviewIndex(i => Math.min(workoutImportSessions.length - 1, i + 1))} style={{ flex: 1 }}>Next</Btn>
+                </div>}
+                <Btn onClick={() => setWorkoutImportStep(3)} style={{ width: '100%' }}>Continue to review</Btn>
+                <Btn kind="ghost" onClick={() => setWorkoutImportStep(1)}>Back</Btn>
+              </>
+            )}
+
+            {workoutImportStep === 3 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 3 · Review and import</div>
+                  {workoutImportPreview.stats.sessions} workouts will be checked for duplicates before anything is written.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>DUPLICATES</div>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    {[['skip', 'Skip exact duplicates'], ['import', 'Import anyway']].map(([key, label]) => (
+                      <button key={key} onClick={() => setWorkoutImportDuplicateMode(key)} style={{ flex: 1, padding: '8px 6px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: workoutImportDuplicateMode === key ? 'var(--accent)' : UI.bgInset, color: workoutImportDuplicateMode === key ? 'var(--accent-ink)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', textShadow: 'none' }}>{label}</button>
+                    ))}
+                  </div>
+                  <div className="micro" style={{ marginTop: 5, color: UI.inkFaint }}>{workoutImportPreview.stats.duplicates} exact duplicate workout{workoutImportPreview.stats.duplicates === 1 ? '' : 's'} found.</div>
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>UNKNOWN EXERCISES</div>
+                  {workoutImportPreview.unknownExercises.length === 0 ? (
+                    <div className="micro" style={{ color: UI.ok }}>All exercises match your library.</div>
+                  ) : <>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 7 }}>{workoutImportPreview.unknownExercises.length} unique names are not in your library. We group them, so a long history does not create a one-by-one chore.</div>
+                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                      {workoutImportPreview.unknownExercises.slice(0, 30).map(x => <div key={x.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: UI.inkSoft, fontSize: 12, fontFamily: UI.fontUi }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span><span className="num" style={{ color: UI.inkFaint, flexShrink: 0 }}>{x.count} sets</span></div>)}
+                      {workoutImportPreview.unknownExercises.length > 30 && <div className="micro" style={{ color: UI.inkFaint }}>+ {workoutImportPreview.unknownExercises.length - 30} more</div>}
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      {[['create', 'Create private exercises'], ['text', 'Keep as text']].map(([key, label]) => (
+                        <button key={key} onClick={() => setWorkoutImportUnknownMode(key)} style={{ flex: 1, padding: '8px 6px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: workoutImportUnknownMode === key ? 'var(--accent)' : UI.bgInset, color: workoutImportUnknownMode === key ? 'var(--accent-ink)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', textShadow: 'none' }}>{label}</button>
+                      ))}
+                    </div>
+                  </>}
+                </div>
+                {workoutImportError && <div style={{ color: UI.danger, fontSize: 12 }}>{workoutImportError}</div>}
+                <Btn onClick={commitWorkoutImport} disabled={workoutImportSaving || !workoutImportPreview.sessions.length || (workoutImportDuplicateMode === 'skip' && workoutImportPreview.sessions.length <= workoutImportPreview.stats.duplicates)} style={{ width: '100%' }}>{workoutImportSaving ? 'Importing...' : (() => { const count = workoutImportPreview.sessions.length - (workoutImportDuplicateMode === 'skip' ? workoutImportPreview.stats.duplicates : 0); return count ? `Import ${count} workouts` : 'Nothing new to import'; })()}</Btn>
+                <Btn kind="ghost" onClick={() => setWorkoutImportStep(2)}>Back to workout preview</Btn>
+                <Btn kind="ghost" onClick={closeWorkoutImport}>Cancel</Btn>
+              </>
+            )}
+          </div>
+        ) : null}
       </SettingsSheet>
 
       {/* ══ How To Sheet ══ */}

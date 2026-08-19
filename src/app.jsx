@@ -441,6 +441,104 @@ function WhatsNewModal({ entries, onDismiss }) {
   );
 }
 
+const ZANE_PWA_INSTALL_PROMPT_KEY = 'logbook-pwa-install-prompt-until';
+const ZANE_PWA_INSTALL_SNOOZE_MS = 14 * 24 * 60 * 60 * 1000;
+
+function zanePwaPromptIsSnoozed() {
+  try {
+    const until = Number(localStorage.getItem(ZANE_PWA_INSTALL_PROMPT_KEY) || 0);
+    return Number.isFinite(until) && until > Date.now();
+  } catch (_) { return false; }
+}
+
+function zaneSnoozePwaPrompt() {
+  try {
+    localStorage.setItem(ZANE_PWA_INSTALL_PROMPT_KEY, String(Date.now() + ZANE_PWA_INSTALL_SNOOZE_MS));
+  } catch (_) {}
+}
+
+function PwaInstallPrompt({ platform, onLater, onOpenGuide }) {
+  const stepStyle = { display: 'flex', alignItems: 'flex-start', gap: 12, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13.5, lineHeight: 1.5 };
+  const numberStyle = { width: 32, height: 32, flex: '0 0 32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),.06)', color: UI.ink, fontFamily: UI.fontNum, fontSize: 13 };
+  const strong = { color: UI.ink, fontWeight: 700 };
+  const iosSteps = [
+    <>Open <strong style={strong}>zane-wo.com</strong> in Safari. Chrome and Firefox cannot install apps on iPhone.</>,
+    <>Tap the <strong style={strong}>Share</strong> button, the square with an arrow pointing up. Depending on your iOS version it sits in the bottom toolbar or in the address-bar menu.</>,
+    <>Scroll through the share sheet and pick <strong style={strong}>Add to Home Screen</strong>. If you do not see it, keep scrolling.</>,
+    <>Confirm the name and tap <strong style={strong}>Add</strong> in the top-right corner.</>,
+  ];
+  const androidSteps = [
+    <>Open <strong style={strong}>zane-wo.com</strong> in Chrome.</>,
+    <>Tap the <strong style={strong}>three-dot menu</strong> in the top-right corner.</>,
+    <>Pick <strong style={strong}>Add to Home screen</strong>. Some Chrome versions call it <strong style={strong}>Install app</strong>.</>,
+    <>A dialog appears with the Zane icon. Tap <strong style={strong}>Install</strong>, and it opens like a native app from then on.</>,
+  ];
+  const card = (kind, title, steps) => (
+    <div style={{
+      minWidth: 0, padding: '27px 28px 25px', border: `1px solid ${UI.hairStrong}`,
+      borderRadius: 10, background: 'rgba(var(--bg-rgb),.34)', textAlign: 'left',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 23 }}>
+        <div style={{ width: 27, height: 27, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.gold }}>
+          {kind === 'ios' ? (
+            <svg width="23" height="25" viewBox="0 0 24 26" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 16V3m0 0L7.5 7.5M12 3l4.5 4.5" /><path d="M5 11v10.5A1.5 1.5 0 0 0 6.5 23h11a1.5 1.5 0 0 0 1.5-1.5V11" />
+            </svg>
+          ) : (
+            <svg width="22" height="25" viewBox="0 0 24 26" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5.5" y="2" width="13" height="22" rx="2" /><path d="M10 20.5h4" />
+            </svg>
+          )}
+        </div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 27, color: UI.ink, lineHeight: 1, letterSpacing: '.03em', textTransform: 'uppercase' }}>{title}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {steps.map((step, index) => <div key={index} style={stepStyle}><span style={numberStyle}>{index + 1}</span><div style={{ flex: 1, minWidth: 0 }}>{step}</div></div>)}
+      </div>
+    </div>
+  );
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="zane-pwa-install-title" style={{
+      position: localViewportLayerPosition(), inset: 0, zIndex: 10001,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      minHeight: '100dvh', padding: '24px 16px',
+      background: 'rgba(8, 6, 13, 0.78)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+    }}>
+      <section style={{
+        width: 'min(100%, 940px)', maxHeight: 'calc(100dvh - 48px)', overflowY: 'auto',
+        border: `1px solid ${UI.goldSoft}`, borderRadius: 10,
+        background: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
+        boxShadow: '0 24px 80px rgba(0,0,0,.65), 0 0 0 1px rgba(var(--accent-rgb),.1)',
+        padding: '30px 28px 24px', animation: 'fadeUp .35s ease both',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 18, marginBottom: 23 }}>
+          <div>
+            <div className="micro-gold" style={{ marginBottom: 5 }}>INSTALL ZANE AS AN APP</div>
+            <div id="zane-pwa-install-title" style={{ fontFamily: UI.fontDisplay, fontSize: 31, color: UI.ink, lineHeight: 1.02, textTransform: 'uppercase' }}>
+              Full app. One tap away.
+            </div>
+            <div style={{ marginTop: 8, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13.5, lineHeight: 1.5 }}>
+              Install Zane to train full-screen, keep workouts available offline and get the best notification experience.
+            </div>
+          </div>
+          <button type="button" onClick={onLater} aria-label="Close" style={{ flex: '0 0 auto', width: 34, height: 34, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, background: 'transparent', color: UI.inkFaint, fontSize: 24, lineHeight: 1, cursor: 'pointer' }}>×</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 18 }}>
+          {card('ios', 'iPhone', iosSteps)}
+          {card('android', 'Android', androidSteps)}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 9, marginTop: 18 }}>
+          <button type="button" onClick={onLater} style={{ padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>MAYBE LATER</button>
+          <button type="button" onClick={onOpenGuide} style={{ padding: '10px 14px', borderRadius: 6, border: 'none', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 7px 18px rgba(var(--accent-rgb),.25)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>
+            {platform === 'desktop' ? 'DONE' : 'OPEN FULL GUIDE'}
+          </button>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 const LIFETIME_CONGRATS_SEEN_PREFIX = 'logbook-lifetime-premium-seen:';
 const LIFETIME_CONGRATS_PENDING_PREFIX = 'logbook-lifetime-premium-pending:';
 
@@ -764,6 +862,7 @@ function App() {
   const [storageFull, setStorageFull] = useStateA(false);  // local cache write failed (quota)
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const [lifetimeCongratsPending, setLifetimeCongratsPending] = useStateA(false);
+  const [pwaInstallPending, setPwaInstallPending] = useStateA(false);
   const onboardingChecked = useRefA(false);
   // Live snapshot of store, read (not subscribed to) by the What's New effect
   // below so it can peek at the current onboarding-relevant fields without
@@ -790,6 +889,7 @@ function App() {
   });
   const unitPicked                = useRefA(false); // user chose a unit this session, silences the reset watcher
   const xHandlePromptCheckedUser  = useRefA(null); // once per user per boot, never re-prompt after onboarding completes in-place
+  const pwaInstallCheckedUser      = useRefA(null); // one prompt decision per browser boot/account
   const retryTimer                = useRefA(null);  // one-shot retry after a failed sync
   const localSaveTimer            = useRefA(null);  // debounces the full-store localStorage write
   const waitingWorker             = useRefA(null);
@@ -833,6 +933,8 @@ function App() {
     syncGeneration.current += 1;
     userIdRef.current = userId;
     setLifetimeCongratsPending(false);
+    setPwaInstallPending(false);
+    pwaInstallCheckedUser.current = null;
     previousMedsEnabled.current = null;
     adminSupportUnreadRevision.current += 1;
     adminSupportUnreadRequest.current += 1;
@@ -2791,6 +2893,21 @@ function App() {
     setXHandlePromptOpen(true);
   }, [xHandlePromptPending, phase, store, route.name, whatsNewSettled, whatsNew, onboardingState, unitPromptOpen, pendingShare, autoCloseNotify, forceShowUpdateBanner, updateAvailable, openSheetCount, textEntryFocused]);
 
+  // A browser tab is fully supported, but the installed app is the better
+  // experience on a phone: it removes browser chrome, improves iOS push
+  // delivery, and gives the offline workout shell its own launch surface. Ask
+  // returning users once per browser period, never from an in-app browser or an
+  // already-installed PWA. The pending flag lets What's New/onboarding/unit
+  // prompts finish first instead of stacking several blocking dialogs.
+  useEffectA(() => {
+    if (phase !== 'ready' || !store || !userId) return;
+    if (pwaInstallCheckedUser.current === userId) return;
+    if (store.settings?.unit == null || !store.settings?.onboardingCompleted || onboardingOwnsBoot(store)) return;
+    pwaInstallCheckedUser.current = userId;
+    if (UI.isStandalonePwa() || UI.isInAppBrowser() || zanePwaPromptIsSnoozed()) return;
+    setPwaInstallPending(true);
+  }, [phase, userId, store?.settings?.unit, store?.settings?.onboardingCompleted, store?.sessions]);
+
   // Sign-out/account switches must not carry a modal or a once-per-boot latch
   // into the next identity.
   useEffectA(() => {
@@ -2798,6 +2915,8 @@ function App() {
       xHandlePromptCheckedUser.current = null;
       setXHandlePromptPending(false);
       setXHandlePromptOpen(false);
+      pwaInstallCheckedUser.current = null;
+      setPwaInstallPending(false);
     }
   }, [phase]);
 
@@ -3019,7 +3138,7 @@ function App() {
         socialRefreshQueued = socialRefreshQueued || force;
         return socialRefreshInFlight;
       }
-      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force }).then(friends => {
+      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force }).then(friends => {
         if (!live) return;
         setStore(s => s ? {
           ...s,
@@ -3043,7 +3162,12 @@ function App() {
       return socialRefreshInFlight;
     };
     if (route.name === 'friends') {
-      if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
+      const requestedWeekStart = LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay);
+      const loadedFriends = storeRefA.current?.friends;
+      // A Friends snapshot is only valid for the reporting boundary it was
+      // loaded with. Changing the local week-start setting must invalidate the
+      // old metrics immediately instead of reusing a merely recent snapshot.
+      if (!loadedFriends?.loadedAt || loadedFriends.weekStart !== requestedWeekStart) refreshFriends();
     } else {
       refreshBadge();
       refreshPendingRequests();
@@ -3121,7 +3245,7 @@ function App() {
       document.removeEventListener('visibilitychange', onVisible);
       unsubscribe?.();
     };
-  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name]);
+  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name, store?.settings?.weekStartDay]);
 
   useEffectA(() => {
     if (phase === 'ready' && route.name === 'friends' && !friendsTabEnabled) go({ name: 'home' });
@@ -3446,6 +3570,21 @@ function App() {
     else probeSyncConnection(uid);
   };
 
+  // This helper lives after the phase returns below, so it must stay a plain
+  // function rather than a React hook. A hook here would make the number of
+  // hooks differ between the loading/login and ready renders (React #310).
+  const openPwaInstallGuide = async () => {
+    zaneSnoozePwaPrompt();
+    setPwaInstallPending(false);
+    const platform = UI.pwaInstallPlatform();
+    if (platform === 'desktop') return;
+    const tourKey = platform === 'ios' ? 'installPwaIos' : 'installPwaAndroid';
+    // Onboarding is lazy-loaded. Load it before handing control to the normal
+    // illustrated guide so the button works even on a cold boot.
+    try { await window.__loadScreenModule?.('onboarding'); } catch (_) {}
+    window.__startTour?.(tourKey);
+  };
+
   // An update may be installed while the user is anywhere in the app, but a
   // reload is only safe on a quiet Home surface. Route checks protect editors;
   // the sheet and focus checks protect quick actions and unsaved text entry.
@@ -3454,6 +3593,25 @@ function App() {
     && !onboardingState
     && openSheetCount === 0
     && !textEntryFocused;
+  const pwaInstallPromptVisible = pwaInstallPending
+    && phase === 'ready'
+    && route?.name === 'home'
+    && whatsNewSettled
+    && !whatsNew
+    && !onboardingState
+    && !unitPromptOpen
+    && !xHandlePromptPending
+    && !xHandlePromptOpen
+    && !pendingShare
+    && !autoCloseNotify
+    && !forceShowUpdateBanner
+    && !updateAvailable
+    && !lifetimeCongratsPending
+    && openSheetCount === 0
+    && !textEntryFocused
+    && !store?.inProgress
+    && !UI.isStandalonePwa()
+    && !UI.isInAppBrowser();
   const safeForLifetimeCongrats = route?.name === 'home'
     && store?.user?.tier === 'lifetime'
     && !store?.inProgress
@@ -3465,6 +3623,7 @@ function App() {
     && !pendingShare
     && !forceShowUpdateBanner
     && !updateAvailable
+    && !pwaInstallPending
     && openSheetCount === 0
     && !textEntryFocused;
 
@@ -3670,6 +3829,13 @@ function App() {
             try { localStorage.removeItem(PENDING_SHARE_KEY); } catch (_) {}
             setPendingShare(null);
           }}
+        />
+      )}
+      {pwaInstallPromptVisible && (
+        <PwaInstallPrompt
+          platform={UI.pwaInstallPlatform()}
+          onLater={() => { zaneSnoozePwaPrompt(); setPwaInstallPending(false); }}
+          onOpenGuide={openPwaInstallGuide}
         />
       )}
       {lifetimeCongratsPending && safeForLifetimeCongrats && (

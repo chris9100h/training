@@ -285,9 +285,13 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     sessionDates.add(localDateKey(new Date(s.ended)));
   });
 
-  // Determine the Monday from which adherence starts, don't penalize weeks before the plan was active.
+  const weekStartDay = LB.normalizeWeekStartDay(clientStore.settings?.weekStartDay);
+
+  // Determine the reporting-week boundary from which adherence starts, don't
+  // penalize weeks before the plan was active. This is reporting-only; the
+  // weekday plan itself still uses its existing Monday-indexed day fields.
   // Use weekPlanStartDate / cycleStartDate when set; fall back to earliest session.
-  let planStartMonday = null;
+  let planStartWeekStart = null;
   let planStartDateStr = null; // actual plan start date, days before this are ignored even within the first week
   const activationDateStr = oldestVersion?.validFrom
     ?? (isWd ? clientStore.weekPlanStartDate : clientStore.cycleStartDate);
@@ -298,57 +302,51 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     // whatever (possibly already wrong) day that parse produced. Matches
     // store.js's own parseDate helper.
     const d = new Date(activationDateStr + 'T12:00:00');
-    const wd = LB.isoWd(d);
-    planStartMonday = new Date(d);
-    planStartMonday.setDate(d.getDate() - wd);
-    planStartMonday.setHours(0, 0, 0, 0);
+    planStartWeekStart = new Date(LB.reportingWeekStartISO(d, weekStartDay) + 'T12:00:00');
+    planStartWeekStart.setHours(0, 0, 0, 0);
     planStartDateStr = activationDateStr.slice(0, 10);
   } else if (planSessions.length > 0) {
     const earliestMs = Math.min(...planSessions.map(s => new Date(s.ended).getTime()));
     const earliest = new Date(earliestMs); earliest.setHours(12, 0, 0, 0);
-    const earliestWd = LB.isoWd(earliest);
-    planStartMonday = new Date(earliest);
-    planStartMonday.setDate(earliest.getDate() - earliestWd);
-    planStartMonday.setHours(0, 0, 0, 0);
-    planStartDateStr = localDateKey(planStartMonday);
+    planStartWeekStart = new Date(LB.reportingWeekStartISO(earliest, weekStartDay) + 'T12:00:00');
+    planStartWeekStart.setHours(0, 0, 0, 0);
+    planStartDateStr = localDateKey(planStartWeekStart);
   }
-  if (!planStartMonday) return [];
+  if (!planStartWeekStart) return [];
 
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayWd = LB.isoWd(today); // 0=Mon
-  const thisMonday = new Date(today);
-  thisMonday.setDate(today.getDate() - todayWd);
+  const thisWeekStart = new Date(LB.reportingWeekStartISO(today, weekStartDay) + 'T12:00:00');
 
   return Array.from({ length: weeksBack }, (_, w) => {
-    const monday = new Date(thisMonday);
-    monday.setDate(thisMonday.getDate() - w * 7);
+    const weekStart = new Date(thisWeekStart);
+    weekStart.setDate(thisWeekStart.getDate() - w * 7);
 
     // Skip weeks before the plan was in use.
-    if (monday < planStartMonday) return null;
+    if (weekStart < planStartWeekStart) return null;
 
     let planned = 0, done = 0;
 
     // Flex plans have no fixed training days, adherence is sessions trained
     // this week against the weekly frequency goal, regardless of which days.
     if (isFlex) {
-      const weekEnd = new Date(monday); weekEnd.setDate(monday.getDate() + 7);
-      const mondayKey = localDateKey(monday);
+      const weekEnd = new Date(weekStart); weekEnd.setDate(weekStart.getDate() + 7);
+      const weekStartKey = localDateKey(weekStart);
       const weekEndKey = localDateKey(weekEnd);
       // Count each session once (sessionDates can hold two keys per session).
       done = planSessions.filter(s => {
         const k = s.date ? s.date.slice(0, 10) : localDateKey(new Date(s.ended));
-        return k >= mondayKey && k < weekEndKey;
+        return k >= weekStartKey && k < weekEndKey;
       }).length;
       planned = flexGoal || 0;
       const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
-      const isoWeek = (() => { const t = new Date(monday); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
+      const isoWeek = (() => { const t = new Date(weekStart); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
       const label = w === 0 ? 'This week' : w === 1 ? 'Last week' : `W${isoWeek}`;
       return { label, planned, done, pct };
     }
 
     for (let d = 0; d < 7; d++) {
-      const date = new Date(monday);
-      date.setDate(monday.getDate() + d);
+      const date = new Date(weekStart);
+      date.setDate(weekStart.getDate() + d);
       if (date > today) continue;
 
       const dateStr = localDateKey(date);
@@ -384,7 +382,7 @@ function computeWeeklyAdherence(clientStore, weeksBack = 6) {
     }
 
     const pct = planned > 0 ? Math.min(100, Math.round((done / planned) * 100)) : null;
-    const isoWeek = (() => { const t = new Date(monday); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
+    const isoWeek = (() => { const t = new Date(weekStart); t.setDate(t.getDate() + 4 - (t.getDay() || 7)); return Math.ceil((((t - new Date(t.getFullYear(), 0, 1)) / 86400000) + 1) / 7); })();
     const label = w === 0 ? 'This week' : w === 1 ? 'Last week' : `W${isoWeek}`;
     return { label, planned, done, pct };
   }).filter(Boolean);
@@ -495,6 +493,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
   const [chartOpen, setChartOpen] = useStateC(null);
   const [planOpen, setPlanOpen] = useStateC(false);
   const unit = (clientStore.settings?.unit === 'lbs') ? 'lbs' : 'kg';
+  const weekStartDay = LB.normalizeWeekStartDay(clientStore.settings?.weekStartDay);
 
   const activeSch = clientStore.schedules?.find(s => s.id === clientStore.activeScheduleId);
   const trainingDayCount = activeSch ? (Array.isArray(activeSch.days) ? activeSch.days : []).filter(d => d.items?.length > 0).length : 0;
@@ -549,11 +548,8 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
     if (!activeSch) return ended.slice(0, 5);
     if (LB.isWeekdayPlan(activeSch)) {
       const today = new Date(); today.setHours(23, 59, 59, 0);
-      const todayWd = LB.isoWd(today);
-      const monday = new Date(today);
-      monday.setDate(today.getDate() - todayWd);
-      monday.setHours(0, 0, 0, 0);
-      return ended.filter(s => new Date(s.ended) >= monday);
+      const weekStart = new Date(LB.reportingWeekStartISO(today, weekStartDay) + 'T00:00:00');
+      return ended.filter(s => new Date(s.ended) >= weekStart);
     } else if (LB.isFlexPlan(activeSch)) {
       // Flex advances per action, so a date window drifts when the client rests.
       // Show the current rotation's worth: the most recent cycleLen sessions.
@@ -571,7 +567,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
       cycleStart.setDate(cycleStart.getDate() - pos);
       return ended.filter(s => new Date(s.ended) >= cycleStart);
     }
-  }, [clientStore]);
+  }, [clientStore, weekStartDay]);
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
@@ -586,7 +582,7 @@ function ClientOverviewTab({ clientStore, coachingId, userId, clientId, onSelect
         <div style={{ paddingBottom: 8 }}>
           {chartOpen === 'adherence' && <AdherenceChart weeks={weeks} />}
           {chartOpen === 'volume' && <RollingVolumeChart sessions={ended} planStartDate={planStartDate} clientStore={clientStore} />}
-          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} planStartDate={planStartDate} />}
+          {chartOpen === 'sessions' && <SessionsWeekChart sessions={ended} planStartDate={planStartDate} weekStartDay={weekStartDay} />}
         </div>
       </Sheet>
 
@@ -1072,35 +1068,33 @@ function RollingVolumeChart({ sessions, planStartDate, clientStore }) {
   );
 }
 
-function SessionsWeekChart({ sessions, planStartDate }) {
+function SessionsWeekChart({ sessions, planStartDate, weekStartDay = 0 }) {
   const cutoff = planStartDate ? planStartDate.slice(0, 10) : null;
   const ended = (sessions || []).filter(s => s.ended && (!cutoff || s.date?.slice(0, 10) >= cutoff));
   const byWeek = {};
   ended.forEach(s => {
     const d = new Date(s.ended); d.setHours(12, 0, 0, 0);
-    const wd = LB.isoWd(d);
-    const mon = new Date(d); mon.setDate(d.getDate() - wd); mon.setHours(0, 0, 0, 0);
-    const key = localDateKey(mon);
+    const weekStart = LB.reportingWeekStartISO(d, weekStartDay);
+    const key = weekStart;
     byWeek[key] = (byWeek[key] || 0) + 1;
   });
   const today = new Date(); today.setHours(12, 0, 0, 0);
-  const todayWd = LB.isoWd(today);
-  const thisMonday = new Date(today); thisMonday.setDate(today.getDate() - todayWd); thisMonday.setHours(0, 0, 0, 0);
-  let startMonday;
+  const thisWeekStart = new Date(LB.reportingWeekStartISO(today, weekStartDay) + 'T12:00:00');
+  let startWeek;
   if (cutoff) {
     const cd = new Date(cutoff + 'T12:00:00');
-    const cdWd = LB.isoWd(cd);
-    startMonday = new Date(cd); startMonday.setDate(cd.getDate() - cdWd); startMonday.setHours(0, 0, 0, 0);
+    startWeek = new Date(LB.reportingWeekStartISO(cd, weekStartDay) + 'T12:00:00');
+    startWeek.setHours(0, 0, 0, 0);
   } else {
-    startMonday = new Date(thisMonday); startMonday.setDate(thisMonday.getDate() - 11 * 7);
+    startWeek = new Date(thisWeekStart); startWeek.setDate(thisWeekStart.getDate() - 11 * 7);
   }
-  const totalWeeks = Math.round((thisMonday - startMonday) / (7 * 86400000)) + 1;
+  const totalWeeks = Math.round((thisWeekStart - startWeek) / (7 * 86400000)) + 1;
   const weekCount = Math.min(totalWeeks, 16);
   const offset = totalWeeks - weekCount;
   const weeks = Array.from({ length: weekCount }, (_, i) => {
-    const mon = new Date(startMonday); mon.setDate(startMonday.getDate() + (offset + i) * 7);
-    const key = localDateKey(mon);
-    return { key, count: byWeek[key] || 0, label: mon.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }) };
+    const weekStart = new Date(startWeek); weekStart.setDate(startWeek.getDate() + (offset + i) * 7);
+    const key = localDateKey(weekStart);
+    return { key, count: byWeek[key] || 0, label: weekStart.toLocaleDateString('en-US', { day: '2-digit', month: 'short' }) };
   });
 
   const n = weeks.length;
