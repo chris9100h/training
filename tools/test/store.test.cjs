@@ -6958,6 +6958,69 @@ async function testAsync(name, fn) {
     assert.ok(Math.abs(imperial.grams - LB.ozToG(8.5)) < 0.001, 'grams matches the label it printed');
   });
 
+  // ── AI workout CSV import: local parser/build/duplicate primitives ────────
+  test('wiParseCsv: keeps quoted commas and normalizes BOM/CRLF rows', () => {
+    const rows = LB.wiParseCsv('\uFEFFDate,Exercise,Weight,Notes\r\n2026-08-17,"Bench, Press",80,"felt good, no pain"\r\n');
+    assert.strictEqual(JSON.stringify(rows), JSON.stringify([
+      ['Date', 'Exercise', 'Weight', 'Notes'],
+      ['2026-08-17', 'Bench, Press', '80', 'felt good, no pain'],
+    ]));
+  });
+
+  test('wiParseCsv: accepts semicolon exports with comma decimals', () => {
+    const rows = LB.wiParseCsv('Datum;Übung;Gewicht;Wiederholungen\n17.08.2026;Kniebeuge;27,5;8\n');
+    assert.strictEqual(JSON.stringify(rows), JSON.stringify([
+      ['Datum', 'Übung', 'Gewicht', 'Wiederholungen'],
+      ['17.08.2026', 'Kniebeuge', '27,5', '8'],
+    ]));
+  });
+
+  test('workout import primitives: locale dates and decimal commas are safe', () => {
+    assert.strictEqual(LB.wiDate('17/08/2026', 'dd/mm/yyyy'), '2026-08-17');
+    assert.strictEqual(LB.wiDate('2026-02-30', 'yyyy-mm-dd'), null);
+    assert.strictEqual(LB.wiNumber('27,5 kg'), 27.5);
+    assert.strictEqual(LB.wiNumber(''), null);
+  });
+
+  test('wiBuildSessions: discards value-less rows before creating empty entries', () => {
+    const mapping = {
+      columns: { date: 'Date', session: 'Workout', exercise: 'Exercise', weight: 'Weight', reps: 'Reps', set: 'Set' },
+      dateFormat: 'yyyy-mm-dd', defaultWeightUnit: 'kg', exerciseMappings: [],
+    };
+    const out = LB.wiBuildSessions([
+      ['2026-08-17', 'Push', 'Bench Press', '', '', '1'],
+      ['2026-08-17', 'Push', 'Bench Press', '80', '5', '1'],
+    ], ['Date', 'Workout', 'Exercise', 'Weight', 'Reps', 'Set'], mapping, [], 'kg');
+    assert.strictEqual(out.invalidRows.length, 1);
+    assert.strictEqual(out.sessions.length, 1);
+    assert.strictEqual(out.sessions[0].entries.length, 1);
+    assert.strictEqual(out.sessions[0].entries[0].sets.length, 1);
+  });
+
+  test('wiBuildSessions: accepts an AI mapping only as a display/library match', () => {
+    const mapping = {
+      columns: { date: 'Date', exercise: 'Exercise', weight: 'Load', reps: 'Reps' },
+      dateFormat: 'yyyy-mm-dd', defaultWeightUnit: 'lb',
+      exerciseMappings: [{ source: 'DB Bench', existingName: 'Dumbbell Bench Press', confidence: 0.98 }],
+    };
+    const out = LB.wiBuildSessions([
+      ['2026-08-17', 'DB Bench', '44', '8'],
+    ], ['Date', 'Exercise', 'Load', 'Reps'], mapping, [{ id: 'ex-1', name: 'Dumbbell Bench Press' }], 'kg');
+    const entry = out.sessions[0].entries[0];
+    assert.strictEqual(entry.exId, 'ex-1');
+    assert.strictEqual(entry.name, 'Dumbbell Bench Press');
+    assert.ok(Math.abs(entry.sets[0].kg - 19.96) < 0.01);
+  });
+
+  test('wiSessionFingerprint: exact duplicate identity ignores entry order', () => {
+    const a = { date: '2026-08-17', entries: [
+      { name: 'Squat', sets: [{ kg: 100, reps: 5, done: true, skipped: false, warmup: false }] },
+      { name: 'Bench', sets: [{ kg: 80, reps: 5, done: true, skipped: false, warmup: false }] },
+    ] };
+    const b = { date: '2026-08-17', entries: [a.entries[1], a.entries[0]] };
+    assert.strictEqual(LB.wiSessionFingerprint(a), LB.wiSessionFingerprint(b));
+  });
+
 
   console.log(`\n${pass} passed, ${fail} failed`);
   process.exit(fail ? 1 : 0);

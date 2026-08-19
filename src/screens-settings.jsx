@@ -894,6 +894,13 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [workoutImportSheet, setWorkoutImportSheet] = useStateSet(false);
+  const [workoutImportLoading, setWorkoutImportLoading] = useStateSet(false);
+  const [workoutImportPreview, setWorkoutImportPreview] = useStateSet(null);
+  const [workoutImportError, setWorkoutImportError] = useStateSet(null);
+  const [workoutImportDuplicateMode, setWorkoutImportDuplicateMode] = useStateSet('skip');
+  const [workoutImportUnknownMode, setWorkoutImportUnknownMode] = useStateSet('create');
+  const [workoutImportSaving, setWorkoutImportSaving] = useStateSet(false);
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
   const [exportingTraining, setExportingTraining] = useStateSet(false);
@@ -1888,6 +1895,42 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
+  };
+  const runWorkoutImport = () => {
+    // Keep input.click synchronous for iOS Safari. The CSV is parsed locally;
+    // only a bounded sample is sent to Qwen/Claude for column mapping.
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,text/csv';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportLoading(true);
+      try {
+        if (file.size > 4_000_000) throw new Error('This CSV is larger than 4 MB. Export a smaller date range and import it in two batches.');
+        const text = await file.text();
+        const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || []);
+        setWorkoutImportPreview(preview);
+      } catch (err) {
+        setWorkoutImportError(err?.message || 'Could not read this CSV.');
+      } finally { setWorkoutImportLoading(false); }
+    };
+    input.click();
+  };
+  const commitWorkoutImport = async () => {
+    if (!workoutImportPreview || workoutImportSaving) return;
+    setWorkoutImportSaving(true); setWorkoutImportError(null);
+    try {
+      await LB.commitWorkoutImport(workoutImportPreview, userId, {
+        duplicateMode: workoutImportDuplicateMode,
+        unknownMode: workoutImportUnknownMode,
+        existingExercises: store.exercises || [],
+      });
+      // Direct import writes bypass the normal in-memory diff. Rebooting after
+      // the commit gives the user the same authoritative server view as any
+      // other large restore, and the deterministic batch ids make a retry safe.
+      LB.clearLocal(userId); window.location.reload();
+    } catch (err) {
+      setWorkoutImportError(`The workout import stopped part-way through: ${err?.message || 'unknown error'}. You can retry this preview safely; already written rows use the same import IDs.`);
+      setWorkoutImportSaving(false);
+    }
   };
   // Flush BEFORE arming the latch: markIntentionalSignOut() is what allows
   // SIGNED_OUT to run LB.clearLocal, which drops the local cache, the pending
@@ -3676,6 +3719,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
+          <Btn kind="ghost" onClick={runWorkoutImport}>Import workout history (CSV)</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
         </div>
       </SettingsSheet>
@@ -3795,6 +3839,73 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
           </div>
         )}
+      </SettingsSheet>
+
+      {/* ══ AI workout CSV import ══ */}
+      <SettingsSheet open={workoutImportSheet} onClose={workoutImportSaving ? () => {} : () => { setWorkoutImportSheet(false); setWorkoutImportPreview(null); setWorkoutImportError(null); }} title="Import workout history">
+        {workoutImportLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the CSV and mapping its columns…</div>
+            <div className="micro" style={{ color: UI.inkFaint }}>Qwen prepares a preview. Your data is not written yet.</div>
+          </div>
+        ) : workoutImportError && !workoutImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: UI.danger, fontSize: 13, lineHeight: 1.5 }}>{workoutImportError}</div>
+            <Btn kind="ghost" onClick={() => setWorkoutImportSheet(false)}>Close</Btn>
+          </div>
+        ) : workoutImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+              <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Preview only</div>
+              {workoutImportPreview.stats.sessions} workouts · {workoutImportPreview.stats.sets} sets found. Nothing is saved until you confirm below.
+            </div>
+            <div>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>WHAT ZANE DETECTED</div>
+              <div style={{ background: UI.bgInset, borderRadius: 6, padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                {Object.entries(workoutImportPreview.mapping?.columns || {}).filter(([, header]) => header).map(([field, header]) => (
+                  <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: UI.inkSoft, fontSize: 12 }}>
+                    <span style={{ color: UI.inkFaint, textTransform: 'capitalize' }}>{field.replace(/([A-Z])/g, ' $1')}</span>
+                    <span style={{ color: UI.ink, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{header}</span>
+                  </div>
+                ))}
+                <div style={{ color: UI.inkFaint, fontSize: 11, marginTop: 2 }}>
+                  {workoutImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0} exercise name{(workoutImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0) === 1 ? '' : 's'} matched to your library.
+                </div>
+              </div>
+            </div>
+            <div>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>DUPLICATES</div>
+              <div style={{ display: 'flex', gap: 6 }}>
+                {[['skip', 'Skip exact duplicates'], ['import', 'Import anyway']].map(([key, label]) => (
+                  <button key={key} onClick={() => setWorkoutImportDuplicateMode(key)} style={{ flex: 1, padding: '8px 6px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: workoutImportDuplicateMode === key ? 'var(--accent)' : UI.bgInset, color: workoutImportDuplicateMode === key ? 'var(--accent-ink)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', textShadow: 'none' }}>{label}</button>
+                ))}
+              </div>
+              <div className="micro" style={{ marginTop: 5, color: UI.inkFaint }}>{workoutImportPreview.stats.duplicates} exact duplicate workout{workoutImportPreview.stats.duplicates === 1 ? '' : 's'} found.</div>
+            </div>
+            <div>
+              <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>UNKNOWN EXERCISES</div>
+              {workoutImportPreview.unknownExercises.length === 0 ? (
+                <div className="micro" style={{ color: UI.ok }}>All exercises match your library.</div>
+              ) : <>
+                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 7 }}>{workoutImportPreview.unknownExercises.length} unique names are not in your library. We group them, so a long history does not create a one-by-one chore.</div>
+                <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+                  {workoutImportPreview.unknownExercises.slice(0, 30).map(x => <div key={x.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: UI.inkSoft, fontSize: 12, fontFamily: UI.fontUi }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span><span className="num" style={{ color: UI.inkFaint, flexShrink: 0 }}>{x.count} sets</span></div>)}
+                  {workoutImportPreview.unknownExercises.length > 30 && <div className="micro" style={{ color: UI.inkFaint }}>+ {workoutImportPreview.unknownExercises.length - 30} more</div>}
+                </div>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {[['create', 'Create private exercises'], ['text', 'Keep as text']].map(([key, label]) => (
+                    <button key={key} onClick={() => setWorkoutImportUnknownMode(key)} style={{ flex: 1, padding: '8px 6px', borderRadius: 4, border: `var(--hair-width) solid ${UI.hairStrong}`, background: workoutImportUnknownMode === key ? 'var(--accent)' : UI.bgInset, color: workoutImportUnknownMode === key ? 'var(--accent-ink)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, cursor: 'pointer', textShadow: 'none' }}>{label}</button>
+                  ))}
+                </div>
+              </>}
+            </div>
+            {workoutImportPreview.stats.invalidRows > 0 && <div className="micro" style={{ color: UI.gold }}>{workoutImportPreview.stats.invalidRows} row{workoutImportPreview.stats.invalidRows === 1 ? '' : 's'} had no usable date or completed value and will be skipped.</div>}
+            {workoutImportPreview.mapping?.warnings?.length > 0 && <div className="micro" style={{ color: UI.gold, lineHeight: 1.45 }}>{workoutImportPreview.mapping.warnings.join(' ')}</div>}
+            {workoutImportError && <div style={{ color: UI.danger, fontSize: 12 }}>{workoutImportError}</div>}
+            <Btn onClick={commitWorkoutImport} disabled={workoutImportSaving || !workoutImportPreview.sessions.length || (workoutImportDuplicateMode === 'skip' && workoutImportPreview.sessions.length <= workoutImportPreview.stats.duplicates)} style={{ width: '100%' }}>{workoutImportSaving ? 'Importing…' : (() => { const count = workoutImportPreview.sessions.length - (workoutImportDuplicateMode === 'skip' ? workoutImportPreview.stats.duplicates : 0); return count ? `Import ${count} workouts` : 'Nothing new to import'; })()}</Btn>
+            <Btn kind="ghost" onClick={() => { setWorkoutImportSheet(false); setWorkoutImportPreview(null); }}>Cancel</Btn>
+          </div>
+        ) : null}
       </SettingsSheet>
 
       {/* ══ How To Sheet ══ */}
