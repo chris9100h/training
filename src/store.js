@@ -719,6 +719,16 @@ function wiNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function wiRepValues(value) {
+  const matches = String(value ?? '').match(/\d+(?:[.,]\d+)?/g) || [];
+  return matches.map(v => Number(v.replace(',', '.'))).filter(Number.isFinite).map(v => Math.max(0, Math.round(v)));
+}
+
+function wiPlanNameFromFilename(fileName) {
+  const name = String(fileName ?? '').replace(/\.[^.]+$/, '').replace(/[_.-]+/g, ' ').trim();
+  return (name || 'Imported plan').slice(0, 120);
+}
+
 function wiDate(value, format) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
@@ -822,6 +832,56 @@ function wiBuildSessions(rows, headers, mapping, existingExercises, targetUnit) 
   return { sessions, invalidRows };
 }
 
+function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName = 'Imported plan') {
+  const columns = mapping?.columns || {};
+  const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
+  const exerciseIndex = idx.exercise;
+  if (exerciseIndex < 0) throw new Error('The AI could not identify an exercise column in this plan.');
+  const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
+  const aiMap = new Map((mapping.exerciseMappings || []).map(m => [m.source, m]));
+  const groups = new Map();
+  const invalidRows = [];
+  rows.forEach((row, rowIndex) => {
+    const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
+    if (!sourceName) { invalidRows.push(rowIndex + 2); return; }
+    const dayRaw = idx.day >= 0 && row[idx.day] ? String(row[idx.day]).trim() : 'Day 1';
+    const dayName = (dayRaw || 'Day 1').slice(0, 80);
+    const dayKey = wiNormalizeName(dayName) || 'day 1';
+    let group = groups.get(dayKey);
+    if (!group) { group = { name: dayName, order: idx.order >= 0 ? wiNumber(row[idx.order]) : null, items: [], _items: new Map() }; groups.set(dayKey, group); }
+    const sourceNorm = wiNormalizeName(sourceName);
+    const aiMatch = aiMap.get(sourceName);
+    const existing = (aiMatch?.existingName && existingByName.get(wiNormalizeName(aiMatch.existingName))) || existingByName.get(sourceNorm) || null;
+    const itemKey = sourceNorm || sourceName.toLowerCase();
+    const setValues = wiRepValues(idx.reps >= 0 ? row[idx.reps] : '');
+    const rangeValues = wiRepValues(idx.repsMax >= 0 ? row[idx.repsMax] : '');
+    const ladderValues = wiRepValues(idx.repsPerSet >= 0 ? row[idx.repsPerSet] : '');
+    const reps = setValues[0] ?? 8;
+    const repsMax = rangeValues[0] ?? (setValues.length > 1 ? setValues[setValues.length - 1] : null);
+    const repsPerSet = ladderValues.length > 1 ? ladderValues : (setValues.length > 1 && rangeValues.length === 0 ? setValues : null);
+    const hasSetColumn = idx.set >= 0 && String(row[idx.set] ?? '').trim() !== '';
+    const requestedSets = idx.sets >= 0 ? wiNumber(row[idx.sets]) : null;
+    const setCount = Math.max(1, Math.round(hasSetColumn ? 1 : (requestedSets ?? 3)));
+    const timeValue = idx.timeSec >= 0 ? wiNumber(row[idx.timeSec]) : null;
+    let item = group._items.get(itemKey);
+    if (!item) {
+      item = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: setCount, reps };
+      if (repsPerSet) { item.repsPerSet = repsPerSet; delete item.reps; }
+      else if (repsMax != null && repsMax > reps) item.repsMax = repsMax;
+      if (timeValue != null) item.timeSecPerSet = Array.from({ length: setCount }, () => Math.max(0, Math.round(timeValue)));
+      group._items.set(itemKey, item); group.items.push(item);
+    } else if (hasSetColumn) {
+      item.sets += setCount;
+      if (item.timeSecPerSet && timeValue != null) item.timeSecPerSet.push(Math.max(0, Math.round(timeValue)));
+      if (item.repsPerSet && repsPerSet) item.repsPerSet.push(...repsPerSet);
+    }
+  });
+  const days = [...groups.values()]
+    .sort((a, b) => (a.order ?? 999999) - (b.order ?? 999999))
+    .map(group => ({ name: group.name, items: group.items.map(({ sourceName, ...item }) => item) }));
+  return { planName: String(mapping?.planName || fallbackPlanName || 'Imported plan').trim().slice(0, 120) || 'Imported plan', days, invalidRows };
+}
+
 function wiSessionFingerprint(session) {
   const entries = (session.entries || []).map(e => `${wiNormalizeName(e.name)}:${(e.sets || []).map(s => [s.kg ?? '', s.reps ?? '', s.repsL ?? '', s.repsR ?? '', s.timeSec ?? '', s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join(',')).join(';')}`).sort();
   return `${session.date}|${entries.join('|')}`;
@@ -882,6 +942,36 @@ async function previewWorkoutImport(csvText, userId, targetUnit, existingExercis
   return { batchId, mapping: data, sessions, unknownExercises: unknown, stats: { sourceRows: rows.length, sessions: sessions.length, sets: sessions.reduce((n, s) => n + s.entries.reduce((m, e) => m + e.sets.length, 0), 0), duplicates: sessions.filter(s => s.duplicate).length, invalidRows: built.invalidRows.length }, targetUnit: targetUnit === 'lbs' ? 'lbs' : 'kg' };
 }
 
+async function previewWorkoutPlanImport(csvText, userId, targetUnit, existingExercises = [], fileName = '') {
+  const rows = wiParseCsv(csvText);
+  const headers = rows.shift();
+  const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
+  if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this plan CSV.');
+  const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
+  const existingExerciseNames = [...new Set((existingExercises || []).map(e => String(e?.name || '').trim()).filter(Boolean))].slice(0, 800);
+  const sampleRows = rows.slice(0, 120);
+  const res = await fnFetch(WORKOUT_IMPORT_URL, { mode: 'plan', headers, sampleRows, exerciseNames, existingExerciseNames });
+  if (!res) throw new Error('Network error while mapping the plan.');
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data?.error || `Plan mapping failed (${res.status})`);
+  const built = wiBuildPlan(rows, headers, data, existingExercises, wiPlanNameFromFilename(fileName));
+  const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
+  const unknown = [];
+  const seenUnknown = new Set();
+  built.days.forEach(day => day.items.forEach(item => {
+    if (!known.has(wiNormalizeName(item.name)) && !seenUnknown.has(wiNormalizeName(item.name))) {
+      seenUnknown.add(wiNormalizeName(item.name));
+      unknown.push({ name: item.name, days: built.days.filter(d => d.items.some(x => wiNormalizeName(x.name) === wiNormalizeName(item.name))).length });
+    }
+  }));
+  const batchId = `plan_import_${uid()}`;
+  return {
+    batchId, planName: built.planName, mapping: data, days: built.days, unknownExercises: unknown,
+    stats: { sourceRows: rows.length, days: built.days.length, exercises: built.days.reduce((n, d) => n + d.items.length, 0), invalidRows: built.invalidRows.length },
+    targetUnit: targetUnit === 'lbs' ? 'lbs' : 'kg',
+  };
+}
+
 async function commitWorkoutImport(preview, userId, options = {}) {
   if (!preview?.batchId || !Array.isArray(preview.sessions)) throw new Error('Invalid import preview.');
   const duplicateMode = options.duplicateMode === 'import' ? 'import' : 'skip';
@@ -936,6 +1026,40 @@ async function commitWorkoutImport(preview, userId, options = {}) {
   // action should be squeezed between them while an import is in progress.
   await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null), { priority: 'critical', kind: 'write' });
   return { importedSessions: toWrite.length, skippedDuplicates: preview.sessions.length - toWrite.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
+}
+
+async function commitWorkoutPlanImport(preview, userId, options = {}) {
+  if (!preview?.batchId || !Array.isArray(preview.days) || !preview.days.length) throw new Error('Invalid plan preview.');
+  const existingExercises = options.existingExercises || [];
+  const existingByName = new Map(existingExercises.map(e => [wiNormalizeName(e.name), e]));
+  const newExerciseByName = new Map(); const exerciseRows = [];
+  for (const day of preview.days) for (const item of day.items || []) {
+    const norm = wiNormalizeName(item.name);
+    if (item.exId || !norm || existingByName.has(norm) || newExerciseByName.has(norm)) continue;
+    const id = `${preview.batchId}_ex_${wiHash(norm)}`;
+    const row = { id, user_id: userId, name: String(item.name).slice(0, 120), tags: ['imported'], note: 'Imported from workout plan', category: 'Imported', unilateral: false, equipment: null, progression_reps: item.reps ?? 8, movement_type: null, no_weight_reps: false, log_mode: 'weight_reps', pull_bodyweight: false, bodyweight_mode: null, youtube_url: null, note_pinned: false, progression_increment: null, horn_labels: null };
+    newExerciseByName.set(norm, row); exerciseRows.push(row);
+  }
+  const customDays = preview.days.map((day, index) => ({
+    name: String(day.name || `Day ${index + 1}`).slice(0, 80),
+    items: (day.items || []).map(item => ({ ...item, exId: item.exId || newExerciseByName.get(wiNormalizeName(item.name))?.id || null })).filter(item => item.exId),
+  }));
+  if (!customDays.some(day => day.items.length)) throw new Error('The plan has no usable exercises.');
+  const schedule = buildPlanSkeleton({ name: preview.planName || 'Imported plan', type: 'flex', presetKey: 'custom', customCount: customDays.length, customDays });
+  // Deterministic ids make a retry safe after a network interruption.
+  schedule.id = `${preview.batchId}_plan`;
+  schedule.days = schedule.days.map((day, index) => ({ ...day, id: `${preview.batchId}_day_${index}` }));
+  for (let i = 0; i < exerciseRows.length; i += 100) {
+    await scheduleDbTask(
+      () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + 100), { onConflict: 'id' })),
+      { priority: 'critical', kind: 'write' },
+    );
+  }
+  await scheduleDbTask(
+    () => unwrap(_supabase.from('zane_schedules').upsert({ ...schedule, user_id: userId }, { onConflict: 'id' })),
+    { priority: 'critical', kind: 'write' },
+  );
+  return { planId: schedule.id, planName: schedule.name, days: schedule.days.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
 }
 
 // Manual Health edits replace a day's detailed Water Tracker rows with one
@@ -13642,7 +13766,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  previewWorkoutImport, commitWorkoutImport, wiParseCsv, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiBuildSessions,
+  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,

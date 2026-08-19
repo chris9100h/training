@@ -7023,6 +7023,49 @@ async function testAsync(name, fn) {
     assert.ok(Math.abs(entry.sets[0].kg - 19.96) < 0.01);
   });
 
+  test('wiRepValues: parses ranges, ladders, and decimal commas', () => {
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('8-12')), JSON.stringify([8, 12]));
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('8/10/12 reps')), JSON.stringify([8, 10, 12]));
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('27,5')), JSON.stringify([28]), 'rep targets are whole repetitions');
+    assert.strictEqual(JSON.stringify(LB.wiRepValues('')), JSON.stringify([]));
+  });
+
+  test('wiBuildPlan: groups days, maps exercises, and keeps ranges/time targets', () => {
+    const mapping = {
+      planName: 'Imported PPL',
+      columns: { day: 'Day', order: 'Order', exercise: 'Exercise', sets: 'Sets', reps: 'Reps', repsMax: 'Max', timeSec: 'Seconds' },
+      exerciseMappings: [{ source: 'DB Bench', existingName: 'Dumbbell Bench Press', confidence: 0.98 }],
+    };
+    const out = LB.wiBuildPlan([
+      ['Push', '1', 'DB Bench', '3', '8', '12', ''],
+      ['Push', '2', 'Lateral Raise', '3', '12', '', ''],
+      ['Conditioning', '1', 'Plank', '2', '', '', '45'],
+    ], ['Day', 'Order', 'Exercise', 'Sets', 'Reps', 'Max', 'Seconds'], mapping, [
+      { id: 'ex-1', name: 'Dumbbell Bench Press' },
+    ]);
+    assert.strictEqual(out.planName, 'Imported PPL');
+    assert.strictEqual(JSON.stringify(out.days.map(d => d.name)), JSON.stringify(['Push', 'Conditioning']));
+    assert.strictEqual(out.days[0].items[0].exId, 'ex-1');
+    assert.strictEqual(out.days[0].items[0].sets, 3);
+    assert.strictEqual(out.days[0].items[0].reps, 8);
+    assert.strictEqual(out.days[0].items[0].repsMax, 12);
+    assert.strictEqual(out.days[1].items[0].timeSecPerSet[0], 45);
+    assert.strictEqual(out.invalidRows.length, 0);
+  });
+
+  test('wiBuildPlan: without a day column keeps all rows on Day 1', () => {
+    const out = LB.wiBuildPlan([
+      ['Bench Press', '3', '8'],
+      ['Squat', '3', '5'],
+    ], ['Exercise', 'Sets', 'Reps'], {
+      columns: { exercise: 'Exercise', sets: 'Sets', reps: 'Reps' },
+      exerciseMappings: [],
+    }, []);
+    assert.strictEqual(out.days.length, 1);
+    assert.strictEqual(out.days[0].name, 'Day 1');
+    assert.strictEqual(out.days[0].items.length, 2);
+  });
+
   test('wiSessionFingerprint: exact duplicate identity ignores entry order', () => {
     const a = { date: '2026-08-17', entries: [
       { name: 'Squat', sets: [{ kg: 100, reps: 5, done: true, skipped: false, warmup: false }] },

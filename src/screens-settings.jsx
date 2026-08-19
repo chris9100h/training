@@ -894,6 +894,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [importing, setImporting] = useStateSet(false);
   const [importSheet, setImportSheet] = useStateSet(false);
   const [importProgress, setImportProgress] = useStateSet({ pct: 0, phase: '' });
+  const [migrationSheet, setMigrationSheet] = useStateSet(false);
   const [workoutImportSheet, setWorkoutImportSheet] = useStateSet(false);
   const [workoutImportLoading, setWorkoutImportLoading] = useStateSet(false);
   const [workoutImportPreview, setWorkoutImportPreview] = useStateSet(null);
@@ -903,6 +904,13 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [workoutImportDuplicateMode, setWorkoutImportDuplicateMode] = useStateSet('skip');
   const [workoutImportUnknownMode, setWorkoutImportUnknownMode] = useStateSet('create');
   const [workoutImportSaving, setWorkoutImportSaving] = useStateSet(false);
+  const [planImportSheet, setPlanImportSheet] = useStateSet(false);
+  const [planImportLoading, setPlanImportLoading] = useStateSet(false);
+  const [planImportPreview, setPlanImportPreview] = useStateSet(null);
+  const [planImportError, setPlanImportError] = useStateSet(null);
+  const [planImportStep, setPlanImportStep] = useStateSet(1);
+  const [planImportDayIndex, setPlanImportDayIndex] = useStateSet(0);
+  const [planImportSaving, setPlanImportSaving] = useStateSet(false);
   // Did step 1 of the restore flow actually produce a file in this sheet visit?
   const [backupOk, setBackupOk] = useStateSet(false);
   const [exportingTraining, setExportingTraining] = useStateSet(false);
@@ -1901,6 +1909,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const runWorkoutImport = () => {
     // Keep input.click synchronous for iOS Safari. The CSV is parsed locally;
     // only a bounded sample is sent to Qwen/Claude for column mapping.
+    setMigrationSheet(false);
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,text/csv';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
@@ -1913,6 +1922,32 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       } catch (err) {
         setWorkoutImportError(err?.message || 'Could not read this CSV.');
       } finally { setWorkoutImportLoading(false); }
+    };
+    input.click();
+  };
+  const closePlanImport = () => {
+    setPlanImportSheet(false);
+    setPlanImportPreview(null);
+    setPlanImportError(null);
+    setPlanImportStep(1);
+    setPlanImportDayIndex(0);
+  };
+  const runPlanImport = () => {
+    // Keep input.click synchronous for iOS Safari, just like the history
+    // importer. The browser sends only a bounded sample to the AI mapper.
+    setMigrationSheet(false);
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,text/csv';
+    input.onchange = async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportLoading(true);
+      try {
+        if (file.size > 4_000_000) throw new Error('This CSV is larger than 4 MB. Export a smaller plan and try again.');
+        const text = await file.text();
+        const preview = await LB.previewWorkoutPlanImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], file.name);
+        setPlanImportPreview(preview); setPlanImportStep(1); setPlanImportDayIndex(0);
+      } catch (err) {
+        setPlanImportError(err?.message || 'Could not read this plan CSV.');
+      } finally { setPlanImportLoading(false); }
     };
     input.click();
   };
@@ -1932,6 +1967,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     } catch (err) {
       setWorkoutImportError(`The workout import stopped part-way through: ${err?.message || 'unknown error'}. You can retry this preview safely; already written rows use the same import IDs.`);
       setWorkoutImportSaving(false);
+    }
+  };
+  const commitPlanImport = async () => {
+    if (!planImportPreview || planImportSaving) return;
+    setPlanImportSaving(true); setPlanImportError(null);
+    try {
+      await LB.commitWorkoutPlanImport(planImportPreview, userId, { existingExercises: store.exercises || [] });
+      // Direct schedule/exercise writes bypass the normal in-memory diff. A
+      // fresh load gives the user the same authoritative view as any restore.
+      LB.clearLocal(userId); window.location.reload();
+    } catch (err) {
+      setPlanImportError(`The plan import stopped before completion: ${err?.message || 'unknown error'}. You can retry this preview safely.`);
+      setPlanImportSaving(false);
     }
   };
   // Flush BEFORE arming the latch: markIntentionalSignOut() is what allows
@@ -2507,6 +2555,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const reps = set?.reps != null ? `${set.reps} reps` : (set?.repsL != null || set?.repsR != null ? `${set.repsL ?? '–'} / ${set.repsR ?? '–'} reps` : null);
     const time = set?.timeSec != null ? `${set.timeSec}s` : null;
     return [load, reps, time].filter(Boolean).join(' · ') || 'No measurable value';
+  };
+  const planImportDays = planImportPreview?.days || [];
+  const planImportSampleDay = planImportDays[Math.min(planImportDayIndex, Math.max(0, planImportDays.length - 1))] || null;
+  const planImportFormatItem = (item) => {
+    if (Array.isArray(item?.repsPerSet) && item.repsPerSet.length > 1) return `${item.sets} sets · ${item.repsPerSet.join('/')}`;
+    if (item?.repsMax != null) return `${item.sets} sets · ${item.reps}-${item.repsMax} reps`;
+    if (Array.isArray(item?.timeSecPerSet) && item.timeSecPerSet.length) return `${item.sets} sets · ${item.timeSecPerSet[0]}s`;
+    return `${item?.sets ?? 0} sets · ${item?.reps ?? 0} reps`;
   };
   const closeWorkoutImport = () => {
     setWorkoutImportSheet(false);
@@ -3737,8 +3793,26 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={() => setImportSheet(true)} disabled={importing} style={{ flex: 1 }}>{importing ? 'Importing…' : 'Import JSON'}</Btn>
           </div>
           <Btn kind="ghost" onClick={() => setTrainingExportSheet(true)}>Export Training</Btn>
-          <Btn kind="ghost" onClick={runWorkoutImport}>Import workout history (CSV)</Btn>
+          <Btn kind="ghost" onClick={() => setMigrationSheet(true)}>Migrate from other apps</Btn>
           <Btn kind="ghost" onClick={handleDeleteAll} style={{ color: UI.danger, background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.2 * var(--danger-border-boost)))' }}>Delete all data</Btn>
+        </div>
+      </SettingsSheet>
+
+      {/* ══ Migration picker ══ */}
+      <SettingsSheet open={migrationSheet} onClose={() => setMigrationSheet(false)} title="Migrate from other apps">
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
+            Bring your training history or a training plan into Zane. The file is analysed first and nothing is saved until you review and confirm it.
+          </div>
+          <Btn kind="ghost" onClick={runWorkoutImport} style={{ width: '100%' }}>
+            <i className="fa-solid fa-clock-rotate-left" style={{ marginRight: 8 }} /> Import workout history
+          </Btn>
+          <Btn kind="ghost" onClick={runPlanImport} style={{ width: '100%' }}>
+            <i className="fa-solid fa-list-check" style={{ marginRight: 8 }} /> Import a training plan
+          </Btn>
+          <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.45 }}>
+            Plans are added as a new flexible plan. Existing plans and history are never overwritten.
+          </div>
         </div>
       </SettingsSheet>
 
@@ -3857,6 +3931,108 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
           </div>
         )}
+      </SettingsSheet>
+
+      {/* ══ AI plan CSV import ══ */}
+      <SettingsSheet open={planImportSheet} onClose={planImportSaving ? () => {} : closePlanImport} title="Import a training plan">
+        {planImportLoading ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the plan and mapping its columns...</div>
+            <div className="micro" style={{ color: UI.inkFaint }}>Qwen prepares a preview. Your existing plans are not changed.</div>
+          </div>
+        ) : planImportError && !planImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div style={{ color: UI.danger, fontSize: 13, lineHeight: 1.5 }}>{planImportError}</div>
+            <Btn kind="ghost" onClick={closePlanImport}>Close</Btn>
+          </div>
+        ) : planImportPreview ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 5 }}>
+              {['DETECTED', 'PLAN PREVIEW', 'REVIEW'].map((label, index) => {
+                const step = index + 1;
+                const active = planImportStep === step;
+                const completed = planImportStep > step;
+                return <button key={label} onClick={() => completed && setPlanImportStep(step)} disabled={!completed && !active} style={{ minWidth: 0, padding: '7px 3px', borderRadius: 4, border: `var(--hair-width) solid ${active || completed ? 'var(--accent)' : UI.hair}`, background: active ? 'var(--accent)' : UI.bgInset, color: active ? 'var(--accent-ink)' : completed ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700, letterSpacing: '0.05em', cursor: completed ? 'pointer' : 'default', textShadow: 'none' }}><span style={{ display: 'block', fontSize: 9, marginBottom: 2 }}>{completed ? '✓' : step}</span>{label}</button>;
+              })}
+            </div>
+            {planImportStep === 1 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 1 · Detected</div>
+                  <span style={{ color: UI.ink }}>{planImportPreview.planName}</span><br />
+                  {planImportPreview.stats.days} training days · {planImportPreview.stats.exercises} exercises found. Nothing is saved yet.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>WHAT ZANE DETECTED</div>
+                  <div style={{ background: UI.bgInset, borderRadius: 6, padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 5 }}>
+                    {Object.entries(planImportPreview.mapping?.columns || {}).filter(([, header]) => header).map(([field, header]) => (
+                      <div key={field} style={{ display: 'flex', justifyContent: 'space-between', gap: 10, color: UI.inkSoft, fontSize: 12 }}>
+                        <span style={{ color: UI.inkFaint, textTransform: 'capitalize' }}>{field.replace(/([A-Z])/g, ' $1')}</span>
+                        <span style={{ color: UI.ink, textAlign: 'right', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{header}</span>
+                      </div>
+                    ))}
+                    <div style={{ color: UI.inkFaint, fontSize: 11, marginTop: 2 }}>
+                      {planImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0} exercise name{(planImportPreview.mapping?.exerciseMappings?.filter(x => x.existingName).length || 0) === 1 ? '' : 's'} matched to your library.
+                    </div>
+                  </div>
+                </div>
+                {planImportPreview.stats.invalidRows > 0 && <div className="micro" style={{ color: UI.gold }}>{planImportPreview.stats.invalidRows} row{planImportPreview.stats.invalidRows === 1 ? '' : 's'} had no usable exercise and will be skipped.</div>}
+                {planImportPreview.mapping?.warnings?.length > 0 && <div className="micro" style={{ color: UI.gold, lineHeight: 1.45 }}>{planImportPreview.mapping.warnings.join(' ')}</div>}
+                <Btn onClick={() => setPlanImportStep(2)} disabled={!planImportPreview.days.length} style={{ width: '100%' }}>See the plan preview</Btn>
+                <Btn kind="ghost" onClick={closePlanImport}>Cancel</Btn>
+              </>
+            )}
+            {planImportStep === 2 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.45 }}>
+                  <div className="label" style={{ color: UI.gold, marginBottom: 5 }}>STEP 2 · PLAN PREVIEW</div>
+                  <div style={{ color: UI.ink, fontSize: 17, fontWeight: 600, fontFamily: UI.fontUi }}>{planImportSampleDay?.name || 'Training day'}</div>
+                  <div className="micro" style={{ color: UI.inkFaint, marginTop: 3 }}>Day {Math.min(planImportDayIndex + 1, planImportDays.length)} of {planImportDays.length} · {planImportPreview.planName}</div>
+                </div>
+                {planImportSampleDay ? (
+                  <div style={{ maxHeight: 340, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 7 }}>
+                    {planImportSampleDay.items.map((item, itemIndex) => (
+                      <div key={`${item.name}-${itemIndex}`} style={{ background: UI.bgInset, borderRadius: 5, padding: '10px 11px', borderLeft: `2px solid ${UI.gold}`, display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: 10 }}>
+                        <span style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</span>
+                        <span className="num" style={{ color: UI.inkSoft, fontSize: 12, flexShrink: 0 }}>{planImportFormatItem(item)}</span>
+                      </div>
+                    ))}
+                  </div>
+                ) : <div className="micro" style={{ color: UI.inkFaint }}>No training day rows were found.</div>}
+                {planImportDays.length > 1 && <div style={{ display: 'flex', gap: 7 }}>
+                  <Btn kind="ghost" disabled={planImportDayIndex <= 0} onClick={() => setPlanImportDayIndex(i => Math.max(0, i - 1))} style={{ flex: 1 }}>Previous day</Btn>
+                  <Btn kind="ghost" disabled={planImportDayIndex >= planImportDays.length - 1} onClick={() => setPlanImportDayIndex(i => Math.min(planImportDays.length - 1, i + 1))} style={{ flex: 1 }}>Next day</Btn>
+                </div>}
+                <Btn onClick={() => setPlanImportStep(3)} style={{ width: '100%' }}>Continue to review</Btn>
+                <Btn kind="ghost" onClick={() => setPlanImportStep(1)}>Back</Btn>
+              </>
+            )}
+            {planImportStep === 3 && (
+              <>
+                <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.55, fontSize: 13, color: UI.inkSoft }}>
+                  <div style={{ color: UI.ink, fontWeight: 600, marginBottom: 5 }}>Step 3 · Review and import</div>
+                  <span style={{ color: UI.ink }}>{planImportPreview.planName}</span> will be added as a new flexible plan with {planImportPreview.stats.days} days.
+                </div>
+                <div>
+                  <div className="label" style={{ color: UI.inkFaint, marginBottom: 7 }}>EXERCISE NAMES</div>
+                  {planImportPreview.unknownExercises.length === 0 ? (
+                    <div className="micro" style={{ color: UI.ok }}>All exercises match your library.</div>
+                  ) : <>
+                    <div className="micro" style={{ color: UI.inkFaint, marginBottom: 7 }}>{planImportPreview.unknownExercises.length} exercise name{planImportPreview.unknownExercises.length === 1 ? '' : 's'} are new. They will be created as private exercises so the imported plan is usable immediately.</div>
+                    <div style={{ maxHeight: 120, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+                      {planImportPreview.unknownExercises.slice(0, 30).map(x => <div key={x.name} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, color: UI.inkSoft, fontSize: 12, fontFamily: UI.fontUi }}><span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.name}</span><span className="num" style={{ color: UI.inkFaint, flexShrink: 0 }}>{x.days} day{x.days === 1 ? '' : 's'}</span></div>)}
+                      {planImportPreview.unknownExercises.length > 30 && <div className="micro" style={{ color: UI.inkFaint }}>+ {planImportPreview.unknownExercises.length - 30} more</div>}
+                    </div>
+                  </>}
+                </div>
+                {planImportError && <div style={{ color: UI.danger, fontSize: 12 }}>{planImportError}</div>}
+                <Btn onClick={commitPlanImport} disabled={planImportSaving || !planImportPreview.days.length} style={{ width: '100%' }}>{planImportSaving ? 'Importing...' : `Import ${planImportPreview.planName}`}</Btn>
+                <Btn kind="ghost" onClick={() => setPlanImportStep(2)}>Back to plan preview</Btn>
+                <Btn kind="ghost" onClick={closePlanImport}>Cancel</Btn>
+              </>
+            )}
+          </div>
+        ) : null}
       </SettingsSheet>
 
       {/* ══ AI workout CSV import ══ */}
