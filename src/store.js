@@ -1060,19 +1060,27 @@ async function wiExistingFingerprints(userId) {
   return index;
 }
 
-async function previewWorkoutImport(csvText, userId, targetUnit, existingExercises = []) {
+async function previewWorkoutImport(csvText, userId, targetUnit, existingExercises = [], onProgress = null) {
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(8, 'Reading the workout rows…');
   const table = wiImportTable(csvText, 'history');
   const { headers, rows } = table;
+  report(18, `Found ${rows.length.toLocaleString('en-US')} rows. Preparing the mapping…`);
   const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
   if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this CSV.');
   const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
   const existingExerciseNames = [...new Set((existingExercises || []).map(e => String(e?.name || '').trim()).filter(Boolean))].slice(0, 800);
   const sampleRows = rows.slice(0, 120);
+  report(28, 'Mapping exercises and columns with Qwen…');
   const res = await fnFetch(WORKOUT_IMPORT_URL, { headers, sampleRows, exerciseNames, existingExerciseNames });
   if (!res) throw new Error('Network error while mapping the CSV.');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Workout mapping failed (${res.status})`);
+  report(62, 'Mapping complete. Building your workout history…');
   const built = wiBuildSessions(rows, headers, data, existingExercises, targetUnit === 'lbs' ? 'lbs' : 'kg');
+  report(76, 'Checking for duplicate workouts…');
   const existing = await wiExistingFingerprints(userId);
   const sessions = built.sessions.map((s, i) => ({ ...s, _index: i, fingerprint: wiSessionFingerprint(s), duplicate: existing.has(wiSessionFingerprint(s)) }));
   const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
@@ -1080,6 +1088,7 @@ async function previewWorkoutImport(csvText, userId, targetUnit, existingExercis
   const seenUnknown = new Set();
   sessions.forEach(s => s.entries.forEach(e => { if (!known.has(wiNormalizeName(e.name)) && !seenUnknown.has(wiNormalizeName(e.name))) { seenUnknown.add(wiNormalizeName(e.name)); unknown.push({ name: e.name, count: sessions.reduce((n, x) => n + x.entries.filter(y => wiNormalizeName(y.name) === wiNormalizeName(e.name)).reduce((m, y) => m + y.sets.length, 0), 0) }); } }));
   const batchId = `import_${uid()}`;
+  report(100, 'Preview ready. Nothing has been saved yet.');
   return { batchId, mapping: data, sessions, unknownExercises: unknown, stats: { sourceRows: rows.length, sessions: sessions.length, sets: sessions.reduce((n, s) => n + s.entries.reduce((m, e) => m + e.sets.length, 0), 0), duplicates: sessions.filter(s => s.duplicate).length, invalidRows: built.invalidRows.length }, targetUnit: targetUnit === 'lbs' ? 'lbs' : 'kg' };
 }
 
@@ -1115,6 +1124,11 @@ async function previewWorkoutPlanImport(csvText, userId, targetUnit, existingExe
 
 async function commitWorkoutImport(preview, userId, options = {}) {
   if (!preview?.batchId || !Array.isArray(preview.sessions)) throw new Error('Invalid import preview.');
+  const onProgress = options.onProgress;
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(4, 'Preparing the selected workouts…');
   const duplicateMode = options.duplicateMode === 'import' ? 'import' : 'skip';
   const unknownMode = options.unknownMode === 'text' ? 'text' : 'create';
   const sessions = preview.sessions.filter(s => duplicateMode === 'import' || !s.duplicate);
@@ -1130,6 +1144,7 @@ async function commitWorkoutImport(preview, userId, options = {}) {
     const row = { id, user_id: userId, name: String(entry.name).slice(0, 120), tags: ['imported'], note: 'Imported from workout CSV', category: 'Imported', unilateral: false, equipment: null, progression_reps: null, movement_type: null, no_weight_reps: !hasWeight && !hasTime, log_mode: hasTime && !hasWeight ? 'time' : hasWeight ? 'weight_reps' : 'reps', pull_bodyweight: false, bodyweight_mode: null, youtube_url: null, note_pinned: false, progression_increment: null, horn_labels: null };
     newExerciseByName.set(norm, row); exerciseRows.push(row);
   }
+  report(15, `Preparing ${sessions.length} workout${sessions.length === 1 ? '' : 's'} for import…`);
   const toWrite = sessions.map((s, index) => {
     // Preview-only fields are useful for the confirmation UI, but are not
     // columns in zane_sessions. Strip them before the normal session mapper
@@ -1155,17 +1170,31 @@ async function commitWorkoutImport(preview, userId, options = {}) {
       () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + chunk), { onConflict: 'id' })),
       { priority: 'critical', kind: 'write' },
     );
+    report(15 + (exerciseRows.length ? Math.min(15, ((i + Math.min(chunk, exerciseRows.length - i)) / exerciseRows.length) * 15) : 15), 'Saving imported exercises…');
   }
   for (let i = 0; i < toWrite.length; i += 50) {
     await scheduleDbTask(
       () => unwrap(_supabase.from('zane_sessions').upsert(toWrite.slice(i, i + 50).map(s => sessionToRow(s, userId)), { onConflict: 'id' })),
       { priority: 'critical', kind: 'write' },
     );
+    report(30 + (toWrite.length ? Math.min(30, ((i + Math.min(50, toWrite.length - i)) / toWrite.length) * 30) : 30), 'Saving imported workouts…');
   }
+  report(65, 'Saving sets and workout details…');
   // Keep the whole relational child write inside the app's write lane. The
   // helper performs several ordered FK requests, but no other foreground
   // action should be squeezed between them while an import is in progress.
-  await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null), { priority: 'critical', kind: 'write' });
+  let detailPct = 65;
+  await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null, message => {
+    const match = /\((\d+)\/(\d+)\)/.exec(String(message || ''));
+    const current = match ? Number(match[1]) : 0;
+    const total = match ? Math.max(1, Number(match[2])) : 1;
+    const entries = String(message || '').startsWith('Uploading entries');
+    const base = entries ? 65 : 80;
+    const span = entries ? 15 : 19;
+    detailPct = Math.max(detailPct, base + Math.min(1, current / total) * span);
+    report(detailPct, message);
+  }), { priority: 'critical', kind: 'write' });
+  report(100, 'Import complete. Reloading your history…');
   return { importedSessions: toWrite.length, skippedDuplicates: preview.sessions.length - toWrite.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
 }
 

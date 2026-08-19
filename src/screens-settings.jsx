@@ -897,6 +897,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [migrationSheet, setMigrationSheet] = useStateSet(false);
   const [workoutImportSheet, setWorkoutImportSheet] = useStateSet(false);
   const [workoutImportLoading, setWorkoutImportLoading] = useStateSet(false);
+  const [workoutImportProgress, setWorkoutImportProgress] = useStateSet({ pct: 0, phase: '' });
   const [workoutImportPreview, setWorkoutImportPreview] = useStateSet(null);
   const [workoutImportError, setWorkoutImportError] = useStateSet(null);
   const [workoutImportStep, setWorkoutImportStep] = useStateSet(1);
@@ -1962,11 +1963,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
-      setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0); setWorkoutImportLoading(true);
+      setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0); setWorkoutImportProgress({ pct: 3, phase: 'Reading the file…' }); setWorkoutImportLoading(true);
       try {
         if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller date range and import it in two batches.');
         const text = await readMigrationFile(file, 'history');
-        const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || []);
+        setWorkoutImportProgress({ pct: 12, phase: 'Reading the file complete. Preparing the mapping…' });
+        const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], progress => setWorkoutImportProgress(progress));
         setWorkoutImportPreview(preview); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0);
       } catch (err) {
         setWorkoutImportError(err?.message || 'Could not read this CSV or XLSX file.');
@@ -2002,12 +2004,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const commitWorkoutImport = async () => {
     if (!workoutImportPreview || workoutImportSaving) return;
-    setWorkoutImportSaving(true); setWorkoutImportError(null);
+    setWorkoutImportSaving(true); setWorkoutImportError(null); setWorkoutImportProgress({ pct: 2, phase: 'Preparing the selected workouts…' });
     try {
       await LB.commitWorkoutImport(workoutImportPreview, userId, {
         duplicateMode: workoutImportDuplicateMode,
         unknownMode: workoutImportUnknownMode,
         existingExercises: store.exercises || [],
+        onProgress: progress => setWorkoutImportProgress(progress),
       });
       // Direct import writes bypass the normal in-memory diff. Rebooting after
       // the commit gives the user the same authoritative server view as any
@@ -2619,6 +2622,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setWorkoutImportError(null);
     setWorkoutImportStep(1);
     setWorkoutImportPreviewIndex(0);
+    setWorkoutImportProgress({ pct: 0, phase: '' });
   };
 
   return (
@@ -2811,34 +2815,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               ? 'The coaching tab stays pinned while a coaching relationship is active.'
               : 'Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.'}
           </div>
-          <div style={{ marginTop: 16 }}>
-            <Row label="Reporting week starts">
-              <select
-                value={LB.normalizeWeekStartDay(store.settings?.weekStartDay)}
-                onChange={e => patchSettings({ weekStartDay: LB.normalizeWeekStartDay(e.target.value) })}
-                aria-label="Reporting week starts"
-                style={{
-                  minWidth: 118,
-                  background: UI.bgInset,
-                  border: `var(--hair-width) solid ${UI.hairStrong}`,
-                  borderRadius: 5,
-                  color: UI.ink,
-                  padding: '7px 8px',
-                  fontFamily: UI.fontUi,
-                  fontSize: 12,
-                  colorScheme: 'dark',
-                }}
-              >
-                {[
-                  ['Monday', 0], ['Tuesday', 1], ['Wednesday', 2], ['Thursday', 3],
-                  ['Friday', 4], ['Saturday', 5], ['Sunday', 6],
-                ].map(([label, value]) => <option key={value} value={value}>{label}</option>)}
-              </select>
-            </Row>
-            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-              Sets the week used by Health summaries, Training stats, History groups, Friends metrics and coach check-ins. Training-plan days stay unchanged.
-            </div>
-          </div>
           {coachingTabOn && (
             <div style={{ marginTop: 12 }}>
               <Row label="Be your own coach">
@@ -3011,6 +2987,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
           <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 16, lineHeight: 1.5 }}>
             These four share one tab slot in the nav bar. Turn on whichever you actually use, any combination works: tap the slot to cycle through them, or long-press it to jump straight to one.
+          </div>
+          <div style={{ marginBottom: 16 }}>
+            <Row label="Reporting week starts" first>
+              <select
+                value={LB.normalizeWeekStartDay(store.settings?.weekStartDay)}
+                onChange={e => patchSettings({ weekStartDay: LB.normalizeWeekStartDay(e.target.value) })}
+                aria-label="Reporting week starts"
+                style={{
+                  minWidth: 118,
+                  background: UI.bgInset,
+                  border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  borderRadius: 5,
+                  color: UI.ink,
+                  padding: '7px 8px',
+                  fontFamily: UI.fontUi,
+                  fontSize: 12,
+                  colorScheme: 'dark',
+                }}
+              >
+                {[
+                  ['Monday', 0], ['Tuesday', 1], ['Wednesday', 2], ['Thursday', 3],
+                  ['Friday', 4], ['Saturday', 5], ['Sunday', 6],
+                ].map(([label, value]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Row>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Sets the week used by Health summaries, Training stats, History groups, Friends metrics and coach check-ins. Training-plan days stay unchanged.
+            </div>
           </div>
           <NavRow label="Health" first hint={store.settings?.showHealthTab ? 'On' : 'Off'} onTap={() => setHealthSubSheet(true)} />
           <NavRow label="Water" hint={store.settings?.showWaterTab ? 'On' : 'Off'} onTap={() => setWaterSubSheet(true)} />
@@ -4144,10 +4148,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       {/* ══ AI workout CSV/XLSX import ══ */}
       <SettingsSheet open={workoutImportSheet} onClose={workoutImportSaving ? () => {} : closeWorkoutImport} title="Import workout history">
-        {workoutImportLoading ? (
+        {workoutImportLoading || workoutImportSaving ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the file and mapping its columns...</div>
-            <div className="micro" style={{ color: UI.inkFaint }}>Qwen prepares a preview. Your data is not written yet.</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <div style={{ color: UI.inkSoft, fontSize: 13, minHeight: 20 }}>{workoutImportProgress.phase || (workoutImportSaving ? 'Importing your history…' : 'Reading the file…')}</div>
+              <div className="num" style={{ color: UI.inkFaint, fontSize: 12, flexShrink: 0 }}>{workoutImportProgress.pct}%</div>
+            </div>
+            <div role="progressbar" aria-label="Workout import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={workoutImportProgress.pct} style={{ background: UI.bgInset, borderRadius: 999, height: 8, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${workoutImportProgress.pct}%`, transition: 'width 0.45s ease' }} />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>{workoutImportSaving ? 'Keep this sheet open while Zane saves the workouts and sets.' : 'Zane analyses the file and prepares a preview. Nothing is saved during this step.'}</div>
           </div>
         ) : workoutImportError && !workoutImportPreview ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
