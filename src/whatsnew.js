@@ -22,6 +22,18 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.853',
+    date: '2026-08-19',
+    title: 'Your Zane, your way 🚀',
+    items: [
+      '📅 Choose when your training week starts. Weekly recaps, TDEE estimates and coaching check-ins now follow your schedule, whether you train solo or with a coach.',
+      '📥 Migration is smoother than ever. Excel files, clearer previews, progress feedback and smarter day detection make bringing your history or plan into Zane effortless.',
+      '🏋️ New to Zane? The exercise picker now puts the full exercise database front and center, with separate tabs for your exercises and the complete catalog.',
+      '📱 Install Zane like an app. New iPhone and Android guides show you exactly how to add Zane to your home screen.',
+      '✨ Everyday training feels better. Keyboard-aware forms, reliable pace-minute entry and less unwanted scrolling make the app easier to use on mobile.'
+    ],
+  },
+  {
     id: 'v2.852',
     date: '2026-08-19',
     title: 'Your training data just found a new home 🚀',

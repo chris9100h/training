@@ -469,14 +469,14 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
                   active plan card stays quiet and readable on small screens. */}
               <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
                 <button onClick={(e) => { e.stopPropagation(); setPlanActionsOpen(true); }} style={{
-                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10,
+                  width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10, position: 'relative',
                   padding: '11px 14px', borderRadius: 6, cursor: 'pointer',
                   background: 'transparent', border: `1px solid ${UI.hairStrong}`, color: UI.inkSoft,
                   fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase',
                   WebkitTapHighlightColor: 'transparent',
                 }}>
                   <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}><i className="fa-solid fa-sliders" style={{ color: UI.gold, fontSize: 12 }} /> Plan actions</span>
-                  <ChevronRight />
+                  <span style={{ position: 'absolute', right: 14, display: 'flex', alignItems: 'center' }}><ChevronRight /></span>
                 </button>
               </div>
             </BracketFrame>
