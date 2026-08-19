@@ -1906,21 +1906,51 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
+  const readMigrationFile = async (file) => {
+    if (!/\.xlsx$/i.test(file.name || '')) return file.text();
+    if (typeof window.__ensureXLSX !== 'function') throw new Error('XLSX support could not be loaded. Connect once and try again.');
+    const ExcelJS = await window.__ensureXLSX();
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(await file.arrayBuffer());
+    const worksheet = workbook.worksheets?.[0];
+    if (!worksheet) throw new Error('The XLSX file does not contain a worksheet.');
+    const columnCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0);
+    const csvCell = (cell) => {
+      let value = cell?.text;
+      if (value == null || value === '') {
+        const raw = cell?.value;
+        if (raw && typeof raw === 'object') {
+          if (Array.isArray(raw.richText)) value = raw.richText.map(part => part?.text || '').join('');
+          else if (raw.result != null) value = raw.result;
+          else if (raw.text != null) value = raw.text;
+          else if (raw.hyperlink != null) value = raw.hyperlink;
+        } else value = raw;
+      }
+      const text = value == null ? '' : String(value);
+      return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+    };
+    const rows = [];
+    worksheet.eachRow({ includeEmpty: false }, row => {
+      rows.push(Array.from({ length: columnCount }, (_, index) => csvCell(row.getCell(index + 1))).join(','));
+    });
+    if (!rows.length) throw new Error('The XLSX file does not contain any rows.');
+    return rows.join('\n');
+  };
   const runWorkoutImport = () => {
-    // Keep input.click synchronous for iOS Safari. The CSV is parsed locally;
-    // only a bounded sample is sent to Qwen/Claude for column mapping.
+    // Keep input.click synchronous for iOS Safari. CSV and XLSX are parsed
+    // locally; only a bounded sample is sent to Qwen/Claude for mapping.
     setMigrationSheet(false);
-    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,text/csv';
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0); setWorkoutImportLoading(true);
       try {
-        if (file.size > 4_000_000) throw new Error('This CSV is larger than 4 MB. Export a smaller date range and import it in two batches.');
-        const text = await file.text();
+        if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller date range and import it in two batches.');
+        const text = await readMigrationFile(file);
         const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || []);
         setWorkoutImportPreview(preview); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0);
       } catch (err) {
-        setWorkoutImportError(err?.message || 'Could not read this CSV.');
+        setWorkoutImportError(err?.message || 'Could not read this CSV or XLSX file.');
       } finally { setWorkoutImportLoading(false); }
     };
     input.click();
@@ -1936,17 +1966,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     // Keep input.click synchronous for iOS Safari, just like the history
     // importer. The browser sends only a bounded sample to the AI mapper.
     setMigrationSheet(false);
-    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,text/csv';
+    const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
       setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportLoading(true);
       try {
-        if (file.size > 4_000_000) throw new Error('This CSV is larger than 4 MB. Export a smaller plan and try again.');
-        const text = await file.text();
+        if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller plan and try again.');
+        const text = await readMigrationFile(file);
         const preview = await LB.previewWorkoutPlanImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], file.name);
         setPlanImportPreview(preview); setPlanImportStep(1); setPlanImportDayIndex(0);
       } catch (err) {
-        setPlanImportError(err?.message || 'Could not read this plan CSV.');
+        setPlanImportError(err?.message || 'Could not read this plan CSV or XLSX file.');
       } finally { setPlanImportLoading(false); }
     };
     input.click();
@@ -3802,7 +3832,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       <SettingsSheet open={migrationSheet} onClose={() => setMigrationSheet(false)} title="Migrate from other apps">
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div style={{ background: UI.bgInset, borderRadius: 6, padding: '12px 14px', lineHeight: 1.5, fontSize: 13, color: UI.inkSoft }}>
-            Bring your training history or a training plan into Zane. The file is analysed first and nothing is saved until you review and confirm it.
+            Bring your training history or a training plan into Zane from a CSV or Excel file. The file is analysed first and nothing is saved until you review and confirm it.
           </div>
           <Btn kind="ghost" onClick={runPlanImport} style={{ width: '100%' }}>
             <i className="fa-solid fa-list-check" style={{ marginRight: 8 }} /> Import a training plan
@@ -3933,7 +3963,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         )}
       </SettingsSheet>
 
-      {/* ══ AI plan CSV import ══ */}
+      {/* ══ AI plan CSV/XLSX import ══ */}
       <SettingsSheet open={planImportSheet} onClose={planImportSaving ? () => {} : closePlanImport} title="Import a training plan">
         {planImportLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -4035,11 +4065,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         ) : null}
       </SettingsSheet>
 
-      {/* ══ AI workout CSV import ══ */}
+      {/* ══ AI workout CSV/XLSX import ══ */}
       <SettingsSheet open={workoutImportSheet} onClose={workoutImportSaving ? () => {} : closeWorkoutImport} title="Import workout history">
         {workoutImportLoading ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the CSV and mapping its columns...</div>
+            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the file and mapping its columns...</div>
             <div className="micro" style={{ color: UI.inkFaint }}>Qwen prepares a preview. Your data is not written yet.</div>
           </div>
         ) : workoutImportError && !workoutImportPreview ? (
