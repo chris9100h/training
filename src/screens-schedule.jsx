@@ -4251,10 +4251,13 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
   const [filterTags, setFilterTags] = useStateS([]);
   const [creatingNew, setCreatingNew] = useStateS(null);
   const [selected, setSelected] = useStateS([]);
+  // Start new users in the built-in catalogue instead of showing an empty
+  // library. Existing users keep the familiar personal-library first view.
+  const [sourceTab, setSourceTab] = useStateS(() => store.exercises.length ? 'mine' : 'database');
   const toggleFilter = (m) => setFilterTags(t => t.includes(m) ? t.filter(x => x !== m) : [...t, m]);
   const toggleSelect = (id) => setSelected(s => s.includes(id) ? s.filter(x => x !== id) : [...s, id]);
 
-  const list = useMemoS(() => {
+  const userList = useMemoS(() => {
     const ql = q.toUpperCase();
     return store.exercises
       .filter(e => {
@@ -4265,24 +4268,22 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
       .sort((a,b) => a.name.localeCompare(b.name));
   }, [store.exercises, q, filterTags]);
 
-  // System exercise catalog (exercise-db.js), surfaced on demand: only while
-  // searching or filtering, so the default quick-add view stays the user's own
-  // library. Catalog entries already in the library (by name) are hidden to
-  // avoid offering a duplicate.
-  const userNamesU = useMemoS(() => new Set(store.exercises.map(e => (e.name || '').toUpperCase())), [store.exercises]);
-  const dbActive = !!q || filterTags.length > 0;
+  // The database is a first-class source now, not an implicit fallback that
+  // only appears after typing or choosing a muscle. Keep every catalogue row
+  // visible here, including movements the user already copied into My
+  // Exercises; finalizePick resolves those back to the existing row.
   const systemList = useMemoS(() => {
-    if (!dbActive) return [];
     const ql = q.toUpperCase();
     return (window.SYSTEM_EXERCISES || [])
-      .filter(s => !userNamesU.has((s.name || '').toUpperCase()))
       .filter(s => {
         const matchSearch = !q || s.name.toUpperCase().includes(ql) || s.tags?.some(t => t.toUpperCase().includes(ql));
         const matchTags = filterTags.length === 0 || filterTags.some(ft => s.tags?.includes(ft));
         return matchSearch && matchTags;
       })
       .sort((a,b) => a.name.localeCompare(b.name));
-  }, [dbActive, q, filterTags, userNamesU]);
+  }, [q, filterTags]);
+  const list = sourceTab === 'mine' ? userList : [];
+  const visibleSystemList = sourceTab === 'database' ? systemList : [];
 
   // Resolve a picked id list to real user-exercise ids: a catalog (sys_) id is
   // duplicated into store.exercises (or mapped to an existing same-named copy)
@@ -4321,7 +4322,25 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
             style={{ cursor: 'pointer' }}>{m}</Pill>
         ))}
       </div>
-      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 240, overflow: 'auto', overscrollBehavior: 'contain' }}>
+      <div role="tablist" aria-label="Exercise source" style={{ display: 'flex', gap: 6, marginTop: 14 }}>
+        {[
+          { id: 'mine', label: 'My Exercises', count: store.exercises.length },
+          { id: 'database', label: 'Exercise Database', count: (window.SYSTEM_EXERCISES || []).length },
+        ].map(tab => {
+          const active = sourceTab === tab.id;
+          return (
+            <button key={tab.id} role="tab" aria-selected={active} onClick={() => { setSourceTab(tab.id); setSelected([]); }} style={{
+              flex: 1, minWidth: 0, padding: '9px 7px', borderRadius: 5, cursor: active ? 'default' : 'pointer',
+              background: active ? UI.goldFaint : 'transparent', border: `1px solid ${active ? UI.goldSoft : UI.hairStrong}`,
+              color: active ? UI.gold : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 10, fontWeight: 700,
+              letterSpacing: '0.08em', textTransform: 'uppercase', whiteSpace: 'nowrap',
+            }}>
+              {tab.label} <span style={{ opacity: 0.7 }}>({tab.count})</span>
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ marginTop: 12, display: 'flex', flexDirection: 'column', maxHeight: 320, overflow: 'auto', overscrollBehavior: 'contain' }}>
         {list.map((e, ei) => {
           const isSel = selected.includes(e.id);
           return (
@@ -4338,14 +4357,14 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
                 {(e.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
               </div>
             </button>
-            {(ei < list.length - 1 || systemList.length > 0) && <div className="knurl" />}
+            {ei < list.length - 1 && <div className="knurl" />}
             </React.Fragment>
           );
         })}
-        {systemList.length > 0 && (
+        {visibleSystemList.length > 0 && (
           <div className="micro" style={{ padding: '8px 8px 4px', color: UI.inkFaint, letterSpacing: '0.12em' }}>DATABASE</div>
         )}
-        {systemList.map((s, si) => {
+        {visibleSystemList.map((s, si) => {
           const isSel = selected.includes(s.id);
           return (
             <React.Fragment key={s.id}>
@@ -4362,16 +4381,11 @@ function ExercisePicker({ store, setStore, onClose, onPick, singleSelect = false
                 {(s.tags || []).map(t => <Pill key={t} gold={isSel}>{t}</Pill>)}
               </div>
             </button>
-            {si < systemList.length - 1 && <div className="knurl" />}
+             {si < visibleSystemList.length - 1 && <div className="knurl" />}
             </React.Fragment>
           );
         })}
-        {list.length === 0 && systemList.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>No exercises found</div>}
-        {!dbActive && (window.SYSTEM_EXERCISES || []).length > 0 && (
-          <div className="micro" style={{ padding: '12px 8px 2px', textAlign: 'center', color: UI.inkFaint, letterSpacing: '0.04em', textTransform: 'none', fontStyle: 'italic' }}>
-            Search or pick a muscle to also add from the exercise database.
-          </div>
-        )}
+        {list.length === 0 && visibleSystemList.length === 0 && <div className="micro" style={{ padding: '20px 0', textAlign: 'center', color: UI.inkFaint }}>{sourceTab === 'mine' ? 'No personal exercises yet' : 'No exercises found'}</div>}
       </div>
       {selected.length > 0 && (
         <Btn onClick={() => finalizePick(selected)} style={{ marginTop: 12, width: '100%' }}>
