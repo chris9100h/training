@@ -655,10 +655,12 @@ function wiParseCsv(text) {
   const source = String(text ?? '').replace(/^\uFEFF/, '');
   if (!source.trim()) throw new Error('The CSV is empty.');
   // Spreadsheet exports in German locales commonly use semicolons because the
-  // comma is the decimal separator. Detect that delimiter from the first
-  // logical row, while ignoring commas inside quoted cells.
-  let delimiter = ','; let quotedHeader = false; const delimiterCounts = { ',': 0, ';': 0, '\t': 0 };
-  for (let i = 0; i < source.length; i++) {
+  // comma is the decimal separator. Do not inspect only the first physical
+  // line: many exports prepend a title, report date, or app name before the
+  // actual header. Score the first few logical rows while ignoring separators
+  // inside quoted cells, preferring the delimiter that appears consistently.
+  let delimiter = ','; let quotedHeader = false; let rowCounts = { ',': 0, ';': 0, '\t': 0 }; const delimiterRows = [];
+  for (let i = 0; i < source.length && delimiterRows.length < 40; i++) {
     const ch = source[i];
     if (quotedHeader) {
       if (ch === '"') {
@@ -668,10 +670,20 @@ function wiParseCsv(text) {
       continue;
     }
     if (ch === '"') { quotedHeader = true; continue; }
-    if (ch === '\n' || ch === '\r') break;
-    if (Object.prototype.hasOwnProperty.call(delimiterCounts, ch)) delimiterCounts[ch]++;
+    if (ch === '\n' || ch === '\r') {
+      if (Object.values(rowCounts).some(count => count > 0)) delimiterRows.push(rowCounts);
+      rowCounts = { ',': 0, ';': 0, '\t': 0 };
+      if (ch === '\r' && source[i + 1] === '\n') i++;
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(rowCounts, ch)) rowCounts[ch]++;
   }
-  const bestDelimiter = Object.entries(delimiterCounts).sort((a, b) => b[1] - a[1])[0];
+  if (Object.values(rowCounts).some(count => count > 0)) delimiterRows.push(rowCounts);
+  const bestDelimiter = Object.keys(rowCounts).map(candidate => {
+    const rows = delimiterRows.filter(counts => counts[candidate] > 0).length;
+    const total = delimiterRows.reduce((sum, counts) => sum + counts[candidate], 0);
+    return [candidate, rows * 1000 + total];
+  }).sort((a, b) => b[1] - a[1])[0];
   if (bestDelimiter?.[1] > 0) delimiter = bestDelimiter[0];
   const rows = [];
   let row = [], cell = '', quoted = false;
@@ -1003,7 +1015,7 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
     const seriesMax = seriesFirstValues.length > 1 && wiIsRepRange(seriesFirst.reps) ? seriesFirstValues[seriesFirstValues.length - 1] : null;
     const plannedReps = seriesReps ?? reps;
     const plannedRepsMax = seriesMax ?? repsMax;
-    const timeValue = idx.timeSec >= 0 ? wiNumber(row[idx.timeSec]) : null;
+    const timeValue = idx.timeSec >= 0 ? wiDurationSeconds(row[idx.timeSec]) : null;
     let item = group._items.get(itemKey);
     if (!item) {
       item = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: setCount, reps: plannedReps };
@@ -1025,7 +1037,7 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
 
 function wiSessionFingerprint(session) {
   const entries = (session.entries || []).map(e => `${wiNormalizeName(e.name)}:${(e.sets || []).map(s => [s.kg ?? '', s.reps ?? '', s.repsL ?? '', s.repsR ?? '', s.timeSec ?? '', s.done ? 1 : 0, s.skipped ? 1 : 0, s.warmup ? 1 : 0].join(',')).join(';')}`).sort();
-  return `${session.date}|${entries.join('|')}`;
+  return `${session.date}|${wiNormalizeName(session.dayName || '')}|${entries.join('|')}`;
 }
 
 async function wiFetchAllRows(table, select, userId) {
@@ -1154,6 +1166,7 @@ async function commitWorkoutImport(preview, userId, options = {}) {
     return {
       ...session,
       id: `${preview.batchId}_s_${index}`,
+      imported: true,
       ended: `${session.date}T12:00:00.000Z`,
       date: `${session.date}T12:00:00.000Z`,
       startedAt: `${session.date}T12:00:00.000Z`,
@@ -1164,36 +1177,67 @@ async function commitWorkoutImport(preview, userId, options = {}) {
       }),
     };
   });
+  const sessionIds = toWrite.map(session => session.id);
+  // A retry may encounter rows from an earlier attempt. Only remove rows that
+  // this attempt creates, so a later network failure cannot delete a complete
+  // import that is being retried with the same deterministic IDs.
+  const [existingSessionRes, existingExerciseRes] = await Promise.all([
+    sessionIds.length
+      ? scheduleDbTask(() => _supabase.from('zane_sessions').select('id').eq('user_id', userId).in('id', sessionIds), { priority: 'foreground', kind: 'read' })
+      : Promise.resolve({ data: [] }),
+    exerciseRows.length
+      ? scheduleDbTask(() => _supabase.from('zane_exercises').select('id').eq('user_id', userId).in('id', exerciseRows.map(row => row.id)), { priority: 'foreground', kind: 'read' })
+      : Promise.resolve({ data: [] }),
+  ]);
+  if (existingSessionRes?.error) throw existingSessionRes.error;
+  if (existingExerciseRes?.error) throw existingExerciseRes.error;
+  const existingSessionIds = new Set((existingSessionRes?.data || []).map(row => row.id));
+  const existingExerciseIds = new Set((existingExerciseRes?.data || []).map(row => row.id));
+  const cleanupSessionIds = sessionIds.filter(id => !existingSessionIds.has(id));
+  const cleanupExerciseIds = exerciseRows.map(row => row.id).filter(id => !existingExerciseIds.has(id));
+  const cleanupImport = async () => {
+    try {
+      if (cleanupSessionIds.length) await scheduleDbTask(() => unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId).in('id', cleanupSessionIds)), { priority: 'critical', kind: 'write' });
+    } catch (_) { /* preserve the original import error; janitor can retry */ }
+    try {
+      if (cleanupExerciseIds.length) await scheduleDbTask(() => unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId).in('id', cleanupExerciseIds)), { priority: 'critical', kind: 'write' });
+    } catch (_) { /* preserve the original import error; janitor can retry */ }
+  };
   const chunk = 100;
-  for (let i = 0; i < exerciseRows.length; i += chunk) {
-    await scheduleDbTask(
-      () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + chunk), { onConflict: 'id' })),
-      { priority: 'critical', kind: 'write' },
-    );
-    report(15 + (exerciseRows.length ? Math.min(15, ((i + Math.min(chunk, exerciseRows.length - i)) / exerciseRows.length) * 15) : 15), 'Saving imported exercises…');
+  try {
+    for (let i = 0; i < exerciseRows.length; i += chunk) {
+      await scheduleDbTask(
+        () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + chunk), { onConflict: 'id' })),
+        { priority: 'critical', kind: 'write' },
+      );
+      report(15 + (exerciseRows.length ? Math.min(15, ((i + Math.min(chunk, exerciseRows.length - i)) / exerciseRows.length) * 15) : 15), 'Saving imported exercises…');
+    }
+    for (let i = 0; i < toWrite.length; i += 50) {
+      await scheduleDbTask(
+        () => unwrap(_supabase.from('zane_sessions').upsert(toWrite.slice(i, i + 50).map(s => sessionToRow(s, userId)), { onConflict: 'id' })),
+        { priority: 'critical', kind: 'write' },
+      );
+      report(30 + (toWrite.length ? Math.min(30, ((i + Math.min(50, toWrite.length - i)) / toWrite.length) * 30) : 30), 'Saving imported workouts…');
+    }
+    report(65, 'Saving sets and workout details…');
+    // Keep the whole relational child write inside the app's write lane. The
+    // helper performs several ordered FK requests, but no other foreground
+    // action should be squeezed between them while an import is in progress.
+    let detailPct = 65;
+    await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null, message => {
+      const match = /\((\d+)\/(\d+)\)/.exec(String(message || ''));
+      const current = match ? Number(match[1]) : 0;
+      const total = match ? Math.max(1, Number(match[2])) : 1;
+      const entries = String(message || '').startsWith('Uploading entries');
+      const base = entries ? 65 : 80;
+      const span = entries ? 15 : 19;
+      detailPct = Math.max(detailPct, base + Math.min(1, current / total) * span);
+      report(detailPct, message);
+    }), { priority: 'critical', kind: 'write' });
+  } catch (error) {
+    await cleanupImport();
+    throw error;
   }
-  for (let i = 0; i < toWrite.length; i += 50) {
-    await scheduleDbTask(
-      () => unwrap(_supabase.from('zane_sessions').upsert(toWrite.slice(i, i + 50).map(s => sessionToRow(s, userId)), { onConflict: 'id' })),
-      { priority: 'critical', kind: 'write' },
-    );
-    report(30 + (toWrite.length ? Math.min(30, ((i + Math.min(50, toWrite.length - i)) / toWrite.length) * 30) : 30), 'Saving imported workouts…');
-  }
-  report(65, 'Saving sets and workout details…');
-  // Keep the whole relational child write inside the app's write lane. The
-  // helper performs several ordered FK requests, but no other foreground
-  // action should be squeezed between them while an import is in progress.
-  let detailPct = 65;
-  await scheduleDbTask(() => _syncEntryRelational(toWrite, userId, null, message => {
-    const match = /\((\d+)\/(\d+)\)/.exec(String(message || ''));
-    const current = match ? Number(match[1]) : 0;
-    const total = match ? Math.max(1, Number(match[2])) : 1;
-    const entries = String(message || '').startsWith('Uploading entries');
-    const base = entries ? 65 : 80;
-    const span = entries ? 15 : 19;
-    detailPct = Math.max(detailPct, base + Math.min(1, current / total) * span);
-    report(detailPct, message);
-  }), { priority: 'critical', kind: 'write' });
   report(100, 'Import complete. Reloading your history…');
   return { importedSessions: toWrite.length, skippedDuplicates: preview.sessions.length - toWrite.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
 }
@@ -2641,6 +2685,7 @@ function buildEssentialLoadResult({
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload ? { isDeload: true } : {}),
         ...(s.is_cleanup ? { isCleanup: true } : {}),
+        ...(s.imported ? { imported: true } : {}),
         ...(s.meso_recap ? { mesoRecap: s.meso_recap } : {}),
         ...(s.readiness ? { readiness: s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight: s.signal_weight } : {}),
@@ -2795,7 +2840,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, meso_recap, readiness, signal_weight, cycle_pos')
+    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, imported, meso_recap, readiness, signal_weight, cycle_pos')
       .eq('user_id', userId).order('date', { ascending: false }),
     _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
     _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
@@ -3176,6 +3221,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         ...(s.is_freestyle ? { isFreestyle: true } : {}),
         ...(s.is_deload    ? { isDeload:    true } : {}),
         ...(s.is_cleanup   ? { isCleanup:   true } : {}),
+        ...(s.imported     ? { imported:    true } : {}),
         ...(s.meso_recap   ? { mesoRecap:   s.meso_recap } : {}),
         ...(s.readiness     ? { readiness:     s.readiness } : {}),
         ...(s.signal_weight ? { signalWeight:  s.signal_weight } : {}),
@@ -3660,7 +3706,7 @@ function sessionToRow(s, userId) {
   // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
   // Cache-only metadata must never be sent to Postgres as if it were a column.
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, _index, fingerprint, duplicate, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, imported, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, _index, fingerprint, duplicate, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -3669,6 +3715,7 @@ function sessionToRow(s, userId) {
   row.is_freestyle = !!isFreestyle;
   row.is_deload = !!isDeload;
   row.is_cleanup = !!isCleanup;
+  row.imported = !!imported || String(s.id || '').startsWith('import_');
   row.meso_recap = mesoRecap ?? null;
   row.readiness = readiness ?? null;
   row.signal_weight = signalWeight ?? null;

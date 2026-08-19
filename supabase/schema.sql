@@ -232,7 +232,8 @@ CREATE TABLE public.zane_sessions (
   -- zane_sessions_stamp_completion, immutable afterwards, never accepted from
   -- the client: it is the only session timestamp a client cannot forge, and the
   -- founding-member day-spread check depends on that.
-  completed_server_at timestamptz
+  completed_server_at timestamptz,
+  imported boolean NOT NULL DEFAULT false -- historical import; never counts as a live completion
 );
 
 CREATE TABLE public.zane_session_entries (
@@ -1938,6 +1939,20 @@ CREATE OR REPLACE FUNCTION public.zane_sessions_stamp_completion()
  SET search_path TO 'public'
 AS $function$
 BEGIN
+  -- Imported history is data, not a new completion. The deterministic import
+  -- id prefix is authoritative so a normal client cannot opt a live workout
+  -- out of the founding-member rules by merely setting a boolean column.
+  IF TG_OP = 'UPDATE' AND OLD.imported THEN
+    NEW.imported := true;
+  ELSIF NEW.id LIKE 'import\_%' ESCAPE '\' THEN
+    NEW.imported := true;
+  ELSE
+    NEW.imported := false;
+  END IF;
+  IF NEW.imported THEN
+    NEW.completed_server_at := NULL;
+    RETURN NEW;
+  END IF;
   IF TG_OP = 'INSERT' THEN
     NEW.completed_server_at := CASE WHEN NEW.ended IS NOT NULL THEN now() ELSE NULL END;
     RETURN NEW;
@@ -1980,7 +1995,7 @@ DECLARE
   v_taken     int;
   v_total     int;
 BEGIN
-  IF NEW.ended IS NULL THEN
+  IF NEW.ended IS NULL OR NEW.imported THEN
     RETURN NEW;
   END IF;
 
@@ -1989,10 +2004,10 @@ BEGIN
     RETURN NEW;
   END IF;
 
-  SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL),
+  SELECT COUNT(*) FILTER (WHERE ended IS NOT NULL AND NOT imported),
          COALESCE(SUM(LEAST(COALESCE(duration_minutes, 0), 120))
-                  FILTER (WHERE ended IS NOT NULL), 0),
-         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL)
+                  FILTER (WHERE ended IS NOT NULL AND NOT imported), 0),
+         COUNT(DISTINCT date(completed_server_at)) FILTER (WHERE completed_server_at IS NOT NULL AND NOT imported)
     INTO v_workouts, v_minutes, v_days
     FROM zane_sessions
    WHERE user_id = NEW.user_id;
