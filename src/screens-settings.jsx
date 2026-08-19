@@ -985,6 +985,9 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   // localStorage tri-state itself.
   const [gridEnabled, setGridEnabled] = useStateSet(() => !!window.__gridEnabled);
   useEffectSet(() => { setGridEnabled(!!window.__gridEnabled); }, [darkMode]);
+  // Larger text is deliberately device-local. It changes presentation only,
+  // so it never enters the synced settings row or a backup.
+  const [largerText, setLargerText] = useStateSet(() => localStorage.getItem('logbook-larger-text') === 'true');
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -3628,6 +3631,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               window.applyGridPreference(n);
             }} />
           </Row>
+          <Row label="Larger text">
+            <Toggle on={largerText} onToggle={() => {
+              const n = !largerText;
+              setLargerText(n);
+              try { localStorage.setItem('logbook-larger-text', String(n)); } catch (_) {}
+              window.applyLargeTextPreference(n);
+            }} />
+          </Row>
+          <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '-2px 0 8px', lineHeight: 1.4 }}>
+            Increases text and controls on this device only.
+          </div>
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">
               <Toggle on={paperAccentEnabled} onToggle={() => {
