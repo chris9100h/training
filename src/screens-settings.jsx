@@ -907,6 +907,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [workoutImportSaving, setWorkoutImportSaving] = useStateSet(false);
   const [planImportSheet, setPlanImportSheet] = useStateSet(false);
   const [planImportLoading, setPlanImportLoading] = useStateSet(false);
+  const [planImportProgress, setPlanImportProgress] = useStateSet({ pct: 0, phase: '' });
   const [planImportPreview, setPlanImportPreview] = useStateSet(null);
   const [planImportError, setPlanImportError] = useStateSet(null);
   const [planImportStep, setPlanImportStep] = useStateSet(1);
@@ -1945,7 +1946,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       });
       const values = sample.flat().map(normalizeHeader);
       const hasExercise = values.some(value => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(value));
-      const hasDate = values.some(value => /(^| )(date|workout date|session date|performed|logged|training date|started)( |$)/.test(value));
+      const hasDate = values.some(value => /(^| )(date|workout date|session date|performed|logged|training date|started|start|timestamp|epoch|unix)( |$)/.test(value));
       const requiredScore = mode === 'history' ? (hasExercise && hasDate ? 60 : 0) : (hasExercise ? 40 : 0);
       return { worksheet, rowCount, score: requiredScore + Math.min(rowCount, 200) / 200 };
     };
@@ -1980,6 +1981,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     setPlanImportSheet(false);
     setPlanImportPreview(null);
     setPlanImportError(null);
+    setPlanImportProgress({ pct: 0, phase: '' });
     setPlanImportStep(1);
     setPlanImportDayIndex(0);
   };
@@ -1990,7 +1992,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.csv,.xlsx,text/csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
     input.onchange = async (e) => {
       const file = e.target.files?.[0]; if (!file) return;
-      setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportLoading(true);
+      setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportProgress({ pct: 3, phase: 'Reading the plan…' }); setPlanImportLoading(true);
       try {
         if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller plan and try again.');
         const text = await readMigrationFile(file, 'plan');
@@ -2023,9 +2025,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   };
   const commitPlanImport = async () => {
     if (!planImportPreview || planImportSaving) return;
-    setPlanImportSaving(true); setPlanImportError(null);
+    setPlanImportSaving(true); setPlanImportError(null); setPlanImportProgress({ pct: 2, phase: 'Preparing the imported plan…' });
     try {
-      await LB.commitWorkoutPlanImport(planImportPreview, userId, { existingExercises: store.exercises || [] });
+      await LB.commitWorkoutPlanImport(planImportPreview, userId, { existingExercises: store.exercises || [], onProgress: progress => setPlanImportProgress(progress) });
       // Direct schedule/exercise writes bypass the normal in-memory diff. A
       // fresh load gives the user the same authoritative view as any restore.
       LB.clearLocal(userId); window.location.reload();
@@ -4046,10 +4048,16 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
 
       {/* ══ AI plan CSV/XLSX import ══ */}
       <SettingsSheet open={planImportSheet} onClose={planImportSaving ? () => {} : closePlanImport} title="Import a training plan">
-        {planImportLoading ? (
+        {planImportLoading || planImportSaving ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <div style={{ color: UI.inkSoft, fontSize: 13 }}>Reading the plan and mapping its columns...</div>
-            <div className="micro" style={{ color: UI.inkFaint }}>Qwen prepares a preview. Your existing plans are not changed.</div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 10, alignItems: 'baseline' }}>
+              <div style={{ color: UI.inkSoft, fontSize: 13, minHeight: 20 }}>{planImportProgress.phase || (planImportSaving ? 'Importing your plan…' : 'Reading the plan…')}</div>
+              <div className="num" style={{ color: UI.inkFaint, fontSize: 12, flexShrink: 0 }}>{planImportProgress.pct}%</div>
+            </div>
+            <div role="progressbar" aria-label="Training plan import progress" aria-valuemin="0" aria-valuemax="100" aria-valuenow={planImportProgress.pct} style={{ background: UI.bgInset, borderRadius: 999, height: 8, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hair}` }}>
+              <div style={{ height: '100%', borderRadius: 999, background: 'var(--accent)', width: `${planImportProgress.pct}%`, transition: 'width 0.45s ease' }} />
+            </div>
+            <div className="micro" style={{ color: UI.inkFaint }}>{planImportSaving ? 'Keep this sheet open while Zane saves the plan.' : 'Qwen prepares a preview. Your existing plans are not changed.'}</div>
           </div>
         ) : planImportError && !planImportPreview ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>

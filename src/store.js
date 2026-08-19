@@ -982,7 +982,14 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
   let previousDayName = '';
   rows.forEach((row, rowIndex) => {
     const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
-    if (!sourceName) return; // blank continuation/rest rows carry no exercise
+    if (!sourceName) {
+      // A row containing only a day/rest label is a valid plan separator. A
+      // row with values in any other column is malformed and should be shown
+      // in the preview's skipped-row count instead of disappearing silently.
+      const hasNonDayValue = row.some((value, index) => index !== dayIndex && String(value ?? '').trim() !== '');
+      if (hasNonDayValue) invalidRows.push(rowIndex + 2);
+      return;
+    }
     const rawDay = dayIndex >= 0 && row[dayIndex] ? String(row[dayIndex]).trim() : '';
     if (rawDay) previousDayName = rawDay;
     const dayRaw = rawDay || previousDayName || 'Day 1';
@@ -1040,11 +1047,15 @@ function wiSessionFingerprint(session) {
   return `${session.date}|${wiNormalizeName(session.dayName || '')}|${entries.join('|')}`;
 }
 
-async function wiFetchAllRows(table, select, userId) {
+async function wiFetchAllRows(table, select, userId, refine = null) {
   const out = []; const page = 1000;
   for (let from = 0; ; from += page) {
     const res = await scheduleDbTask(
-      () => _supabase.from(table).select(select).eq('user_id', userId).range(from, from + page - 1),
+      () => {
+        let query = _supabase.from(table).select(select).eq('user_id', userId);
+        if (typeof refine === 'function') query = refine(query);
+        return query.range(from, from + page - 1);
+      },
       { priority: 'foreground', kind: 'read' },
     );
     if (res?.error) throw res.error;
@@ -1055,19 +1066,36 @@ async function wiFetchAllRows(table, select, userId) {
   return out;
 }
 
-async function wiExistingFingerprints(userId) {
-  const [sessions, entries, sets] = await Promise.all([
-    wiFetchAllRows('zane_sessions', 'id,date,day_name', userId),
-    wiFetchAllRows('zane_session_entries', 'id,session_id,entry_idx,name', userId),
-    wiFetchAllRows('zane_sets', 'entry_id,session_id,set_idx,kg,reps,reps_l,reps_r,time_sec,done,skipped,warmup', userId),
-  ]);
+async function wiFetchRowsByIds(table, select, userId, column, ids) {
+  const out = []; const chunk = 100;
+  for (let i = 0; i < ids.length; i += chunk) {
+    const res = await scheduleDbTask(
+      () => _supabase.from(table).select(select).eq('user_id', userId).in(column, ids.slice(i, i + chunk)),
+      { priority: 'foreground', kind: 'read' },
+    );
+    if (res?.error) throw res.error;
+    out.push(...(res?.data || []));
+  }
+  return out;
+}
+
+async function wiExistingFingerprints(userId, dates = []) {
+  const normalizedDates = [...new Set((dates || []).map(date => String(date || '').slice(0, 10)).filter(Boolean))].sort();
+  const sessions = await wiFetchAllRows('zane_sessions', 'id,date,day_name,ended', userId, normalizedDates.length
+    ? query => query.gte('date', `${normalizedDates[0]}T00:00:00.000Z`).lte('date', `${normalizedDates[normalizedDates.length - 1]}T23:59:59.999Z`)
+    : null);
+  const sessionIds = sessions.map(session => session.id);
+  const entries = sessionIds.length ? await wiFetchRowsByIds('zane_session_entries', 'id,session_id,entry_idx,name', userId, 'session_id', sessionIds) : [];
+  const entryIds = entries.map(entry => entry.id);
+  const sets = entryIds.length ? await wiFetchRowsByIds('zane_sets', 'entry_id,session_id,set_idx,kg,reps,reps_l,reps_r,time_sec,done,skipped,warmup', userId, 'entry_id', entryIds) : [];
   const entriesBySession = new Map(); const setsByEntry = new Map();
   entries.forEach(e => { if (!entriesBySession.has(e.session_id)) entriesBySession.set(e.session_id, []); entriesBySession.get(e.session_id).push({ ...e, sets: [] }); });
   sets.forEach(s => { if (!setsByEntry.has(s.entry_id)) setsByEntry.set(s.entry_id, []); setsByEntry.get(s.entry_id).push(s); });
   const index = new Set();
   for (const s of sessions) {
+    if (!s.ended) continue;
     const date = String(s.date || '').slice(0, 10); const sessionEntries = (entriesBySession.get(s.id) || []).sort((a, b) => a.entry_idx - b.entry_idx).map(e => ({ name: e.name, sets: (setsByEntry.get(e.id) || []).sort((a, b) => a.set_idx - b.set_idx).map(st => ({ kg: st.kg == null ? null : Number(st.kg), reps: st.reps == null ? null : Number(st.reps), repsL: st.reps_l == null ? null : Number(st.reps_l), repsR: st.reps_r == null ? null : Number(st.reps_r), timeSec: st.time_sec == null ? null : Number(st.time_sec), done: !!st.done, skipped: !!st.skipped, warmup: !!st.warmup })) }));
-    index.add(wiSessionFingerprint({ date, entries: sessionEntries }));
+    index.add(wiSessionFingerprint({ date, dayName: s.day_name, entries: sessionEntries }));
   }
   return index;
 }
@@ -1093,7 +1121,7 @@ async function previewWorkoutImport(csvText, userId, targetUnit, existingExercis
   report(62, 'Mapping complete. Building your workout history…');
   const built = wiBuildSessions(rows, headers, data, existingExercises, targetUnit === 'lbs' ? 'lbs' : 'kg');
   report(76, 'Checking for duplicate workouts…');
-  const existing = await wiExistingFingerprints(userId);
+  const existing = await wiExistingFingerprints(userId, built.sessions.map(session => session.date));
   const sessions = built.sessions.map((s, i) => ({ ...s, _index: i, fingerprint: wiSessionFingerprint(s), duplicate: existing.has(wiSessionFingerprint(s)) }));
   const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
   const unknown = [];
@@ -1244,6 +1272,11 @@ async function commitWorkoutImport(preview, userId, options = {}) {
 
 async function commitWorkoutPlanImport(preview, userId, options = {}) {
   if (!preview?.batchId || !Array.isArray(preview.days) || !preview.days.length) throw new Error('Invalid plan preview.');
+  const onProgress = options.onProgress;
+  const report = (pct, phase) => {
+    try { if (typeof onProgress === 'function') onProgress({ pct: Math.max(0, Math.min(100, Math.round(pct))), phase }); } catch (_) { /* progress is best effort */ }
+  };
+  report(5, 'Preparing the imported plan…');
   const existingExercises = options.existingExercises || [];
   const existingByName = new Map(existingExercises.map(e => [wiNormalizeName(e.name), e]));
   const newExerciseByName = new Map(); const exerciseRows = [];
@@ -1268,11 +1301,14 @@ async function commitWorkoutPlanImport(preview, userId, options = {}) {
       () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + 100), { onConflict: 'id' })),
       { priority: 'critical', kind: 'write' },
     );
+    report(10 + (exerciseRows.length ? Math.min(35, ((i + Math.min(100, exerciseRows.length - i)) / exerciseRows.length) * 35) : 35), 'Saving private exercises…');
   }
+  report(55, 'Saving the new flexible plan…');
   await scheduleDbTask(
     () => unwrap(_supabase.from('zane_schedules').upsert({ ...schedule, user_id: userId }, { onConflict: 'id' })),
     { priority: 'critical', kind: 'write' },
   );
+  report(100, 'Plan import complete. Reloading your plans…');
   return { planId: schedule.id, planName: schedule.name, days: schedule.days.length, createdExercises: exerciseRows.length, batchId: preview.batchId };
 }
 
