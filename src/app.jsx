@@ -458,92 +458,82 @@ function zaneSnoozePwaPrompt() {
 }
 
 function PwaInstallPrompt({ platform, onLater, onOpenGuide }) {
-  const content = platform === 'ios'
-    ? {
-      label: 'iPhone / iPad',
-      intro: 'Open Zane from your Home Screen for a full-screen app, offline training and reliable notifications.',
-      steps: ['Open this page in Safari', 'Tap Share, then Add to Home Screen', 'Tap Add to finish'],
-    }
-    : platform === 'android'
-      ? {
-        label: 'Android',
-        intro: 'Install Zane once and it opens like a native app, with offline training and a cleaner gym-floor view.',
-        steps: ['Open this page in Chrome', 'Tap ⋮, then Add to Home screen or Install app', 'Confirm Install'],
-      }
-      : {
-        label: 'Desktop',
-        intro: 'Install Zane from your browser menu for a separate window, instant access and the full app experience.',
-        steps: ['Open the browser menu or install icon', 'Choose Install Zane or Add to desktop', 'Confirm Install'],
-      };
+  const stepStyle = { display: 'flex', alignItems: 'flex-start', gap: 12, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13.5, lineHeight: 1.5 };
+  const numberStyle = { width: 32, height: 32, flex: '0 0 32px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'rgba(var(--accent-rgb),.06)', color: UI.ink, fontFamily: UI.fontNum, fontSize: 13 };
+  const strong = { color: UI.ink, fontWeight: 700 };
+  const iosSteps = [
+    <>Open <strong style={strong}>zane-wo.com</strong> in Safari. Chrome and Firefox cannot install apps on iPhone.</>,
+    <>Tap the <strong style={strong}>Share</strong> button, the square with an arrow pointing up. Depending on your iOS version it sits in the bottom toolbar or in the address-bar menu.</>,
+    <>Scroll through the share sheet and pick <strong style={strong}>Add to Home Screen</strong>. If you do not see it, keep scrolling.</>,
+    <>Confirm the name and tap <strong style={strong}>Add</strong> in the top-right corner.</>,
+  ];
+  const androidSteps = [
+    <>Open <strong style={strong}>zane-wo.com</strong> in Chrome.</>,
+    <>Tap the <strong style={strong}>three-dot menu</strong> in the top-right corner.</>,
+    <>Pick <strong style={strong}>Add to Home screen</strong>. Some Chrome versions call it <strong style={strong}>Install app</strong>.</>,
+    <>A dialog appears with the Zane icon. Tap <strong style={strong}>Install</strong>, and it opens like a native app from then on.</>,
+  ];
+  const card = (kind, title, steps) => (
+    <div style={{
+      minWidth: 0, padding: '27px 28px 25px', border: `1px solid ${UI.hairStrong}`,
+      borderRadius: 10, background: 'rgba(var(--bg-rgb),.34)', textAlign: 'left',
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginBottom: 23 }}>
+        <div style={{ width: 27, height: 27, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.gold }}>
+          {kind === 'ios' ? (
+            <svg width="23" height="25" viewBox="0 0 24 26" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="M12 16V3m0 0L7.5 7.5M12 3l4.5 4.5" /><path d="M5 11v10.5A1.5 1.5 0 0 0 6.5 23h11a1.5 1.5 0 0 0 1.5-1.5V11" />
+            </svg>
+          ) : (
+            <svg width="22" height="25" viewBox="0 0 24 26" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <rect x="5.5" y="2" width="13" height="22" rx="2" /><path d="M10 20.5h4" />
+            </svg>
+          )}
+        </div>
+        <div style={{ fontFamily: UI.fontDisplay, fontSize: 27, color: UI.ink, lineHeight: 1, letterSpacing: '.03em', textTransform: 'uppercase' }}>{title}</div>
+      </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        {steps.map((step, index) => <div key={index} style={stepStyle}><span style={numberStyle}>{index + 1}</span><div style={{ flex: 1, minWidth: 0 }}>{step}</div></div>)}
+      </div>
+    </div>
+  );
 
   return (
-    <div
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="zane-pwa-install-title"
-      style={{
-        position: localViewportLayerPosition(), inset: 0, zIndex: 10001,
-        display: 'flex', alignItems: 'center', justifyContent: 'center',
-        minHeight: '100dvh', padding: '24px 16px',
-        background: 'rgba(8, 6, 13, 0.74)',
-        backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
-      }}
-    >
+    <div role="dialog" aria-modal="true" aria-labelledby="zane-pwa-install-title" style={{
+      position: localViewportLayerPosition(), inset: 0, zIndex: 10001,
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      minHeight: '100dvh', padding: '24px 16px',
+      background: 'rgba(8, 6, 13, 0.78)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
+    }}>
       <section style={{
-        width: 'min(100%, 360px)', maxHeight: 'calc(100dvh - 48px)', overflowY: 'auto',
+        width: 'min(100%, 940px)', maxHeight: 'calc(100dvh - 48px)', overflowY: 'auto',
         border: `1px solid ${UI.goldSoft}`, borderRadius: 10,
         background: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
-        boxShadow: '0 24px 70px rgba(0,0,0,.62), 0 0 0 1px rgba(var(--accent-rgb),.1)',
-        padding: '26px 24px 22px', textAlign: 'center',
-        animation: 'fadeUp .35s ease both',
+        boxShadow: '0 24px 80px rgba(0,0,0,.65), 0 0 0 1px rgba(var(--accent-rgb),.1)',
+        padding: '30px 28px 24px', animation: 'fadeUp .35s ease both',
       }}>
-        <div style={{
-          width: 46, height: 46, margin: '0 auto 13px', borderRadius: 8,
-          display: 'flex', alignItems: 'center', justifyContent: 'center',
-          background: UI.goldFaint, border: `1px solid ${UI.goldSoft}`,
-        }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke={UI.gold} strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-            <path d="M4 10.5 12 4l8 6.5v8a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 4 18.5v-8Z" />
-            <path d="M9 20v-5.5h6V20M12 2v6m0 0 2.5-2.5M12 8 9.5 5.5" />
-          </svg>
-        </div>
-        <div className="micro-gold" style={{ marginBottom: 6 }}>INSTALL ZANE</div>
-        <div id="zane-pwa-install-title" style={{ fontFamily: UI.fontDisplay, fontSize: 27, color: UI.ink, lineHeight: 1.05 }}>
-          Keep Zane close
-        </div>
-        <div style={{ marginTop: 10, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, lineHeight: 1.55 }}>
-          {content.intro}
-        </div>
-        <div style={{
-          marginTop: 17, padding: '13px 14px', textAlign: 'left',
-          border: `1px solid ${UI.hairStrong}`, borderRadius: 7,
-          background: UI.bgInset,
-        }}>
-          <div style={{ color: UI.gold, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', marginBottom: 9 }}>
-            {content.label}
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 18, marginBottom: 23 }}>
+          <div>
+            <div className="micro-gold" style={{ marginBottom: 5 }}>INSTALL ZANE AS AN APP</div>
+            <div id="zane-pwa-install-title" style={{ fontFamily: UI.fontDisplay, fontSize: 31, color: UI.ink, lineHeight: 1.02, textTransform: 'uppercase' }}>
+              Full app. One tap away.
+            </div>
+            <div style={{ marginTop: 8, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13.5, lineHeight: 1.5 }}>
+              Install Zane to train full-screen, keep workouts available offline and get the best notification experience.
+            </div>
           </div>
-          <ol style={{ margin: 0, paddingLeft: 20, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 12.5, lineHeight: 1.65 }}>
-            {content.steps.map(step => <li key={step} style={{ paddingLeft: 3 }}>{step}</li>)}
-          </ol>
+          <button type="button" onClick={onLater} aria-label="Close" style={{ flex: '0 0 auto', width: 34, height: 34, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, background: 'transparent', color: UI.inkFaint, fontSize: 24, lineHeight: 1, cursor: 'pointer' }}>×</button>
         </div>
-        <button type="button" onClick={onOpenGuide} style={{
-          width: '100%', marginTop: 17, padding: '13px 12px', borderRadius: 6,
-          border: 'none', cursor: 'pointer',
-          background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)',
-          boxShadow: '0 8px 22px rgba(var(--accent-rgb),.28)',
-          color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 13, fontWeight: 700,
-          letterSpacing: '.1em', textTransform: 'uppercase', textShadow: 'none',
-        }}>
-          {platform === 'desktop' ? 'GOT IT' : 'OPEN FULL GUIDE'}
-        </button>
-        <button type="button" onClick={onLater} style={{
-          width: '100%', marginTop: 8, padding: '10px 12px', borderRadius: 6,
-          border: `1px solid ${UI.hairStrong}`, background: 'transparent',
-          color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600,
-          letterSpacing: '.1em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none',
-        }}>
-          MAYBE LATER
-        </button>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 360px), 1fr))', gap: 18 }}>
+          {card('ios', 'iPhone', iosSteps)}
+          {card('android', 'Android', androidSteps)}
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 9, marginTop: 18 }}>
+          <button type="button" onClick={onLater} style={{ padding: '10px 14px', borderRadius: 6, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '.1em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>MAYBE LATER</button>
+          <button type="button" onClick={onOpenGuide} style={{ padding: '10px 14px', borderRadius: 6, border: 'none', background: 'linear-gradient(160deg, var(--accent-light) 0%, var(--accent) 55%, var(--accent-deep) 100%)', boxShadow: '0 7px 18px rgba(var(--accent-rgb),.25)', color: 'var(--accent-ink)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '.1em', textTransform: 'uppercase', cursor: 'pointer', textShadow: 'none' }}>
+            {platform === 'desktop' ? 'DONE' : 'OPEN FULL GUIDE'}
+          </button>
+        </div>
       </section>
     </div>
   );
