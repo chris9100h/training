@@ -828,6 +828,28 @@ function wiSetSeries(headers) {
   return [...bySet.values()].sort((a, b) => a.setNumber - b.setNumber);
 }
 
+// Some exports call the day/split column "Cycle 1" or "Workout" instead of
+// "Day". If the mapper leaves that field empty, recover it locally from the
+// header and the sparse, repeated group labels rather than flattening the
+// whole plan into Day 1.
+function wiGuessPlanDayIndex(rows, headers, exerciseIndex) {
+  const exerciseRows = rows.filter(row => String(row[exerciseIndex] ?? '').trim());
+  if (!exerciseRows.length) return -1;
+  let best = -1; let bestScore = 0;
+  headers.forEach((header, index) => {
+    if (index === exerciseIndex) return;
+    const normalized = wiNormalizeName(header);
+    if (!/(^| )(day|cycle|block|phase|split|workout|session)( |$)/.test(normalized)) return;
+    const values = exerciseRows.map(row => String(row[index] ?? '').trim()).filter(Boolean);
+    if (!values.length) return;
+    const uniqueCount = new Set(values.map(wiNormalizeName)).size;
+    const sparsity = 1 - (values.length / exerciseRows.length);
+    const score = 12 + (Math.max(0, sparsity) * 8) + Math.min(uniqueCount, 12) * 0.5;
+    if (score > bestScore) { best = index; bestScore = score; }
+  });
+  return best;
+}
+
 function wiIsRepLadder(value) {
   return /[\/]\s*\d/.test(String(value ?? ''));
 }
@@ -889,6 +911,7 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
   const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
   const exerciseIndex = idx.exercise;
   if (exerciseIndex < 0) throw new Error('The AI could not identify an exercise column in this plan.');
+  const dayIndex = idx.day >= 0 ? idx.day : wiGuessPlanDayIndex(rows, headers, exerciseIndex);
   const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
   const aiMap = new Map((mapping.exerciseMappings || []).map(m => [m.source, m]));
   const series = wiSetSeries(headers);
@@ -898,7 +921,7 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
   rows.forEach((row, rowIndex) => {
     const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
     if (!sourceName) return; // blank continuation/rest rows carry no exercise
-    const rawDay = idx.day >= 0 && row[idx.day] ? String(row[idx.day]).trim() : '';
+    const rawDay = dayIndex >= 0 && row[dayIndex] ? String(row[dayIndex]).trim() : '';
     if (rawDay) previousDayName = rawDay;
     const dayRaw = rawDay || previousDayName || 'Day 1';
     const dayName = (dayRaw || 'Day 1').slice(0, 80);

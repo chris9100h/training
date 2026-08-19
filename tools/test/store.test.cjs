@@ -7075,7 +7075,9 @@ async function testAsync(name, fn) {
 
   test('wiBuildPlan: carries forward day labels and derives repeated set columns', () => {
     const headers = ['Cycle 1', 'Exercise', 'Skipped', 'Set 1 Type', 'Set 1 Rep Range', 'Set 2 Type', 'Set 2 Rep Range', 'Set 3 Type', 'Set 3 Rep Range'];
-    const mapping = { columns: { day: 'Cycle 1', exercise: 'Exercise' }, exerciseMappings: [] };
+    // The AI may not call a column named "Cycle 1" a day column. The local
+    // fallback must still preserve the split instead of flattening to Day 1.
+    const mapping = { columns: { exercise: 'Exercise' }, exerciseMappings: [] };
     const out = LB.wiBuildPlan([
       ['Push 1', 'Bench Press', 'No', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12'],
       ['', 'Incline Press', 'No', 'Standard Set', '10 - 15', 'Standard Set', '10 - 15', '', ''],
