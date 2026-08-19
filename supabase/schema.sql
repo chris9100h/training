@@ -1184,7 +1184,7 @@ AS $function$
 $function$;
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
- RETURNS TABLE(coaching_id text, checked_in_at timestamptz)
+ RETURNS TABLE(coaching_id text, checked_in_at timestamptz, reporting_week_start date)
  LANGUAGE plpgsql
  SECURITY DEFINER
  SET search_path TO 'public'
@@ -1205,7 +1205,10 @@ begin
           - ((extract(isodow from cfg.client_today)::int - 1
               - cfg.week_start_day + 7) % 7)
       limit 1
-    ) as checked_in_at
+    ) as checked_in_at,
+    cfg.client_today
+      - ((extract(isodow from cfg.client_today)::int - 1
+          - cfg.week_start_day + 7) % 7) as reporting_week_start
   from zane_coaching c
   left join zane_user_settings us on us.user_id = c.client_id
   cross join lateral (
@@ -1216,7 +1219,7 @@ begin
           then (now() at time zone trim(us.time_zone))::date
         else ((now() at time zone 'UTC') + make_interval(mins => coalesce(us.tz_offset_minutes, 0)))::date
       end as client_today,
-      coalesce(greatest(0, least(6, us.week_start_day)), 0)::integer as week_start_day
+      greatest(0, least(6, coalesce(us.week_start_day, 0)))::integer as week_start_day
   ) cfg
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
@@ -4625,7 +4628,7 @@ BEGIN
 
   v_week_start_day := 0;
   SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes,
-         coalesce(greatest(0, least(6, us.week_start_day)), 0)
+         greatest(0, least(6, coalesce(us.week_start_day, 0)))
     INTO v_zone, v_offset, v_week_start_day
     FROM zane_user_settings us
    WHERE us.user_id = p_user_id;

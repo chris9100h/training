@@ -26,7 +26,7 @@ BEGIN
   IF p_user_id IS NULL THEN RETURN NULL; END IF;
 
   SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes,
-         coalesce(greatest(0, least(6, us.week_start_day)), 0)
+         greatest(0, least(6, coalesce(us.week_start_day, 0)))
     INTO v_zone, v_offset, v_week_start_day
     FROM public.zane_user_settings us
    WHERE us.user_id = p_user_id;

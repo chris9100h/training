@@ -3162,7 +3162,12 @@ function App() {
       return socialRefreshInFlight;
     };
     if (route.name === 'friends') {
-      if (!storeRefA.current?.friends?.loadedAt) refreshFriends();
+      const requestedWeekStart = LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay);
+      const loadedFriends = storeRefA.current?.friends;
+      // A Friends snapshot is only valid for the reporting boundary it was
+      // loaded with. Changing the local week-start setting must invalidate the
+      // old metrics immediately instead of reusing a merely recent snapshot.
+      if (!loadedFriends?.loadedAt || loadedFriends.weekStart !== requestedWeekStart) refreshFriends();
     } else {
       refreshBadge();
       refreshPendingRequests();

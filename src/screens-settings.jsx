@@ -2836,7 +2836,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </select>
             </Row>
             <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
-              Sets the week used by Health summaries, Friends metrics and coach check-ins. Training-plan days stay unchanged.
+              Sets the week used by Health summaries, Training stats, History groups, Friends metrics and coach check-ins. Training-plan days stay unchanged.
             </div>
           </div>
           {coachingTabOn && (

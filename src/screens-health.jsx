@@ -6017,8 +6017,8 @@ function HealthClientLogs({ clientStore }) {
   const waterSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ value: l.waterMl }), weekWindow), [logs, tf, selectedDate, weekStartDay]);
   const macroSeries  = useMemoH(() => healthSeriesFor(logs, windowDays, l => ({ protein: l.protein, carbs: l.carbs, fat: l.fat, fiber: l.fiber, calories: l.calories, targetCal: l.targetsSnap?.calories ?? null }), weekWindow), [logs, tf, selectedDate, weekStartDay]);
   const adherenceLogs = useMemoH(() => healthAdherenceLogs(logs, today), [logs, today]);
-  const adhSeries    = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate]);
-  const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate]);
+  const adhSeries    = useMemoH(() => healthSeriesFor(adherenceLogs, windowDays, l => ({ value: l.adherence }), weekWindow), [adherenceLogs, tf, selectedDate, weekStartDay]);
+  const cardioSeries = useMemoH(() => healthCardioSeries(cardioLogs, windowDays, weekWindow), [cardioLogs, tf, selectedDate, weekStartDay]);
 
   const numAvg = series => { const vs = series.data.map(d => d.value).filter(v => v != null); return vs.length ? vs.reduce((s, v) => s + v, 0) / vs.length : null; };
   const weightAvg = useMemoH(() => { const a = numAvg(weightSeries); return a != null ? Math.round(a * 10) / 10 : null; }, [weightSeries]);

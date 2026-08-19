@@ -1,8 +1,8 @@
--- Keep coach-side check-in due status on the client's local reporting date.
--- This prevents a boundary-day report from waiting for database UTC midnight.
+-- Keep the Monday default when the optional settings row is absent.  In
+-- PostgreSQL LEAST(6, NULL) returns 6, so the COALESCE must be inside LEAST.
 
 CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
-RETURNS TABLE(coaching_id text, checked_in_at timestamptz)
+RETURNS TABLE(coaching_id text, checked_in_at timestamptz, reporting_week_start date)
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path TO 'public'
@@ -15,11 +15,10 @@ BEGIN
       SELECT ci.checked_in_at
         FROM public.zane_checkins ci
        WHERE ci.coaching_id = c.id
-         AND ci.week_start = cfg.client_today
-           - ((extract(isodow FROM cfg.client_today)::int - 1
-               - cfg.week_start_day + 7) % 7)
+         AND ci.week_start = boundary.reporting_week_start
        LIMIT 1
-    ) AS checked_in_at
+    ) AS checked_in_at,
+    boundary.reporting_week_start
     FROM public.zane_coaching c
     LEFT JOIN public.zane_user_settings us ON us.user_id = c.client_id
     CROSS JOIN LATERAL (
@@ -32,9 +31,17 @@ BEGIN
         END AS client_today,
         greatest(0, least(6, coalesce(us.week_start_day, 0)))::integer AS week_start_day
     ) cfg
+    CROSS JOIN LATERAL (
+      SELECT cfg.client_today
+        - ((extract(isodow FROM cfg.client_today)::int - 1
+            - cfg.week_start_day + 7) % 7)::integer AS reporting_week_start
+    ) boundary
    WHERE c.coach_id = auth.uid()
      AND c.coach_id <> c.client_id
      AND c.status = 'active'
      AND c.id NOT LIKE 'support_%';
 END;
 $function$;
+
+REVOKE EXECUTE ON FUNCTION public.get_coach_checkin_status() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.get_coach_checkin_status() TO authenticated;

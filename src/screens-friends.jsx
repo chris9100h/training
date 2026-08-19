@@ -502,7 +502,8 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     // The app-level social loader normally owns refreshes. If another boot
     // path clears the slice while this screen stays mounted, restart the
     // screen-level recovery load instead of leaving a stale empty fallback.
-    if (data?.loadedAt) {
+    const requestedWeekStart = LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay);
+    if (data?.loadedAt && data.weekStart === requestedWeekStart) {
       setLoading(false);
       return;
     }

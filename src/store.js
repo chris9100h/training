@@ -8963,7 +8963,11 @@ async function addCoachingMacros(coachingId, macros, userId) {
 async function loadCoachCheckinStatus() {
   const { data, error } = await _supabase.rpc('get_coach_checkin_status');
   if (error) throw error;
-  return (data || []).map(r => ({ coachingId: r.coaching_id, checkedInAt: r.checked_in_at ?? null }));
+  return (data || []).map(r => ({
+    coachingId: r.coaching_id,
+    checkedInAt: r.checked_in_at ?? null,
+    reportingWeekStart: r.reporting_week_start ?? null,
+  }));
 }
 
 async function setCheckinEnabled(coachingId, enabled) {

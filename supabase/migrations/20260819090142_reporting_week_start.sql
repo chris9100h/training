@@ -36,7 +36,7 @@ BEGIN
        WHERE ci.coaching_id = c.id
          AND ci.week_start = current_date
            - ((extract(isodow FROM current_date)::int - 1
-               - coalesce(greatest(0, least(6, us.week_start_day)), 0) + 7) % 7)
+               - greatest(0, least(6, coalesce(us.week_start_day, 0))) + 7) % 7)
        LIMIT 1
     ) AS checked_in_at
     FROM public.zane_coaching c
@@ -73,7 +73,7 @@ BEGIN
 
   v_week_start_day := 0;
   SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes,
-         coalesce(greatest(0, least(6, us.week_start_day)), 0)
+         greatest(0, least(6, coalesce(us.week_start_day, 0)))
     INTO v_zone, v_offset, v_week_start_day
     FROM public.zane_user_settings us
    WHERE us.user_id = p_user_id;

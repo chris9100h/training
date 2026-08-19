@@ -143,13 +143,13 @@ function writeCoachReviewQueue(value) {
   } catch (_) {}
 }
 
-function CoachNeedsAttention({ clients, checkinMap, unreadNotes, go, onRequestCheckin, weekStartDay = 0 }) {
+function CoachNeedsAttention({ clients, checkinMap, checkinWeekMap, unreadNotes, go, onRequestCheckin, weekStartDay = 0 }) {
   const [dismissed, setDismissed] = useStateC(readCoachReviewQueue);
   const [expanded, setExpanded] = useStateC(false);
   const [requested, setRequested] = useStateC({});
   const activeClients = (clients || []).filter(c => c.status === 'active');
   const clientById = new Map(activeClients.map(c => [c.clientId, c]));
-  const weekStart = LB.checkinWeekStart?.(weekStartDay) || new Date().toISOString().slice(0, 10);
+  const coachWeekStart = LB.checkinWeekStart?.(weekStartDay) || new Date().toISOString().slice(0, 10);
   const items = [];
 
   const isDismissed = key => !!dismissed[key];
@@ -176,6 +176,11 @@ function CoachNeedsAttention({ clients, checkinMap, unreadNotes, go, onRequestCh
     }
 
     if (checkinAt === null && client.checkinEnabled !== false) {
+      // The RPC resolves the boundary with the client's own setting and
+      // timezone. Use that exact server-provided week for the local dismissal
+      // key; falling back to the coach's setting keeps old/partial responses
+      // compatible while the new column rolls out.
+      const weekStart = checkinWeekMap?.[client.id] || coachWeekStart;
       const key = `due:${client.id}:${weekStart}`;
       if (!isDismissed(key)) {
         items.push({
@@ -316,6 +321,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
   // card would announce a status the client has not entered yet.
   const [statusSinceMap, setStatusSinceMap] = useStateC({});
   const [checkinMap, setCheckinMap] = useStateC({});
+  const [checkinWeekMap, setCheckinWeekMap] = useStateC({});
   const [inviteOpen, setInviteOpen] = useStateC(false);
   const [inviteEmail, setInviteEmail] = useStateC('');
   const [inviting, setInviting] = useStateC(false);
@@ -338,8 +344,13 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
           setStatusMap(sm);
           setStatusSinceMap(ssm);
           const cm = {};
-          checkinData.forEach(r => { cm[r.coachingId] = r.checkedInAt; });
+          const cwm = {};
+          checkinData.forEach(r => {
+            cm[r.coachingId] = r.checkedInAt;
+            if (r.reportingWeekStart) cwm[r.coachingId] = r.reportingWeekStart;
+          });
           setCheckinMap(cm);
+          setCheckinWeekMap(cwm);
         })
         .catch(() => {});
     };
@@ -509,6 +520,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
       <CoachNeedsAttention
         clients={allClients}
         checkinMap={checkinMap}
+        checkinWeekMap={checkinWeekMap}
         unreadNotes={unreadNotes.filter(n => !n.coachingId?.startsWith('support_'))}
         go={go}
         onRequestCheckin={handleRequestCheckin}
