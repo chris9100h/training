@@ -54,7 +54,8 @@ Rules:
   not the upload date. A Unix timestamp in seconds or milliseconds is a valid workout
   date source; map it to date and leave dateFormat null (the client handles the epoch).
 - Weight must be the load used for the set, reps the completed repetitions, and timeSec
-  a duration in seconds. Do not use planned targets as completed values.
+  a duration in seconds. A 'time' value such as 'MM:SS' or 'HH:MM:SS' is a duration
+  column and should map to timeSec. Do not use planned targets as completed values.
 - A source exercise may map to an existing name only when the match is unambiguous;
   otherwise existingName must be null. Never merge two distinct movements.
 - Confidence is 0..1. Keep warnings short and factual.`;

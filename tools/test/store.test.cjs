@@ -7045,6 +7045,18 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.sessions[0].entries[0].sets[0].kg, 60);
   });
 
+  test('wiBuildSessions: imports time-only rows from an unlabelled time column', () => {
+    const mapping = {
+      columns: { date: 'start', session: 'workout', exercise: 'exercise' },
+      dateFormat: null, defaultWeightUnit: 'kg', exerciseMappings: [],
+    };
+    const out = LB.wiBuildSessions([
+      ['Walking', '1781557953970', '1781561477527', 'Walking', '', '', '', '00:15:00'],
+    ], ['workout', 'start', 'end', 'exercise', 'weight', 'reps', 'time-per-500', 'time'], mapping, [], 'kg');
+    assert.strictEqual(out.invalidRows.length, 0);
+    assert.strictEqual(out.sessions[0].entries[0].sets[0].timeSec, 900);
+  });
+
   test('wiBuildSessions: accepts an AI mapping only as a display/library match', () => {
     const mapping = {
       columns: { date: 'Date', exercise: 'Exercise', weight: 'Load', reps: 'Reps' },

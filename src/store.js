@@ -719,6 +719,32 @@ function wiNumber(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function wiDurationSeconds(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const parts = raw.split(':');
+  if (parts.length === 2 || parts.length === 3) {
+    const numbers = parts.map(part => Number(part.replace(',', '.')));
+    const valid = numbers.every(Number.isFinite)
+      && numbers.every(n => n >= 0)
+      && numbers.slice(1).every(n => n < 60);
+    if (valid) {
+      const seconds = parts.length === 3
+        ? numbers[0] * 3600 + numbers[1] * 60 + numbers[2]
+        : numbers[0] * 60 + numbers[1];
+      return Math.round(seconds);
+    }
+  }
+  return wiNumber(raw);
+}
+
+function wiDurationIndex(headers, mappedIndex) {
+  const mappedName = mappedIndex >= 0 ? wiNormalizeName(headers[mappedIndex]) : '';
+  if (mappedIndex >= 0 && !/(?:per 500|pace|split)/.test(mappedName)) return mappedIndex;
+  const exact = new Set(['time', 'duration', 'duration seconds', 'duration sec', 'elapsed', 'elapsed time', 'seconds']);
+  return headers.findIndex(header => exact.has(wiNormalizeName(header)));
+}
+
 function wiRepValues(value) {
   const matches = String(value ?? '').match(/\d+(?:[.,]\d+)?/g) || [];
   return matches.map(v => Number(v.replace(',', '.'))).filter(Number.isFinite).map(v => Math.max(0, Math.round(v)));
@@ -884,6 +910,7 @@ function wiIsRepRange(value) {
 function wiBuildSessions(rows, headers, mapping, existingExercises, targetUnit) {
   const columns = mapping?.columns || {};
   const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
+  const durationIndex = wiDurationIndex(headers, idx.timeSec);
   const dateIndex = idx.date; const exerciseIndex = idx.exercise;
   if (dateIndex < 0 || exerciseIndex < 0) throw new Error('The AI could not identify both a date and an exercise column.');
   const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
@@ -899,7 +926,7 @@ function wiBuildSessions(rows, headers, mapping, existingExercises, targetUnit) 
     const reps = idx.reps >= 0 ? wiNumber(row[idx.reps]) : null;
     const repsL = idx.repsLeft >= 0 ? wiNumber(row[idx.repsLeft]) : null;
     const repsR = idx.repsRight >= 0 ? wiNumber(row[idx.repsRight]) : null;
-    const timeSec = idx.timeSec >= 0 ? wiNumber(row[idx.timeSec]) : null;
+    const timeSec = durationIndex >= 0 ? wiDurationSeconds(row[durationIndex]) : null;
     const hasValue = weight != null || reps != null || repsL != null || repsR != null || timeSec != null;
     if (!hasValue) { invalidRows.push(rowIndex + 2); return; }
     const sessionLabel = idx.session >= 0 && row[idx.session] ? String(row[idx.session]).trim().slice(0, 120) : 'Imported workout';
