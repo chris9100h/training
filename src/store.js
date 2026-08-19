@@ -784,6 +784,58 @@ function wiHeaderIndex(headers, name) {
   return idx >= 0 ? idx : -1;
 }
 
+// Some spreadsheet exports put a title and program metadata above the actual
+// header row. Find the first header-like row instead of assuming row one is
+// the table header. This is deliberately conservative: a real header must
+// name an exercise/movement/lift column, so a program title cannot win.
+function wiFindImportHeaderRow(rows) {
+  let best = -1; let bestScore = -1;
+  rows.slice(0, 40).forEach((row, rowIndex) => {
+    const names = row.map(wiNormalizeName);
+    const hasExercise = names.some(name => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(name) || name.includes(' exercise'));
+    if (!hasExercise) return;
+    const score = 20 + names.filter(name => /(^| )(date|session|workout|day|cycle|set|sets|rep|reps|weight|load|range|time)( |$)/.test(name)).length;
+    if (score > bestScore) { best = rowIndex; bestScore = score; }
+  });
+  return best >= 0 ? best : 0;
+}
+
+function wiImportTable(csvText) {
+  const allRows = wiParseCsv(csvText);
+  const headerRow = wiFindImportHeaderRow(allRows);
+  return { headers: allRows[headerRow], rows: allRows.slice(headerRow + 1), preamble: allRows.slice(0, headerRow) };
+}
+
+function wiImportPlanName(preamble, fallback) {
+  const programCell = (preamble || []).flat().map(v => String(v || '').trim()).find(v => /^(program|plan|routine)\s*:/i.test(v));
+  const named = programCell?.replace(/^(program|plan|routine)\s*:\s*/i, '').trim();
+  return (named || fallback || 'Imported plan').slice(0, 120);
+}
+
+function wiSetSeries(headers) {
+  const bySet = new Map();
+  headers.forEach((header, index) => {
+    const normalized = wiNormalizeName(header);
+    const match = normalized.match(/^(?:set|series)\s+(\d+)\s+(.+)$/);
+    if (!match) return;
+    const setNumber = Number(match[1]);
+    if (!Number.isInteger(setNumber) || setNumber < 1) return;
+    const entry = bySet.get(setNumber) || { setNumber, repsIndex: -1, typeIndex: -1 };
+    if (/rep range|reps?|repetitions?/.test(match[2])) entry.repsIndex = index;
+    if (/type|mode/.test(match[2])) entry.typeIndex = index;
+    bySet.set(setNumber, entry);
+  });
+  return [...bySet.values()].sort((a, b) => a.setNumber - b.setNumber);
+}
+
+function wiIsRepLadder(value) {
+  return /[\/]\s*\d/.test(String(value ?? ''));
+}
+
+function wiIsRepRange(value) {
+  return /\d\s*(?:-|[\u2013\u2014]|to)\s*\d/i.test(String(value ?? ''));
+}
+
 function wiBuildSessions(rows, headers, mapping, existingExercises, targetUnit) {
   const columns = mapping?.columns || {};
   const idx = Object.fromEntries(Object.entries(columns).map(([key, header]) => [key, wiHeaderIndex(headers, header)]));
@@ -839,12 +891,16 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
   if (exerciseIndex < 0) throw new Error('The AI could not identify an exercise column in this plan.');
   const existingByName = new Map((existingExercises || []).map(e => [wiNormalizeName(e.name), e]));
   const aiMap = new Map((mapping.exerciseMappings || []).map(m => [m.source, m]));
+  const series = wiSetSeries(headers);
   const groups = new Map();
   const invalidRows = [];
+  let previousDayName = '';
   rows.forEach((row, rowIndex) => {
     const sourceName = String(row[exerciseIndex] ?? '').trim().slice(0, 120);
-    if (!sourceName) { invalidRows.push(rowIndex + 2); return; }
-    const dayRaw = idx.day >= 0 && row[idx.day] ? String(row[idx.day]).trim() : 'Day 1';
+    if (!sourceName) return; // blank continuation/rest rows carry no exercise
+    const rawDay = idx.day >= 0 && row[idx.day] ? String(row[idx.day]).trim() : '';
+    if (rawDay) previousDayName = rawDay;
+    const dayRaw = rawDay || previousDayName || 'Day 1';
     const dayName = (dayRaw || 'Day 1').slice(0, 80);
     const dayKey = wiNormalizeName(dayName) || 'day 1';
     let group = groups.get(dayKey);
@@ -853,21 +909,33 @@ function wiBuildPlan(rows, headers, mapping, existingExercises, fallbackPlanName
     const aiMatch = aiMap.get(sourceName);
     const existing = (aiMatch?.existingName && existingByName.get(wiNormalizeName(aiMatch.existingName))) || existingByName.get(sourceNorm) || null;
     const itemKey = sourceNorm || sourceName.toLowerCase();
-    const setValues = wiRepValues(idx.reps >= 0 ? row[idx.reps] : '');
+    const repsRaw = idx.reps >= 0 ? row[idx.reps] : '';
+    const setValues = wiRepValues(repsRaw);
     const rangeValues = wiRepValues(idx.repsMax >= 0 ? row[idx.repsMax] : '');
     const ladderValues = wiRepValues(idx.repsPerSet >= 0 ? row[idx.repsPerSet] : '');
     const reps = setValues[0] ?? 8;
-    const repsMax = rangeValues[0] ?? (setValues.length > 1 ? setValues[setValues.length - 1] : null);
-    const repsPerSet = ladderValues.length > 1 ? ladderValues : (setValues.length > 1 && rangeValues.length === 0 ? setValues : null);
+    const repsMax = rangeValues[0] ?? (wiIsRepRange(repsRaw) && setValues.length > 1 ? setValues[setValues.length - 1] : null);
+    const repsPerSet = ladderValues.length > 1 ? ladderValues : (wiIsRepLadder(repsRaw) && setValues.length > 1 ? setValues : null);
     const hasSetColumn = idx.set >= 0 && String(row[idx.set] ?? '').trim() !== '';
     const requestedSets = idx.sets >= 0 ? wiNumber(row[idx.sets]) : null;
-    const setCount = Math.max(1, Math.round(hasSetColumn ? 1 : (requestedSets ?? 3)));
+    const seriesValues = series.map(s => ({
+      reps: s.repsIndex >= 0 ? String(row[s.repsIndex] ?? '').trim() : '',
+      type: s.typeIndex >= 0 ? String(row[s.typeIndex] ?? '').trim() : '',
+    }));
+    const seriesCount = seriesValues.filter(value => value.reps || value.type).length;
+    const setCount = Math.max(1, Math.round(hasSetColumn ? 1 : (seriesCount || requestedSets || 3)));
+    const seriesFirst = seriesValues.find(value => value.reps);
+    const seriesFirstValues = wiRepValues(seriesFirst?.reps || '');
+    const seriesReps = seriesFirstValues[0] ?? null;
+    const seriesMax = seriesFirstValues.length > 1 && wiIsRepRange(seriesFirst.reps) ? seriesFirstValues[seriesFirstValues.length - 1] : null;
+    const plannedReps = seriesReps ?? reps;
+    const plannedRepsMax = seriesMax ?? repsMax;
     const timeValue = idx.timeSec >= 0 ? wiNumber(row[idx.timeSec]) : null;
     let item = group._items.get(itemKey);
     if (!item) {
-      item = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: setCount, reps };
+      item = { exId: existing?.id || null, name: existing?.name || sourceName, sourceName, sets: setCount, reps: plannedReps };
       if (repsPerSet) { item.repsPerSet = repsPerSet; delete item.reps; }
-      else if (repsMax != null && repsMax > reps) item.repsMax = repsMax;
+      else if (plannedRepsMax != null && plannedRepsMax > plannedReps) item.repsMax = plannedRepsMax;
       if (timeValue != null) item.timeSecPerSet = Array.from({ length: setCount }, () => Math.max(0, Math.round(timeValue)));
       group._items.set(itemKey, item); group.items.push(item);
     } else if (hasSetColumn) {
@@ -920,8 +988,8 @@ async function wiExistingFingerprints(userId) {
 }
 
 async function previewWorkoutImport(csvText, userId, targetUnit, existingExercises = []) {
-  const rows = wiParseCsv(csvText);
-  const headers = rows.shift();
+  const table = wiImportTable(csvText);
+  const { headers, rows } = table;
   const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
   if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this CSV.');
   const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
@@ -943,8 +1011,8 @@ async function previewWorkoutImport(csvText, userId, targetUnit, existingExercis
 }
 
 async function previewWorkoutPlanImport(csvText, userId, targetUnit, existingExercises = [], fileName = '') {
-  const rows = wiParseCsv(csvText);
-  const headers = rows.shift();
+  const table = wiImportTable(csvText);
+  const { headers, rows } = table;
   const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
   if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this plan CSV.');
   const exerciseNames = [...new Set(rows.map(r => String(r[exerciseIndex] || '').trim()).filter(Boolean))].slice(0, 800);
@@ -954,7 +1022,7 @@ async function previewWorkoutPlanImport(csvText, userId, targetUnit, existingExe
   if (!res) throw new Error('Network error while mapping the plan.');
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data?.error || `Plan mapping failed (${res.status})`);
-  const built = wiBuildPlan(rows, headers, data, existingExercises, wiPlanNameFromFilename(fileName));
+  const built = wiBuildPlan(rows, headers, data, existingExercises, wiImportPlanName(table.preamble, wiPlanNameFromFilename(fileName)));
   const known = new Set((existingExercises || []).map(e => wiNormalizeName(e.name)));
   const unknown = [];
   const seenUnknown = new Set();
@@ -13766,7 +13834,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
+  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiImportTable, wiFindImportHeaderRow, wiImportPlanName, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,

@@ -7066,6 +7066,30 @@ async function testAsync(name, fn) {
     assert.strictEqual(out.days[0].items.length, 2);
   });
 
+  test('wiImportTable: skips spreadsheet title rows before the real header', () => {
+    const table = LB.wiImportTable('Program: PPL\nBlock 1\nCycle 1,Exercise,Notes\nPush,Bench,\n');
+    assert.strictEqual(JSON.stringify(table.headers), JSON.stringify(['Cycle 1', 'Exercise', 'Notes']));
+    assert.strictEqual(JSON.stringify(table.rows[0]), JSON.stringify(['Push', 'Bench', '']));
+    assert.strictEqual(LB.wiImportPlanName(table.preamble, 'fallback'), 'PPL');
+  });
+
+  test('wiBuildPlan: carries forward day labels and derives repeated set columns', () => {
+    const headers = ['Cycle 1', 'Exercise', 'Skipped', 'Set 1 Type', 'Set 1 Rep Range', 'Set 2 Type', 'Set 2 Rep Range', 'Set 3 Type', 'Set 3 Rep Range'];
+    const mapping = { columns: { day: 'Cycle 1', exercise: 'Exercise' }, exerciseMappings: [] };
+    const out = LB.wiBuildPlan([
+      ['Push 1', 'Bench Press', 'No', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12'],
+      ['', 'Incline Press', 'No', 'Standard Set', '10 - 15', 'Standard Set', '10 - 15', '', ''],
+      ['Rest', '', '', '', '', '', '', '', ''],
+      ['Pull 1', 'Cable Row', 'No', 'Standard Set', '8 - 12', 'Standard Set', '8 - 12', '', ''],
+    ], headers, mapping, []);
+    assert.strictEqual(JSON.stringify(out.days.map(d => d.name)), JSON.stringify(['Push 1', 'Pull 1']));
+    assert.strictEqual(out.days[0].items[0].sets, 3);
+    assert.strictEqual(out.days[0].items[0].reps, 8);
+    assert.strictEqual(out.days[0].items[0].repsMax, 12);
+    assert.strictEqual(out.days[0].items[1].sets, 2);
+    assert.strictEqual(out.days[1].items[0].sets, 2);
+  });
+
   test('wiSessionFingerprint: exact duplicate identity ignores entry order', () => {
     const a = { date: '2026-08-17', entries: [
       { name: 'Squat', sets: [{ kg: 100, reps: 5, done: true, skipped: false, warmup: false }] },
