@@ -1288,6 +1288,17 @@ function toResponse(field, raw, distUnit) {
   // Hydration is entered in the viewer's water unit (fl oz for lbs, else ml)
   // and stored canonically in ml, like distance stores meters.
   if (field.key === 'hydration_ml') { const n = parseInt(raw, 10); return isNaN(n) ? null : UI.waterEntryToMl(n); }
+  if (field.type === 'pace') {
+    // Pace is edited as two text inputs, so the form can briefly contain a
+    // half-entered value such as `:00` or `6:`. Do not submit those states;
+    // once both sides are present, store one canonical min:ss string.
+    const match = String(raw).match(/^(\d{1,2}):(\d{1,2})$/);
+    if (!match) return null;
+    const minutes = Number(match[1]);
+    const seconds = Number(match[2]);
+    if (!Number.isInteger(minutes) || !Number.isInteger(seconds) || minutes > 99 || seconds > 59) return null;
+    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+  }
   if (field.type === 'integer' || field.type === 'percent') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
   if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
   return raw; // text, stepper, choice
@@ -1387,22 +1398,28 @@ function FieldWidget({ field, value, onChange, distUnit, setDistUnit, inputStyle
     const colon = raw.indexOf(':');
     const mins = colon >= 0 ? raw.slice(0, colon) : raw;
     const secs = colon >= 0 ? raw.slice(colon + 1) : '';
-    const combine = (m, s) => {
-      const mm = m.replace(/\D/g, '').slice(0, 2);
-      const ss = s.replace(/\D/g, '').slice(0, 2);
+    // Keep the empty intermediate value while a user replaces one side of
+    // the pace. The old implementation immediately turned a cleared minute
+    // field into `0:00`, so iOS never gave the user a chance to type the new
+    // minutes. The canonical value is validated/normalised in toResponse at
+    // submit time; while editing, `:00` and `6:` are intentional states.
+    const combine = (part, next) => {
+      const clean = v => String(v ?? '').replace(/\D/g, '').slice(0, 2);
+      const mm = clean(part === 'minutes' ? next : mins);
+      const ss = clean(part === 'seconds' ? next : secs);
       if (!mm && !ss) { onChange(''); return; }
-      onChange(`${mm || '0'}:${(ss || '0').padStart(2, '0')}`);
+      onChange(`${mm}:${ss}`);
     };
     return (
       <>
         <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 4 }}>{lbl}</div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <input type="text" inputMode="numeric" min="0" max="99" placeholder="mm"
-            value={mins} onChange={e => combine(e.target.value, secs)}
+            value={mins} onChange={e => combine('minutes', e.target.value)}
             style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
           <span style={{ color: UI.inkFaint, fontFamily: UI.fontNum, fontSize: 18, lineHeight: 1, flexShrink: 0 }}>:</span>
           <input type="text" inputMode="numeric" min="0" max="59" placeholder="ss"
-            value={secs} onChange={e => combine(mins, e.target.value)}
+            value={secs} onChange={e => combine('seconds', e.target.value)}
             style={{ ...inputStyle, textAlign: 'center', flex: 1 }} />
         </div>
       </>
