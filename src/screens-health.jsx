@@ -4524,12 +4524,13 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
       : { id: LB.uid(), date: selectedDate, weight: null, steps: null, calories: null, protein: null, carbs: null, fat: null, fiber: null, waterMl: null, note: null, offPlanNote: null, coachFields: null, adherence, targetsSnap, updatedAt: now, createdAt: now };
     setStore(s => ({ ...s, dailyLogs: [log, ...(s.dailyLogs || []).filter(l => l.date !== selectedDate)] }));
   };
+  const weekStart = days[0];
   const sunday = days[6];
   // Month label for the week, spans two months at a boundary (e.g. "MAY – JUN").
   const mLabel = iso => new Date(iso + 'T12:00:00').toLocaleDateString('en-US', { month: 'short' }).toUpperCase();
-  const monthLabel = mLabel(monday) === mLabel(sunday)
-    ? `${mLabel(monday)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
-    : `${mLabel(monday)} – ${mLabel(sunday)}`;
+  const monthLabel = mLabel(weekStart) === mLabel(sunday)
+    ? `${mLabel(weekStart)} ${new Date(sunday + 'T12:00:00').getFullYear()}`
+    : `${mLabel(weekStart)} – ${mLabel(sunday)}`;
 
   return (
     <div style={{ flexShrink: 0, padding: '4px 16px 12px' }}>
