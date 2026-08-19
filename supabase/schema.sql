@@ -1191,21 +1191,33 @@ CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
 AS $function$
 declare
 begin
-  /* Each client may report on a different week boundary.  Keep this scoped
-     to reporting; plan/cycle weekdays use their own existing calculations. */
+  /* Each client may report on a different week boundary. Keep this scoped
+     to reporting; plan/cycle weekdays use their own existing calculations.
+     Resolve today's date in the client's own zone so a boundary-day report
+     is not delayed until the database's UTC midnight. */
   return query
   select
     c.id as coaching_id,
     (
       select ci.checked_in_at from zane_checkins ci
       where ci.coaching_id = c.id
-        and ci.week_start = current_date
-          - ((extract(isodow from current_date)::int - 1
-              - coalesce(greatest(0, least(6, us.week_start_day)), 0) + 7) % 7)
+        and ci.week_start = cfg.client_today
+          - ((extract(isodow from cfg.client_today)::int - 1
+              - cfg.week_start_day + 7) % 7)
       limit 1
     ) as checked_in_at
   from zane_coaching c
   left join zane_user_settings us on us.user_id = c.client_id
+  cross join lateral (
+    select
+      case
+        when nullif(trim(us.time_zone), '') is not null
+         and exists (select 1 from pg_timezone_names where name = trim(us.time_zone))
+          then (now() at time zone trim(us.time_zone))::date
+        else ((now() at time zone 'UTC') + make_interval(mins => coalesce(us.tz_offset_minutes, 0)))::date
+      end as client_today,
+      coalesce(greatest(0, least(6, us.week_start_day)), 0)::integer as week_start_day
+  ) cfg
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
     and c.status = 'active'
