@@ -1906,15 +1906,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }
     }; input.click();
   };
-  const readMigrationFile = async (file) => {
+  const readMigrationFile = async (file, mode = 'plan') => {
     if (!/\.xlsx$/i.test(file.name || '')) return file.text();
     if (typeof window.__ensureXLSX !== 'function') throw new Error('XLSX support could not be loaded. Connect once and try again.');
     const ExcelJS = await window.__ensureXLSX();
     const workbook = new ExcelJS.Workbook();
     await workbook.xlsx.load(await file.arrayBuffer());
-    const worksheet = workbook.worksheets?.[0];
-    if (!worksheet) throw new Error('The XLSX file does not contain a worksheet.');
-    const columnCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0);
     const csvCell = (cell) => {
       let value = cell?.text;
       if (value == null || value === '') {
@@ -1929,10 +1926,32 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       const text = value == null ? '' : String(value);
       return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
     };
-    const rows = [];
-    worksheet.eachRow({ includeEmpty: false }, row => {
-      rows.push(Array.from({ length: columnCount }, (_, index) => csvCell(row.getCell(index + 1))).join(','));
-    });
+    const normalizeHeader = value => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim().replace(/\s+/g, ' ');
+    const worksheetRows = worksheet => {
+      const columnCount = Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0);
+      const rows = [];
+      worksheet.eachRow({ includeEmpty: false }, row => {
+        rows.push(Array.from({ length: columnCount }, (_, index) => csvCell(row.getCell(index + 1))).join(','));
+      });
+      return rows;
+    };
+    const scoreWorksheet = worksheet => {
+      const sample = [];
+      let rowCount = 0;
+      worksheet.eachRow({ includeEmpty: false }, row => {
+        rowCount += 1;
+        if (sample.length < 40) sample.push(Array.from({ length: Math.max(worksheet.actualColumnCount || 0, worksheet.columnCount || 0) }, (_, index) => String(csvCell(row.getCell(index + 1))).replace(/^"|"$/g, '')));
+      });
+      const values = sample.flat().map(normalizeHeader);
+      const hasExercise = values.some(value => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(value));
+      const hasDate = values.some(value => /(^| )(date|workout date|session date|performed|logged|training date|started)( |$)/.test(value));
+      const requiredScore = mode === 'history' ? (hasExercise && hasDate ? 60 : 0) : (hasExercise ? 40 : 0);
+      return { worksheet, rowCount, score: requiredScore + Math.min(rowCount, 200) / 200 };
+    };
+    const candidates = (workbook.worksheets || []).map(scoreWorksheet).filter(candidate => candidate.rowCount > 0);
+    const selected = candidates.sort((a, b) => b.score - a.score || b.rowCount - a.rowCount)[0];
+    if (!selected) throw new Error('The XLSX file does not contain a worksheet with rows.');
+    const rows = worksheetRows(selected.worksheet);
     if (!rows.length) throw new Error('The XLSX file does not contain any rows.');
     return rows.join('\n');
   };
@@ -1946,7 +1965,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setDataSheet(false); setWorkoutImportSheet(true); setWorkoutImportPreview(null); setWorkoutImportError(null); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0); setWorkoutImportLoading(true);
       try {
         if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller date range and import it in two batches.');
-        const text = await readMigrationFile(file);
+        const text = await readMigrationFile(file, 'history');
         const preview = await LB.previewWorkoutImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || []);
         setWorkoutImportPreview(preview); setWorkoutImportStep(1); setWorkoutImportPreviewIndex(0);
       } catch (err) {
@@ -1972,7 +1991,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setPlanImportSheet(true); setPlanImportPreview(null); setPlanImportError(null); setPlanImportStep(1); setPlanImportDayIndex(0); setPlanImportLoading(true);
       try {
         if (file.size > 4_000_000) throw new Error('This CSV or XLSX is larger than 4 MB. Export a smaller plan and try again.');
-        const text = await readMigrationFile(file);
+        const text = await readMigrationFile(file, 'plan');
         const preview = await LB.previewWorkoutPlanImport(text, userId, LB.weightAxisUnit(store.settings?.unit), store.exercises || [], file.name);
         setPlanImportPreview(preview); setPlanImportStep(1); setPlanImportDayIndex(0);
       } catch (err) {

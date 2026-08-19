@@ -800,9 +800,22 @@ function wiFindImportHeaderRow(rows) {
   return best >= 0 ? best : 0;
 }
 
-function wiImportTable(csvText) {
+function wiFindHistoryHeaderRow(rows) {
+  let best = -1; let bestScore = -1;
+  rows.slice(0, 40).forEach((row, rowIndex) => {
+    const names = row.map(wiNormalizeName);
+    const hasExercise = names.some(name => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(name) || name.includes(' exercise'));
+    const hasDate = names.some(name => /(^| )(date|workout date|session date|performed|logged|training date|started)( |$)/.test(name));
+    if (!hasExercise || !hasDate) return;
+    const score = 40 + names.filter(name => /(^| )(session|workout|set|sets|rep|reps|weight|load|time|unit|done)( |$)/.test(name)).length;
+    if (score > bestScore) { best = rowIndex; bestScore = score; }
+  });
+  return best >= 0 ? best : wiFindImportHeaderRow(rows);
+}
+
+function wiImportTable(csvText, mode = 'plan') {
   const allRows = wiParseCsv(csvText);
-  const headerRow = wiFindImportHeaderRow(allRows);
+  const headerRow = mode === 'history' ? wiFindHistoryHeaderRow(allRows) : wiFindImportHeaderRow(allRows);
   return { headers: allRows[headerRow], rows: allRows.slice(headerRow + 1), preamble: allRows.slice(0, headerRow) };
 }
 
@@ -1011,7 +1024,7 @@ async function wiExistingFingerprints(userId) {
 }
 
 async function previewWorkoutImport(csvText, userId, targetUnit, existingExercises = []) {
-  const table = wiImportTable(csvText);
+  const table = wiImportTable(csvText, 'history');
   const { headers, rows } = table;
   const exerciseIndex = wiGuessColumn(headers, ['exercise', 'movement', 'lift', 'exercise name', 'movement name']);
   if (exerciseIndex < 0) throw new Error('Could not find an exercise column in this CSV.');
@@ -13857,7 +13870,7 @@ window.LB = {
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
   cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
-  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiImportTable, wiFindImportHeaderRow, wiImportPlanName, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
+  previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiImportTable, wiFindImportHeaderRow, wiFindHistoryHeaderRow, wiImportPlanName, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
