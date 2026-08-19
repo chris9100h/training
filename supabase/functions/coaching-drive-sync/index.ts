@@ -6,6 +6,8 @@
  * status only; the check-in row has already been committed independently.
  */
 
+import { isMissingStorageObjectResponse } from '../_shared/storage-cleanup.ts';
+
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -318,7 +320,8 @@ async function deleteStagingObject(path: string, tolerateMissing = true, timeout
   const res = await timedFetch(storageObjectUrl(path), {
     method: 'DELETE', headers: { Authorization: `Bearer ${serviceKey()}`, apikey: serviceKey() },
   }, timeoutMs);
-  if (res.ok || (tolerateMissing && res.status === 404)) return;
+  const body = res.status === 400 ? await res.text().catch(() => '') : '';
+  if (res.ok || (tolerateMissing && isMissingStorageObjectResponse(res.status, body))) return;
   const error = new Error(`staging photo delete ${res.status}`); (error as any).status = res.status;
   throw error;
 }
