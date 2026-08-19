@@ -118,9 +118,9 @@ function TopBar({ title, sub, onBack, right }) {
   return (
     <div style={{
       flexShrink: 0,
-      // iOS devices can smear the status-bar readout against a screen header;
-      // the extra clearance and backdrop keep the confirmed device fix intact.
-      padding: 'calc(env(safe-area-inset-top, 0px) + 30px) 22px 0',
+      // Keep a small, consistent visual gap below the OS safe area. The
+      // backdrop prevents the status-bar readout from smearing into the title.
+      padding: 'calc(env(safe-area-inset-top, 0px) + 4px) 22px 0',
       position: 'sticky', top: 0,
       background: 'rgba(var(--bg-rgb),0.97)',
       backdropFilter: 'blur(8px)',
@@ -1608,7 +1608,7 @@ function ScreenHead({ ref_, title, sub, right, onBack, style = {} }) {
   const { pressing, handlers } = useLongPressHome();
   return (
     <div style={{
-      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 34px) 22px 14px',
+      flexShrink: 0, padding: 'calc(env(safe-area-inset-top, 0px) + 4px) 22px 14px',
       position: 'relative', ...style,
     }}>
       {sub && (

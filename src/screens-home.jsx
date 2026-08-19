@@ -3084,8 +3084,8 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
         // Preview experiment: reserve only the system-reported safe area and
         // keep the blur layer off this sticky Home header. The former +28px
         // workaround, and then the compact +12px inset, both consumed useful
-        // vertical space; this keeps only the OS-required clearance.
-        padding: `env(safe-area-inset-top, 0px) 22px 0`,
+        // vertical space; this keeps the OS clearance plus a small 4px visual gap.
+        padding: `calc(env(safe-area-inset-top, 0px) + 4px) 22px 0`,
         position: 'sticky', top: 0, zIndex: 5,
         background: 'rgba(var(--bg-rgb),0.92)',
       }}>
