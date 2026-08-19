@@ -1872,25 +1872,64 @@ UI.alert = (message, { title = null, ok = 'OK' } = {}) => new Promise(resolve =>
   btn.focus();
 });
 
+// The browser does not expose a universal "installed somewhere" flag. What it
+// does expose reliably is the display mode of the CURRENT browsing context.
+// Keep this in one place so iOS, Android and desktop use the same answer. The
+// iOS-only navigator.standalone fallback is still needed for Safari's home
+// screen apps, which predate the display-mode media query.
+UI.pwaDisplayMode = () => {
+  if (typeof window === 'undefined' || typeof navigator === 'undefined') return 'browser';
+  if (navigator.standalone === true) return 'standalone';
+  if (typeof window.matchMedia !== 'function') return 'browser';
+  // These are app-like manifest modes. Deliberately leave fullscreen out: a
+  // page can enter fullscreen without being installed as a PWA.
+  for (const mode of ['standalone', 'minimal-ui', 'window-controls-overlay']) {
+    try {
+      if (window.matchMedia(`(display-mode: ${mode})`).matches) return mode;
+    } catch (_) { /* an older browser may reject an unknown media feature */ }
+  }
+  return 'browser';
+};
+
+UI.isStandalonePwa = () => UI.pwaDisplayMode() !== 'browser';
+
+UI.pwaInstallPlatform = () => {
+  if (typeof navigator === 'undefined') return 'desktop';
+  const ua = navigator.userAgent || '';
+  if (/iPhone|iPod|iPad/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1)) return 'ios';
+  if (/Android/i.test(ua)) return 'android';
+  return 'desktop';
+};
+
 // True when the app runs inside a third-party app's in-app browser (X,
 // Instagram, Facebook, TikTok, ...) rather than a real browser. Those WKWebView
-// or custom-tab environments frequently block cross-origin fetches to Supabase
-// (ITP, content blockers, request abort on backgrounding), which surfaces as a
-// bare "Load failed" on sign up or login. Heuristic, not exhaustive: it matches
-// the common UA tokens plus iOS WebViews that are neither Safari, nor a known
-// browser, nor an installed PWA.
+// and Android WebView environments frequently block cross-origin fetches to
+// Supabase (ITP, content blockers, request abort on backgrounding), which can
+// surface as a bare "Load failed" on sign up or login. This remains a
+// heuristic: browsers intentionally do not expose a standard "embedded in
+// another app" flag, so we combine known app tokens with the WebView markers
+// used by iOS and Android. An installed PWA must never be classified as one.
 UI.isInAppBrowser = () => {
-  if (typeof navigator === 'undefined') return false;
+  if (typeof navigator === 'undefined' || typeof window === 'undefined') return false;
+  if (UI.isStandalonePwa()) return false;
   const ua = navigator.userAgent || '';
   if (/FBAN|FBAV|FB_IAB|Instagram|Twitter|Line\/|MicroMessenger|Snapchat|TikTok|musical_ly|Pinterest|LinkedInApp|GSA\//i.test(ua)) return true;
+
   const isIOS = /iPhone|iPod|iPad/i.test(ua) && !window.MSStream;
   if (isIOS) {
+    // iOS WKWebViews omit Safari/Version, while Safari and the major iOS
+    // browsers advertise their own token (CriOS, FxiOS, EdgiOS, OPiOS).
     const isSafari = /Safari/i.test(ua) && /Version\//i.test(ua);
-    const isKnownBrowser = /CriOS|FxiOS|EdgiOS|OPiOS/i.test(ua);
-    const isStandalone = window.navigator.standalone === true;
-    if (!isSafari && !isKnownBrowser && !isStandalone) return true;
+    const isKnownBrowser = /CriOS|FxiOS|EdgiOS|OPiOS|DuckDuckGo/i.test(ua);
+    if (!isSafari && !isKnownBrowser) return true;
   }
-  return false;
+
+  // Android WebView normally contains "; wv" and Version/4.0. Do not use
+  // the absence of a Chrome token alone: custom tabs and Samsung/Firefox
+  // browsers intentionally have different but valid UAs.
+  const isAndroid = /Android/i.test(ua);
+  const isAndroidWebView = isAndroid && (/[;\s]wv\)/i.test(ua) || /Version\/4\.0/i.test(ua) && /Chrome\//i.test(ua));
+  return !!isAndroidWebView;
 };
 
 // Turn an auth or network error into a user-facing message. Auth errors can be
