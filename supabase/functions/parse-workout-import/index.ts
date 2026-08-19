@@ -51,7 +51,8 @@ does not contain it. Return exactly one JSON object and no markdown:
 Rules:
 - Use exact header strings from the supplied header list for columns, or null.
 - Date is required for a usable import. Prefer the column containing the workout date,
-  not the export timestamp or upload date.
+  not the upload date. A Unix timestamp in seconds or milliseconds is a valid workout
+  date source; map it to date and leave dateFormat null (the client handles the epoch).
 - Weight must be the load used for the set, reps the completed repetitions, and timeSec
   a duration in seconds. Do not use planned targets as completed values.
 - A source exercise may map to an existing name only when the match is unambiguous;

@@ -732,6 +732,16 @@ function wiPlanNameFromFilename(fileName) {
 function wiDate(value, format) {
   const raw = String(value ?? '').trim();
   if (!raw) return null;
+  // Workout apps often export start/end as Unix timestamps instead of
+  // formatted dates. Accept both seconds (10 digits) and milliseconds (13
+  // digits), using the device's local calendar date so an evening workout
+  // does not move to the previous UTC day for users outside Greenwich.
+  if (/^\d{10,13}$/.test(raw)) {
+    const numeric = Number(raw);
+    const epochMs = raw.length === 10 ? numeric * 1000 : numeric;
+    const epochDate = new Date(epochMs);
+    if (Number.isFinite(epochMs) && !Number.isNaN(epochDate.getTime())) return fmtISO(epochDate);
+  }
   let y, m, d;
   let match = raw.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
   if (match) [, y, m, d] = match.map(Number);
@@ -805,7 +815,7 @@ function wiFindHistoryHeaderRow(rows) {
   rows.slice(0, 40).forEach((row, rowIndex) => {
     const names = row.map(wiNormalizeName);
     const hasExercise = names.some(name => /^(exercise|exercise name|movement|movement name|lift|lift name)$/.test(name) || name.includes(' exercise'));
-    const hasDate = names.some(name => /(^| )(date|workout date|session date|performed|logged|training date|started)( |$)/.test(name));
+    const hasDate = names.some(name => /(^| )(date|workout date|session date|performed|logged|training date|started|start|timestamp|epoch)( |$)/.test(name));
     if (!hasExercise || !hasDate) return;
     const score = 40 + names.filter(name => /(^| )(session|workout|set|sets|rep|reps|weight|load|time|unit|done)( |$)/.test(name)).length;
     if (score > bestScore) { best = rowIndex; bestScore = score; }
