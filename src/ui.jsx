@@ -60,17 +60,71 @@ function localViewportLayerPosition() {
 
 // ─── Screen ─────────────────────────────────────────────────────────
 function Screen({ children, scroll = true, style = {} }) {
+  const screenRef = React.useRef(null);
+  const [contentCanScroll, setContentCanScroll] = React.useState(null);
+
+  React.useLayoutEffect(() => {
+    const node = screenRef.current;
+    if (!scroll || !node) {
+      setContentCanScroll(false);
+      return undefined;
+    }
+
+    let frame = 0;
+    const measure = () => {
+      if (frame) cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        frame = 0;
+        const next = node.scrollHeight > node.clientHeight + 1;
+        setContentCanScroll(prev => prev === next ? prev : next);
+      });
+    };
+
+    // A Screen's own box keeps the same height while its children grow after
+    // async data loads. Observe the direct children as well, so the lock is
+    // released as soon as a page genuinely becomes taller than the viewport.
+    const resizeObserver = typeof ResizeObserver !== 'undefined'
+      ? new ResizeObserver(measure)
+      : null;
+    const observeChildren = () => {
+      resizeObserver?.disconnect();
+      resizeObserver?.observe(node);
+      Array.from(node.children).forEach(child => resizeObserver?.observe(child));
+    };
+    observeChildren();
+    measure();
+
+    const mutationObserver = typeof MutationObserver !== 'undefined'
+      ? new MutationObserver(() => { observeChildren(); measure(); })
+      : null;
+    mutationObserver?.observe(node, { childList: true, subtree: true, characterData: true });
+
+    window.addEventListener('resize', measure, { passive: true });
+    window.visualViewport?.addEventListener('resize', measure, { passive: true });
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      resizeObserver?.disconnect();
+      mutationObserver?.disconnect();
+      window.removeEventListener('resize', measure);
+      window.visualViewport?.removeEventListener('resize', measure);
+    };
+  }, [scroll]);
+
   return (
-    <div style={{
+    <div ref={screenRef} style={{
       width: '100%', flex: 1, minHeight: 0,
       backgroundColor: UI.bg, backgroundImage: 'var(--bg-texture)', color: UI.ink, fontFamily: UI.fontUi,
       display: 'flex', flexDirection: 'column',
       overflow: scroll ? 'auto' : 'hidden',
+      overflowY: scroll
+        ? (contentCanScroll === false ? 'hidden' : 'auto')
+        : 'hidden',
       // A screen is a vertical page, not a horizontal canvas. Keep accidental
       // wide children from turning the whole route into a sideways scroll
       // surface; components that intentionally scroll sideways (chip strips,
       // tables) own their separate overflow container.
       overflowX: 'hidden',
+      overscrollBehaviorY: contentCanScroll ? 'contain' : 'none',
       // Inherits to every descendant (text-shadow is an inherited CSS
       // property) except where a surface with its own background, like Card,
       // Sheet, or a solid-fill Btn, resets it back to 'none'. 'none' outside
