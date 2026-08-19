@@ -899,7 +899,25 @@ async function commitWorkoutImport(preview, userId, options = {}) {
     const row = { id, user_id: userId, name: String(entry.name).slice(0, 120), tags: ['imported'], note: 'Imported from workout CSV', category: 'Imported', unilateral: false, equipment: null, progression_reps: null, movement_type: null, no_weight_reps: !hasWeight && !hasTime, log_mode: hasTime && !hasWeight ? 'time' : hasWeight ? 'weight_reps' : 'reps', pull_bodyweight: false, bodyweight_mode: null, youtube_url: null, note_pinned: false, progression_increment: null, horn_labels: null };
     newExerciseByName.set(norm, row); exerciseRows.push(row);
   }
-  const toWrite = sessions.map((s, index) => ({ ...s, id: `${preview.batchId}_s_${index}`, ended: `${s.date}T12:00:00.000Z`, date: `${s.date}T12:00:00.000Z`, startedAt: `${s.date}T12:00:00.000Z`, isFreestyle: true, entries: (s.entries || []).map(e => ({ ...e, exId: e.exId || newExerciseByName.get(wiNormalizeName(e.name))?.id || null })) }));
+  const toWrite = sessions.map((s, index) => {
+    // Preview-only fields are useful for the confirmation UI, but are not
+    // columns in zane_sessions. Strip them before the normal session mapper
+    // ever sees the import payload (otherwise PostgREST rejects `_index`,
+    // `fingerprint`, or `duplicate` as unknown columns).
+    const { _index, fingerprint, duplicate, ...session } = s;
+    return {
+      ...session,
+      id: `${preview.batchId}_s_${index}`,
+      ended: `${session.date}T12:00:00.000Z`,
+      date: `${session.date}T12:00:00.000Z`,
+      startedAt: `${session.date}T12:00:00.000Z`,
+      isFreestyle: true,
+      entries: (session.entries || []).map(e => {
+        const { sourceName, ...entry } = e;
+        return { ...entry, exId: entry.exId || newExerciseByName.get(wiNormalizeName(entry.name))?.id || null };
+      }),
+    };
+  });
   const chunk = 100;
   for (let i = 0; i < exerciseRows.length; i += chunk) {
     await scheduleDbTask(
@@ -3344,7 +3362,7 @@ function sessionToRow(s, userId) {
   // across the whole history on every device.
   // eslint-disable-next-line no-unused-vars
   // Cache-only metadata must never be sent to Postgres as if it were a column.
-  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, ...rest } = s;
+  const { currentExIdx, cyclePos, restStart, restDuration, scheduleId, dayId, dayName, startedAt, durationMinutes, feel, entries, aggVolume, aggDoneSets, aggExercises, isBonus, isFreestyle, isDeload, isCleanup, mesoRecap, readiness, signalWeight, progressionBumps, cleanupOptOuts, _offlineEntriesDigest, _index, fingerprint, duplicate, ...rest } = s;
   const row = { ...rest, schedule_id: scheduleId, day_id: dayId, day_name: dayName, user_id: userId };
   if (startedAt != null) row.started_at = startedAt;
   if (durationMinutes != null) row.duration_minutes = durationMinutes;
@@ -13637,7 +13655,7 @@ window.LB = {
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
-  normSet, stableJson, syncValuesEqual, // exported for tools/test/store.test.cjs
+  normSet, stableJson, syncValuesEqual, sessionToRow, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
   loadCoachingMacros, addCoachingMacros,
   diffSchedule,

@@ -1759,6 +1759,17 @@ async function testAsync(name, fn) {
     }
   });
 
+  test('sessionToRow strips workout-import preview metadata', () => {
+    const row = LB.sessionToRow({
+      id: 'import_s_0', date: '2026-08-17T12:00:00.000Z', ended: '2026-08-17T12:00:00.000Z',
+      _index: 0, fingerprint: 'abc', duplicate: false,
+      entries: [{ name: 'Bench Press', sourceName: 'Bench' }],
+    }, 'u1');
+    for (const key of ['_index', 'fingerprint', 'duplicate', 'entries']) {
+      assert.ok(!(key in row), `${key} must not be written to zane_sessions`);
+    }
+  });
+
   // ── historyWindowCutoffISO ────────────────────────────────────────────────
   test('historyWindowCutoffISO returns the date 70 days before now', () => {
     const cutoff = LB.historyWindowCutoffISO(new Date('2026-06-10T12:00:00Z'));
