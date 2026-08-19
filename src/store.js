@@ -13160,6 +13160,82 @@ function buildBlockRecap(sessions) {
   return { sessionCount: list.length, setGains, loadPRs, prCount, bestSession: best };
 }
 
+// Build the compact volume series shown in the manual progress recap. The
+// bucket follows the plan's own training unit: cycle plans use cycles, weekday
+// plans use seven-day meso weeks, and flex plans use trained rotations. Values
+// are averages per completed session inside each bucket, so a point is not
+// distorted by a week containing more or fewer training days. The first bucket
+// is intentionally allowed to be partial because a block can start mid-cycle.
+// Pure/testable; `sessions` is expected to already be scoped by blockSessions.
+function buildBlockVolumeTrend(sessions, schedule, mesoState, statusPeriods, exercises = [], dailyLogs = [], cycleStartDate = null) {
+  if (!schedule || !Array.isArray(sessions) || !sessions.length) return null;
+  const list = sessions
+    .filter(s => s && s.ended && !s.isDeload && (!schedule.id || s.scheduleId === schedule.id))
+    .slice()
+    .sort((a, b) => String(a.ended || a.date || '').localeCompare(String(b.ended || b.date || '')));
+  if (!list.length) return null;
+
+  const mode = isFlexPlan(schedule) ? 'rotation' : (isWeekdayPlan(schedule) ? 'week' : 'cycle');
+  const labels = { cycle: 'cycle', week: 'week', rotation: 'rotation' };
+  const dateOf = s => String(s.date || s.ended || '').slice(0, 10);
+  const firstDate = dateOf(list[0]);
+  const anchorTs = blockStartTs(mesoState, statusPeriods);
+  const anchorDate = anchorTs != null ? fmtISO(new Date(anchorTs)) : (mesoState?.startDate || firstDate);
+  const anchor = parseDate(anchorDate) || parseDate(firstDate);
+  const dayDiff = (iso, base) => {
+    const d = parseDate(iso);
+    return d && base ? Math.round((d - base) / 86400000) : 0;
+  };
+
+  let rawKeys;
+  if (mode === 'rotation') {
+    const dayIndex = {};
+    (schedule.days || []).forEach((d, i) => { if (d && d.id != null) dayIndex[d.id] = i; });
+    let rotation = 0;
+    let lastPos = -1;
+    let started = false;
+    rawKeys = list.map(s => {
+      const pos = dayIndex[s.dayId] != null ? dayIndex[s.dayId] : (s.cyclePos ?? s.cycle_pos);
+      const parsedPos = Number(pos);
+      const resolved = Number.isFinite(parsedPos) ? parsedPos : lastPos + 1;
+      if (started && resolved <= lastPos) rotation += 1;
+      lastPos = resolved;
+      started = true;
+      return rotation;
+    });
+  } else if (mode === 'week') {
+    rawKeys = list.map(s => Math.max(0, Math.floor(dayDiff(dateOf(s), anchor) / 7)));
+  } else {
+    const planDays = (getPlanDaysForDate(schedule, firstDate) || schedule.days || []).length || 1;
+    const cycleAnchor = schedule.versions?.length ? null : (parseDate(cycleStartDate) || anchor);
+    rawKeys = list.map(s => {
+      const n = getCycleNumForDate(schedule, dateOf(s));
+      return n != null ? n : Math.max(0, Math.floor(dayDiff(dateOf(s), cycleAnchor) / planDays));
+    });
+  }
+
+  const numericKeys = rawKeys.filter(Number.isFinite);
+  if (!numericKeys.length) return null;
+  const minKey = Math.min(...numericKeys);
+  const maxKey = Math.max(...numericKeys);
+  const buckets = new Map();
+  for (let key = minKey; key <= maxKey; key += 1) buckets.set(key, { volume: 0, sessions: 0 });
+  list.forEach((s, index) => {
+    const key = rawKeys[index];
+    if (!Number.isFinite(key)) return;
+    const bucket = buckets.get(key) || { volume: 0, sessions: 0 };
+    bucket.volume += Math.max(0, Number(totalVolume(s, exercises, dailyLogs)) || 0);
+    bucket.sessions += 1;
+    buckets.set(key, bucket);
+  });
+  const points = [...buckets.entries()].map(([key, bucket], index) => ({
+    label: `${mode === 'cycle' ? 'C' : mode === 'week' ? 'W' : 'R'}${index + 1}`,
+    averageVolume: bucket.sessions ? Math.round(bucket.volume / bucket.sessions) : 0,
+    sessionCount: bucket.sessions,
+  }));
+  return { unit: mode, unitLabel: labels[mode], points };
+}
+
 // Anti-nag deload governance (spec 5.3). PURE. Given the persisted autoreg_state,
 // the count of block sessions so far (the cooldown clock, spec 10 counts sessions
 // not days), and whether the detector still flags a ceiling this finish, decide
@@ -14091,7 +14167,7 @@ window.LB = {
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,
-  blockStartTs, blockSessions, buildBlockRecap, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
+  blockStartTs, blockSessions, buildBlockRecap, buildBlockVolumeTrend, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,

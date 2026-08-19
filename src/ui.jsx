@@ -2632,8 +2632,53 @@ const PLATE_SIZE_KG = { 25: 70, 20: 64, 15: 60, 10: 56, 5: 48, 2.5: 42, 1.25: 36
 const PLATE_COLORS_LBS = { 55:'#c0392b', 45:'#2471a3', 35:'#b7950b', 25:'#1e8449', 10:'#808b96', 5:'#1a1a1a', 2.5:'#ca6f1e', 1.25:'#808b96' };
 const PLATE_SIZE_LBS = { 55: 70, 45: 64, 35: 56, 25: 48, 10: 42, 5: 36, 2.5: 30, 1.25: 28 };
 
+function VolumeTrendChart({ trend }) {
+  const points = Array.isArray(trend?.points) ? trend.points : [];
+  if (!points.length) return null;
+  const width = 340;
+  const height = 154;
+  const left = 48;
+  const right = 12;
+  const top = 14;
+  const bottom = 28;
+  const plotWidth = width - left - right;
+  const plotHeight = height - top - bottom;
+  const values = points.map(p => Math.max(0, Number(p.averageVolume) || 0));
+  const max = Math.max(...values, 1);
+  const min = Math.min(...values, 0);
+  const range = max - min || 1;
+  const xAt = i => points.length === 1 ? left + plotWidth / 2 : left + (i / (points.length - 1)) * plotWidth;
+  const yAt = value => top + ((max - value) / range) * plotHeight;
+  const fmt = value => Math.round(value).toLocaleString('en-US');
+  const polyline = points.map((p, i) => `${xAt(i)},${yAt(values[i])}`).join(' ');
+  const labelStep = points.length > 8 ? Math.ceil(points.length / 8) : 1;
+  const gridValues = [max, min + range / 2, min];
+  return (
+    <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 10px 8px', marginBottom: 16 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
+        <div className="micro" style={{ color: UI.inkFaint }}>AVG VOLUME PER {String(trend.unitLabel || 'unit').toUpperCase()}</div>
+        <div className="micro" style={{ color: UI.inkFaint }}>SINCE BLOCK START</div>
+      </div>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Average volume per ${trend.unitLabel || 'unit'} since block start`} style={{ display: 'block', width: '100%', height: 'auto', overflow: 'visible' }}>
+        {gridValues.map((value, i) => {
+          const y = yAt(value);
+          return <g key={i}>
+            <line x1={left} x2={width - right} y1={y} y2={y} stroke={UI.hairStrong} strokeWidth="1" strokeDasharray={i === 2 ? undefined : '3 4'} />
+            <text x={left - 7} y={y + 3} textAnchor="end" fill={UI.inkFaint} fontFamily={UI.fontNum} fontSize="8">{fmt(value)}</text>
+          </g>;
+        })}
+        <polyline points={polyline} fill="none" stroke="var(--accent)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />
+        {points.map((point, i) => <g key={point.label + i}>
+          <circle cx={xAt(i)} cy={yAt(values[i])} r="4" fill={UI.bgInset} stroke="var(--accent)" strokeWidth="2" />
+          {(i % labelStep === 0 || i === points.length - 1) && <text x={xAt(i)} y={height - 8} textAnchor="middle" fill={UI.inkSoft} fontFamily={UI.fontUi} fontSize="9">{point.label}</text>}
+        </g>)}
+      </svg>
+    </div>
+  );
+}
+
 // Shared block recap used by Home, Training and Library confirmation sheets.
-function BlockRecap({ recap, evidence = null, escalation = 0 }) {
+function BlockRecap({ recap, evidence = null, escalation = 0, volumeTrend = null }) {
   const u = UI.unit();
   const tile = (k, v) => (
     <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
@@ -2647,6 +2692,7 @@ function BlockRecap({ recap, evidence = null, escalation = 0 }) {
         {tile('Weight PRs', recap.prCount)}
         {tile('Sessions', recap.sessionCount)}
       </div>
+      {volumeTrend && <VolumeTrendChart trend={volumeTrend} />}
       {recap.loadPRs.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
         <div className="knurl" style={{ marginBottom: 10 }} />

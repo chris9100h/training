@@ -5984,6 +5984,34 @@ async function testAsync(name, fn) {
       assert.strictEqual(r.loadPRs.length, 0, 'a cut is never a load PR');
       assert.strictEqual(r.bestSession, null);
     });
+
+    const volumeSession = (id, date, kg, opts = {}) => ({
+      id, scheduleId: opts.scheduleId || 'p', date, ended: `${date}T10:00:00Z`, dayId: opts.dayId,
+      entries: [{ exId: 'volume-ex', sets: [{ kg, reps: 1 }] }],
+    });
+    test('buildBlockVolumeTrend: weekday points average volume per week from block start', () => {
+      const schedule = { id: 'p', mode: 'weekday', days: [{ id: 'mon', weekday: 0 }] };
+      const ms = { scheduleId: 'p', startedAt: '2026-07-01T00:00:00Z', startDate: '2026-07-01' };
+      const trend = LB.buildBlockVolumeTrend([
+        volumeSession('a', '2026-07-02', 100),
+        volumeSession('b', '2026-07-08', 200),
+      ], schedule, ms, [], [], []);
+      assert.strictEqual(trend.unit, 'week');
+      assert.deepStrictEqual(Array.from(trend.points, p => p.label), ['W1', 'W2']);
+      assert.deepStrictEqual(Array.from(trend.points, p => p.averageVolume), [100, 200]);
+    });
+    test('buildBlockVolumeTrend: flex points follow rotations, not calendar weeks', () => {
+      const schedule = { id: 'p', is_flex: true, days: [{ id: 'a' }, { id: 'b' }] };
+      const ms = { scheduleId: 'p', startedAt: '2026-07-01T00:00:00Z', startDate: '2026-07-01' };
+      const trend = LB.buildBlockVolumeTrend([
+        volumeSession('a', '2026-07-02', 100, { dayId: 'a' }),
+        volumeSession('b', '2026-07-03', 200, { dayId: 'b' }),
+        volumeSession('c', '2026-07-04', 300, { dayId: 'a' }),
+      ], schedule, ms, [], [], []);
+      assert.strictEqual(trend.unit, 'rotation');
+      assert.deepStrictEqual(Array.from(trend.points, p => p.label), ['R1', 'R2']);
+      assert.deepStrictEqual(Array.from(trend.points, p => p.averageVolume), [150, 300]);
+    });
   }
 
   // ── Autoreg v2 P2: anti-nag deload governance ────────────────────────────────

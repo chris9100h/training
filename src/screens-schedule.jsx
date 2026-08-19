@@ -212,12 +212,22 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
       await confirm('Progress recap is available once this plan has an active autoregulated or mesocycle block.', { title: 'Show progress', ok: 'Got it', cancel: null });
       return;
     }
-    const recap = LB.buildBlockRecap(LB.blockSessions(store.sessions, mesoState, store.statusPeriods));
+    const blockSess = LB.blockSessions(store.sessions, mesoState, store.statusPeriods);
+    const recap = LB.buildBlockRecap(blockSess);
     if (!recap || recap.sessionCount === 0) {
       await confirm('There is no completed training in the current block yet. Keep training and your progress will appear here.', { title: 'Show progress', ok: 'Got it', cancel: null });
       return;
     }
-    await confirm(<BlockRecap recap={recap} />, { title: 'Your progress so far', ok: 'Done', cancel: null, preventBackdropClose: true });
+    const volumeTrend = LB.buildBlockVolumeTrend(
+      blockSess,
+      schedule,
+      mesoState,
+      store.statusPeriods,
+      store.exercises,
+      store.dailyLogs,
+      store.cycleStartDate,
+    );
+    await confirm(<BlockRecap recap={recap} volumeTrend={volumeTrend} />, { title: 'Your progress so far', ok: 'Done', cancel: null, preventBackdropClose: true });
   };
 
   const importPlan = (e) => {
