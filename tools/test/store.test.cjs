@@ -289,6 +289,21 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.todayISO(), expected);
   });
 
+  test('reporting week helpers support a configurable boundary without changing plan math', () => {
+    assert.strictEqual(LB.normalizeWeekStartDay(5), 5);
+    assert.strictEqual(LB.normalizeWeekStartDay('6'), 6);
+    assert.strictEqual(LB.normalizeWeekStartDay(-1), 0);
+    assert.strictEqual(LB.normalizeWeekStartDay(9), 0);
+    assert.strictEqual(LB.reportingWeekStartISO('2026-08-15', 5), '2026-08-15', 'Saturday starts Saturday–Friday');
+    assert.strictEqual(LB.reportingWeekEndISO('2026-08-15'), '2026-08-21');
+    assert.strictEqual(LB.reportingWeekStartISO('2026-08-20', 5), '2026-08-15');
+    assert.strictEqual(LB.previousReportingWeekStartISO('2026-08-15', 5), '2026-08-08');
+    assert.strictEqual(LB.reportingWeekEndsToday('2026-08-21', 5), true);
+    assert.strictEqual(LB.reportingWeekEndsToday('2026-08-22', 5), false);
+    assert.strictEqual(LB.checkinWeekStart(5, new Date('2026-08-22T12:00:00Z')), '2026-08-15');
+    assert.strictEqual(LB.checkinWeekStart(0, new Date('2026-08-17T12:00:00Z')), '2026-08-10', 'Monday remains the default');
+  });
+
   test('saveSyncedState stores one atomic pair entry and loadLocalState reuses it as the base', () => {
     const state = { user: { name: 'A' }, sessions: [] };
     assert.strictEqual(LB.saveSyncedState(state, 'cache-user'), true);

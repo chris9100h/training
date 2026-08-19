@@ -143,13 +143,13 @@ function writeCoachReviewQueue(value) {
   } catch (_) {}
 }
 
-function CoachNeedsAttention({ clients, checkinMap, unreadNotes, go, onRequestCheckin }) {
+function CoachNeedsAttention({ clients, checkinMap, unreadNotes, go, onRequestCheckin, weekStartDay = 0 }) {
   const [dismissed, setDismissed] = useStateC(readCoachReviewQueue);
   const [expanded, setExpanded] = useStateC(false);
   const [requested, setRequested] = useStateC({});
   const activeClients = (clients || []).filter(c => c.status === 'active');
   const clientById = new Map(activeClients.map(c => [c.clientId, c]));
-  const weekStart = LB.checkinWeekStart?.() || new Date().toISOString().slice(0, 10);
+  const weekStart = LB.checkinWeekStart?.(weekStartDay) || new Date().toISOString().slice(0, 10);
   const items = [];
 
   const isDismissed = key => !!dismissed[key];
@@ -512,6 +512,7 @@ function CoachingTabCoachView({ store, setStore, userId, go, hideTopBar = false 
         unreadNotes={unreadNotes.filter(n => !n.coachingId?.startsWith('support_'))}
         go={go}
         onRequestCheckin={handleRequestCheckin}
+        weekStartDay={store.settings?.weekStartDay}
       />
 
       {allClients.length === 0 ? (
@@ -1685,15 +1686,16 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
   const deleteCheckinTemplate = (id) => {
     setStore(s => ({ ...s, checkinSchemaTemplates: (s.checkinSchemaTemplates || []).filter(t => t.id !== id) }));
   };
-  const weekStart = LB.checkinWeekStart();
-  // Check-ins cover Mon–Sun. On Sunday the current week isn't over yet, only
-  // allow submission from Monday onwards (day 1; Sunday = 0 in JS getDay()).
-  const canSubmitToday = new Date().getDay() !== 0;
-  // Monday of the current training week (what's accumulating right now for the upcoming check-in)
-  const previewWeekStart = (() => {
-    const t = new Date(); const d = t.getDay();
-    const m = new Date(t); m.setDate(t.getDate() - (d === 0 ? 6 : d - 1));
-    return LB.fmtISO(m);
+  const weekStartDay = LB.normalizeWeekStartDay(store?.settings?.weekStartDay);
+  const weekStart = LB.checkinWeekStart(weekStartDay);
+  // The configured last day is still part of the current week, so the form
+  // opens from the boundary day onward. On that boundary day the preview shows
+  // the newly started week while the submitted form covers the previous one.
+  const canSubmitToday = !LB.reportingWeekEndsToday(new Date(), weekStartDay);
+  const previewWeekStart = LB.reportingWeekStartISO(new Date(), weekStartDay);
+  const reportingWeekLabel = (() => {
+    const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return `${names[weekStartDay]}–${names[(weekStartDay + 6) % 7]}`;
   })();
   const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
   const [photosEnabled, setPhotosEnabled] = useStateC(false);
@@ -1787,7 +1789,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
         <div style={{ padding: '10px 14px 0', flexShrink: 0 }}>
           <div style={{ fontSize: 12, color: UI.inkSoft, fontFamily: UI.fontUi, lineHeight: 1.5 }}>
             {isNew
-              ? <>Week of <strong>{fmtWeek(formWeek)}</strong>. Covers Mon–Sun of last week.</>
+              ? <>Week of <strong>{fmtWeek(formWeek)}</strong>. Covers {reportingWeekLabel} of last week.</>
               : <>Editing <strong>week of {fmtWeek(formWeek)}</strong>. The change is logged to your coach.</>}
           </div>
           <button onClick={() => setEditTarget(null)} style={{ background: 'transparent', border: 'none', fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, cursor: 'pointer', padding: '4px 0' }}>← Cancel</button>
@@ -1831,19 +1833,17 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               Submit this week's check-in
             </button>
           )}
-          {/* Sunday only (!canSubmitToday). The preview shows previewWeekStart,
-              the CURRENT in-progress week, which is independent of weekStart's
-              submission status, so it must NOT be gated on !thisWeek: since
-              checkinWeekStart now correctly points weekStart at last week on
-              Sunday (already submitted → thisWeek truthy), gating on !thisWeek
-              would wrongly hide the preview whenever last week was checked in. */}
+          {/* The reporting week's last day only (!canSubmitToday). The preview
+              shows previewWeekStart, the CURRENT in-progress week, which is
+              independent of weekStart's submission status, so it must NOT be
+              gated on !thisWeek. */}
           {checkinEnabled && !canSubmitToday && previewResponses && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ flex: 1, background: previewOpen ? `rgba(var(--accent-rgb),0.18)` : `rgba(var(--accent-rgb),0.11)`, border: `var(--hair-width) solid rgba(var(--accent-rgb),0.25)`, borderRadius: 6, textShadow: 'none', padding: '12px 14px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkSoft, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>
               {previewOpen ? 'Close preview' : 'Preview this week'}
             </button>
           )}
-          {previewResponses && canSubmitToday && new Date().getDay() !== 1 && (
+          {previewResponses && canSubmitToday && LB.isoWd(new Date()) !== weekStartDay && (
             <button onClick={() => setPreviewOpen(v => !v)}
               style={{ background: previewOpen ? `rgba(var(--accent-rgb),0.22)` : UI.bgInset, border: `${previewOpen ? '1.5px' : 'var(--hair-width)'} solid ${previewOpen ? 'var(--accent)' : UI.hairStrong}`, borderRadius: 6, textShadow: 'none', padding: '11px 13px', cursor: 'pointer', color: previewOpen ? 'var(--accent)' : UI.inkFaint, fontSize: 15, lineHeight: 1, flexShrink: 0 }}>
               <i className="fa-solid fa-eye" />

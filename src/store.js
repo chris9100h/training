@@ -1649,6 +1649,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     pushover_user_key: sett.pushoverUserKey ?? null,
     use_pushover: sett.usePushover ?? false,
     cycle_week_view: sett.cycleWeekView ?? false,
+    week_start_day: normalizeWeekStartDay(sett.weekStartDay),
     accent_color: sett.accentColor ?? 'copper',
     dark_mode: sett.darkMode ?? 'dark',
     custom_day_types: backup.customDayTypes ?? [],
@@ -2457,6 +2458,9 @@ function mapUserSettings(sett = {}) {
     pushoverUserKey: sett.pushover_user_key ?? null,
     usePushover: sett.use_pushover ?? false,
     cycleWeekView: sett.cycle_week_view ?? false,
+    // Reporting-only week boundary. Training plan weekdays and cycle math stay
+    // calendar-based; this setting affects weekly summaries and check-ins.
+    weekStartDay: normalizeWeekStartDay(sett.week_start_day),
     accentColor: sett.accent_color ?? 'copper',
     darkMode: sett.dark_mode ?? 'dark',
     tempoEnabled: sett.tempo_enabled ?? false,
@@ -4128,6 +4132,7 @@ async function syncStore(prev, next, userId) {
     prev.settings?.pushoverUserKey  !== next.settings?.pushoverUserKey  ||
     prev.settings?.usePushover      !== next.settings?.usePushover      ||
     prev.settings?.cycleWeekView   !== next.settings?.cycleWeekView   ||
+    prev.settings?.weekStartDay    !== next.settings?.weekStartDay    ||
     prev.settings?.accentColor      !== next.settings?.accentColor      ||
     prev.settings?.darkMode         !== next.settings?.darkMode          ||
     prev.settings?.tempoEnabled       !== next.settings?.tempoEnabled       ||
@@ -4209,6 +4214,7 @@ async function syncStore(prev, next, userId) {
       pushover_user_key: next.settings?.pushoverUserKey ?? null,
       use_pushover: next.settings?.usePushover ?? false,
       cycle_week_view: next.settings?.cycleWeekView ?? false,
+      week_start_day: normalizeWeekStartDay(next.settings?.weekStartDay),
       accent_color: next.settings?.accentColor ?? 'copper',
       dark_mode: next.settings?.darkMode ?? 'dark',
       tempo_enabled: next.settings?.tempoEnabled ?? false,
@@ -4518,6 +4524,47 @@ function parseDate(s) {
 
 // ISO weekday from a Date: 0=Mon … 6=Sun
 function isoWd(d) { return (d.getDay() + 6) % 7; }
+
+// User-facing reporting weeks are configurable, but always use the same
+// ISO-indexed representation as isoWd: 0 = Monday … 6 = Sunday.  Keep this
+// separate from training-plan/cycle boundaries: a plan's real weekdays and
+// mesocycle windows must never move just because a user reports to a coach on
+// a different day.
+function normalizeWeekStartDay(value) {
+  const n = Number(value);
+  return Number.isInteger(n) && n >= 0 && n <= 6 ? n : 0;
+}
+
+// Most recent configured reporting-week boundary containing `date`.
+// `date` may be a Date or a local YYYY-MM-DD string. Noon anchoring keeps the
+// calculation stable across DST transitions and deliberately follows the
+// app's local-calendar-date convention rather than UTC.
+function reportingWeekStartISO(date = new Date(), weekStartDay = 0) {
+  const candidate = date instanceof Date ? new Date(date.getTime()) : parseDate(String(date || ''));
+  const parsed = candidate && !Number.isNaN(candidate.getTime()) ? candidate : new Date();
+  parsed.setHours(12, 0, 0, 0);
+  const start = normalizeWeekStartDay(weekStartDay);
+  const offset = (isoWd(parsed) - start + 7) % 7;
+  parsed.setDate(parsed.getDate() - offset);
+  return fmtISO(parsed);
+}
+
+function reportingWeekEndISO(weekStart) {
+  return shiftDate(weekStart, 6);
+}
+
+// The check-in submitted on the configured boundary day represents the week
+// that just ended. This is the generalized form of the old Monday–Sunday
+// behaviour: Saturday reporters submit the previous Saturday–Friday window.
+function previousReportingWeekStartISO(date = new Date(), weekStartDay = 0) {
+  return shiftDate(reportingWeekStartISO(date, weekStartDay), -7);
+}
+
+function reportingWeekEndsToday(date = new Date(), weekStartDay = 0) {
+  const candidate = date instanceof Date ? new Date(date.getTime()) : parseDate(String(date || ''));
+  const d = candidate && !Number.isNaN(candidate.getTime()) ? candidate : new Date();
+  return isoWd(d) === ((normalizeWeekStartDay(weekStartDay) + 6) % 7);
+}
 
 // Sunday of the week that starts on weekStart (YYYY-MM-DD) → YYYY-MM-DD
 function weekEnd(weekStart) {
@@ -7563,12 +7610,8 @@ function normalizeSocialMetricSlots(raw) {
 
 window.SocialMetricCatalog = SOCIAL_METRIC_CATALOG;
 
-function socialWeekStartISO(date = new Date()) {
-  const d = new Date(date);
-  d.setHours(12, 0, 0, 0);
-  const mondayOffset = (d.getDay() + 6) % 7;
-  d.setDate(d.getDate() - mondayOffset);
-  return fmtISO(d);
+function socialWeekStartISO(date = new Date(), weekStartDay = 0) {
+  return reportingWeekStartISO(date, weekStartDay);
 }
 
 function mapSocialProfile(p) {
@@ -8938,20 +8981,12 @@ async function requestCheckin(coachingId, userId) {
   await unwrap(_supabase.from('zane_coaching').update({ checkin_requested_at: new Date().toISOString() }).eq('id', coachingId));
 }
 
-function checkinWeekStart() {
-  const today = new Date();
-  // Check-ins cover Mon–Sun. Sunday is the LAST day of its week, not a fresh
-  // start, treating it as day 0 (like plain getDay() does) flipped this to
-  // the not-yet-finished current week a full day early, before that Sunday's
-  // own daily log (macros/steps) even exists. isoWd(today)+1 keeps Sunday
-  // counted as day 7 of its own week, so the "due" week only advances once
-  // Monday actually arrives.
-  const daysSinceSunday = isoWd(today) + 1;
-  const lastSunday = new Date(today);
-  lastSunday.setDate(today.getDate() - daysSinceSunday);
-  const monday = new Date(lastSunday);
-  monday.setDate(lastSunday.getDate() - 6);
-  return fmtISO(monday);
+function checkinWeekStart(weekStartDay = 0, date = new Date()) {
+  // The boundary day is the first day of a new reporting week, so a check-in
+  // submitted on that day covers the reporting week that just ended. This is
+  // the old Monday–Sunday rule generalized for users who report on another
+  // day (for example Saturday–Friday).
+  return previousReportingWeekStartISO(date, weekStartDay);
 }
 
 // responses = plain object with snake_case keys matching the form schema fields.
@@ -13865,7 +13900,7 @@ window.LB = {
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   resignSocialAttachment,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, normalizeWeekStartDay, reportingWeekStartISO, reportingWeekEndISO, previousReportingWeekStartISO, reportingWeekEndsToday, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,

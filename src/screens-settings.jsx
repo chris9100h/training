@@ -1079,7 +1079,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     let live = true;
     setSocialProfileLoading(true);
     setSocialProfileLoadError(null);
-    LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force: socialProfileRetry > 0 }).then(friends => {
+    LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force: socialProfileRetry > 0 }).then(friends => {
       if (live) setStore(s => s ? {
         ...s,
         friends: {
@@ -1094,7 +1094,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       if (live) setSocialProfileLoading(false);
     });
     return () => { live = false; };
-  }, [friendsSheet, store.settings?.showFriendsTab, !!store.friends?.loadedAt, userId, socialProfileRetry]);
+  }, [friendsSheet, store.settings?.showFriendsTab, store.settings?.weekStartDay, !!store.friends?.loadedAt, userId, socialProfileRetry]);
 
   const saveSocialProfile = async next => {
     if (!next || socialProfileSaving) return;
@@ -2810,6 +2810,34 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             {coachingTabLocked
               ? 'The coaching tab stays pinned while a coaching relationship is active.'
               : 'Pin the coaching tab to the nav bar. Shows automatically when a coaching relationship is active.'}
+          </div>
+          <div style={{ marginTop: 16 }}>
+            <Row label="Reporting week starts">
+              <select
+                value={LB.normalizeWeekStartDay(store.settings?.weekStartDay)}
+                onChange={e => patchSettings({ weekStartDay: LB.normalizeWeekStartDay(e.target.value) })}
+                aria-label="Reporting week starts"
+                style={{
+                  minWidth: 118,
+                  background: UI.bgInset,
+                  border: `var(--hair-width) solid ${UI.hairStrong}`,
+                  borderRadius: 5,
+                  color: UI.ink,
+                  padding: '7px 8px',
+                  fontFamily: UI.fontUi,
+                  fontSize: 12,
+                  colorScheme: 'dark',
+                }}
+              >
+                {[
+                  ['Monday', 0], ['Tuesday', 1], ['Wednesday', 2], ['Thursday', 3],
+                  ['Friday', 4], ['Saturday', 5], ['Sunday', 6],
+                ].map(([label, value]) => <option key={value} value={value}>{label}</option>)}
+              </select>
+            </Row>
+            <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, marginTop: 6, lineHeight: 1.5 }}>
+              Sets the week used by Health summaries, Friends metrics and coach check-ins. Training-plan days stay unchanged.
+            </div>
           </div>
           {coachingTabOn && (
             <div style={{ marginTop: 12 }}>

@@ -2533,11 +2533,11 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     // optional coaching photos here; the coach/client Check-ins tab loads them
     // when it actually renders the check-in card.
     LB.loadCheckins(coachingId, { includePhotos: false }).then(rows => {
-      const weekStart = LB.checkinWeekStart();
+      const weekStart = LB.checkinWeekStart(store.settings?.weekStartDay);
       const thisWeek = rows.find(r => r.weekStart === weekStart);
       setCheckinDue(!thisWeek);
     }).catch(() => setCheckinDue(false));
-  }, [store.coaching]);
+  }, [store.coaching, store.settings?.weekStartDay]);
 
   useEffect(() => {
     const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;

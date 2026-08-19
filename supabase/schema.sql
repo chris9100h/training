@@ -393,6 +393,9 @@ CREATE TABLE public.zane_user_settings (
   rest_small integer DEFAULT 90,
   auto_open_rest_timer boolean NOT NULL DEFAULT false,
   cycle_week_view boolean DEFAULT false,
+  -- Reporting-only boundary for weekly summaries, Friends metrics and coach check-ins.
+  -- 0 = Monday ... 6 = Sunday; training-plan weekdays are unaffected.
+  week_start_day smallint NOT NULL DEFAULT 0 CHECK (week_start_day BETWEEN 0 AND 6),
   accent_color text DEFAULT 'gold'::text,
   dark_mode text DEFAULT 'dark'::text,
   pushover_user_key text,
@@ -1187,22 +1190,22 @@ CREATE OR REPLACE FUNCTION public.get_coach_checkin_status()
  SET search_path TO 'public'
 AS $function$
 declare
-  v_week_start date;
 begin
-  v_week_start := current_date
-    - (extract(isodow from current_date)::int) * interval '1 day'
-    - interval '6 days';
-
+  /* Each client may report on a different week boundary.  Keep this scoped
+     to reporting; plan/cycle weekdays use their own existing calculations. */
   return query
   select
     c.id as coaching_id,
     (
       select ci.checked_in_at from zane_checkins ci
       where ci.coaching_id = c.id
-        and ci.week_start = v_week_start
+        and ci.week_start = current_date
+          - ((extract(isodow from current_date)::int - 1
+              - coalesce(greatest(0, least(6, us.week_start_day)), 0) + 7) % 7)
       limit 1
     ) as checked_in_at
   from zane_coaching c
+  left join zane_user_settings us on us.user_id = c.client_id
   where c.coach_id = auth.uid()
     and c.coach_id <> c.client_id
     and c.status = 'active'
@@ -4600,6 +4603,7 @@ DECLARE
   v_value jsonb;
   v_zone text;
   v_offset integer;
+  v_week_start_day integer;
   v_owner_today date;
   v_week_start date;
   v_week_end date;
@@ -4607,8 +4611,10 @@ DECLARE
 BEGIN
   IF p_user_id IS NULL THEN RETURN NULL; END IF;
 
-  SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes
-    INTO v_zone, v_offset
+  v_week_start_day := 0;
+  SELECT nullif(trim(us.time_zone), ''), us.tz_offset_minutes,
+         coalesce(greatest(0, least(6, us.week_start_day)), 0)
+    INTO v_zone, v_offset, v_week_start_day
     FROM zane_user_settings us
    WHERE us.user_id = p_user_id;
 
@@ -4617,7 +4623,8 @@ BEGIN
   ELSE
     v_owner_today := ((now() AT TIME ZONE 'UTC') + make_interval(mins => coalesce(v_offset, 0)))::date;
   END IF;
-  v_week_start := date_trunc('week', v_owner_today)::date;
+  v_week_start := v_owner_today
+    - ((extract(isodow from v_owner_today)::int - 1 - v_week_start_day + 7) % 7);
   v_week_end := v_week_start + 7;
   v_adherence_end := least(v_week_end, v_owner_today);
 

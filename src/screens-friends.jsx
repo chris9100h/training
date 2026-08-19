@@ -512,7 +512,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     setLoading(true);
     const load = () => {
       if (!live) return;
-      LB.loadFriendsState(userId, LB.socialWeekStartISO()).then(next => {
+      LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay)).then(next => {
         if (!live) return;
         setError('');
         setStore(s => s ? {
@@ -537,13 +537,13 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
       live = false;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [userId, store.settings?.showFriendsTab, !data]);
+  }, [userId, store.settings?.showFriendsTab, store.settings?.weekStartDay, !data]);
 
   const reload = async (force = false) => {
     setLoading(true);
     setError('');
     try {
-      const next = await LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force });
+      const next = await LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force });
       setStore(s => s ? {
         ...s,
         friends: {
@@ -650,7 +650,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   };
 
   const ownMetrics = useMemoF(() => {
-    const start = data?.weekStart || LB.socialWeekStartISO();
+    const start = data?.weekStart || LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay);
     const end = new Date(`${start}T12:00:00`);
     end.setDate(end.getDate() + 7);
     const fullEndISO = LB.fmtISO(end);
@@ -666,7 +666,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
       workouts: sessions.length ? sessions.length : null,
       adherence: adherenceValues.length ? Math.round((adherenceValues.reduce((a, b) => a + b, 0) / adherenceValues.length) * 10) / 10 : null,
     };
-  }, [store.dailyLogs, store.sessions, data?.weekStart, LB.todayISO()]);
+  }, [store.dailyLogs, store.sessions, data?.weekStart, store.settings?.weekStartDay, LB.todayISO()]);
 
   const leaderboard = (metric, groupId = null) => {
     const rows = (groupId
@@ -1582,7 +1582,7 @@ function FriendRequestBanner({ store, setStore, userId }) {
     try {
       await LB.respondToSocialFriendRequest(pending.id, accept);
       try {
-        const friends = await LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force: true });
+        const friends = await LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force: true });
         setStore(s => s ? {
           ...s,
           friends: {

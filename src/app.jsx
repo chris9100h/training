@@ -3138,7 +3138,7 @@ function App() {
         socialRefreshQueued = socialRefreshQueued || force;
         return socialRefreshInFlight;
       }
-      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(), { force }).then(friends => {
+      socialRefreshInFlight = LB.loadFriendsState(userId, LB.socialWeekStartISO(new Date(), store.settings?.weekStartDay), { force }).then(friends => {
         if (!live) return;
         setStore(s => s ? {
           ...s,
@@ -3240,7 +3240,7 @@ function App() {
       document.removeEventListener('visibilitychange', onVisible);
       unsubscribe?.();
     };
-  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name]);
+  }, [userId, friendsDataEnabled, runtimeConfig.socialTransport, route.name, store?.settings?.weekStartDay]);
 
   useEffectA(() => {
     if (phase === 'ready' && route.name === 'friends' && !friendsTabEnabled) go({ name: 'home' });
