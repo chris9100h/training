@@ -4553,7 +4553,7 @@ function HealthDateStrip({ store, setStore, selectedDate, onSelect, onLog, targe
                 WebkitTapHighlightColor: 'transparent',
               }}>
               <div className="num" style={{ fontSize: 9, color: sel ? UI.gold : isToday ? UI.inkSoft : UI.inkFaint, textShadow: 'none' }}>
-                {WEEKDAYS[i]}
+                {WEEKDAYS[LB.isoWd(new Date(d + 'T12:00:00'))]}
               </div>
               <div style={{ fontSize: 11, fontWeight: 600, marginTop: 4, letterSpacing: '0.06em',
                 color: sel ? UI.gold : has ? UI.ink : UI.inkFaint, textShadow: 'none' }}>

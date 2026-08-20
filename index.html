@@ -1258,6 +1258,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   var layoutHeight = function () {
     return Math.max(window.innerHeight || 0, document.documentElement.clientHeight || 0, 1);
   };
+  // Keep the last keyboard-free viewport as the reference point. On iOS the
+  // layout viewport and visual viewport can shrink together (`interactive-
+  // widget=resizes-content`), so comparing their current heights alone cannot
+  // tell an open keyboard from a dismissed keyboard. The active element also
+  // remains an input after Safari dismisses the keyboard, which used to leave
+  // the root using the stale keyboard offset and shifted every tap target.
+  var keyboardBaselineHeight = Math.max(layoutHeight(), vv ? Math.round(vv.height || 0) : 0);
+  var keyboardBaselineWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
   var sync = function () {
     if (raf) return;
     raf = requestAnimationFrame(function () {
@@ -1265,6 +1273,26 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       var typing = isTyping();
       var visualHeight = vv ? Math.round(vv.height || 0) : 0;
       var layout = layoutHeight();
+      var currentWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+      // A real orientation/zoom change gives us a new keyboard-free baseline;
+      // the keyboard itself does not change the viewport width.
+      var widthChanged = keyboardBaselineWidth && currentWidth
+        && Math.abs(currentWidth - keyboardBaselineWidth) > 80;
+      if (!typing || widthChanged) {
+        keyboardBaselineHeight = Math.max(layout, visualHeight || 0);
+        keyboardBaselineWidth = currentWidth || keyboardBaselineWidth;
+      }
+      var visualOffsetTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
+      var keyboardGap = Math.max(0, keyboardBaselineHeight - (visualHeight || layout) - visualOffsetTop);
+      // Browser chrome can account for a small gap. A native keyboard is much
+      // larger; the threshold also lets us recover as soon as it is dismissed
+      // even when document.activeElement is still the input field.
+      var keyboardOpen = !!typing && keyboardGap > 120;
+      if (typing && !keyboardOpen && keyboardGap < 80) {
+        // Refresh the baseline after the keyboard has returned, so a later
+        // focus does not inherit the old keyboard-sized reference.
+        keyboardBaselineHeight = Math.max(layout, visualHeight || 0);
+      }
       // Regular Chrome on iOS can leave the visual viewport panned after the
       // keyboard is dismissed. The old handler only used offsetTop while a
       // field was focused, so the app then remained visibly shifted while its
@@ -1276,7 +1304,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       var top = 0;
       if (isIosChrome && !isStandalone) {
         var reportedTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
-        if (typing) {
+        if (keyboardOpen) {
           iosChromeTopCorrection = reportedTop;
         } else if (reportedTop > 2) {
           iosChromeTopCorrection = reportedTop;
@@ -1294,8 +1322,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
           if (uncorrectedTop < -2 && uncorrectedTop > -240) iosChromeTopCorrection = Math.round(-uncorrectedTop);
         }
         top = iosChromeTopCorrection;
-      } else if (typing && vv) {
-        top = Math.max(0, Math.round(vv.offsetTop || 0));
+      } else if (keyboardOpen && vv) {
+        top = visualOffsetTop;
       }
       // iOS standalone PWAs can retain a stale, keyboard-sized
       // visualViewport.height after a background/resume or rotation. A short
@@ -1307,7 +1335,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       // plus an 84px stale pan is the same full 844px page the user sees after
       // dismissing the keyboard, while a collapsed browser toolbar (offset 0)
       // still keeps the app at the actual 760px visible height.
-      var height = typing
+      var height = keyboardOpen
         ? Math.max(1, visualHeight || layout)
         : (isIosChrome && !isStandalone)
           ? Math.max(1, Math.min(layout, (visualHeight || layout) + iosChromeTopCorrection))
@@ -1315,7 +1343,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       document.documentElement.style.setProperty('--app-viewport-top', top + 'px');
       document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
 
-      if (!typing && (window.pageYOffset || window.pageXOffset)) window.scrollTo(0, 0);
+      if (!keyboardOpen && (window.pageYOffset || window.pageXOffset)) window.scrollTo(0, 0);
     });
   };
   var repairScale = function () {
