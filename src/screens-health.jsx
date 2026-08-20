@@ -4059,7 +4059,7 @@ function WeeklyCheckinSheet({ open, onClose, store, setStore, userId, coachHasMa
 
 // ─── Today / selected-day metrics card ────────────────────────────────────────
 
-function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit, foodDayClosed = true, onOpenFood }) {
+function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, onOpen, dragHandle, trained, hasCardio, dayTarget, nutritionUnscored, mealOfChoiceOrdinal, weightUnit, foodDayClosed = true, onOpenFood }) {
   // Coach view passes the client's unit; athlete view falls back to own unit.
   const wUnit = weightUnit || UI.unit();
   const stat = (label, value, unit) => (
@@ -4094,8 +4094,24 @@ function HealthMetricsCard({ log, dateLabel, isToday, onJumpToday, dragHandle, t
       <span style={{ fontSize: 9, color: 'var(--accent)', fontFamily: UI.fontUi, fontWeight: 700, letterSpacing: '0.06em' }}>{label}</span>
     </span>
   );
+  const openCard = (event) => {
+    // The card is the shortcut into the selected day's log, but controls
+    // inside it (Today →, Open Food, and any future action buttons) must keep
+    // their own meaning instead of bubbling into the daily-log action.
+    if (!onOpen || event?.target?.closest?.('button,[data-reorder-ignore]')) return;
+    onOpen();
+  };
+  const openCardFromKeyboard = (event) => {
+    if (!onOpen || event?.target?.closest?.('button,[data-reorder-ignore]')) return;
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    onOpen();
+  };
   return (
-    <Card accent style={{ padding: 16, borderLeft: `3px solid ${UI.gold}` }}>
+    <Card accent onClick={onOpen ? openCard : undefined} onKeyDown={onOpen ? openCardFromKeyboard : undefined}
+      role={onOpen ? 'button' : undefined} tabIndex={onOpen ? 0 : undefined}
+      aria-label={onOpen ? `Open daily log for ${dateLabel}` : undefined}
+      style={{ padding: 16, borderLeft: `3px solid ${UI.gold}`, cursor: onOpen ? 'pointer' : undefined }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: trained || hasCardio ? 8 : 12 }}>
         {dragHandle}
         <span style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 20, fontWeight: 700, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--accent)' }}>
@@ -5752,7 +5768,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
 
   const cardEls = {
     week: <HealthWeekCard stats={weekStats} dragHandle={handle} targets={effectiveTargets} tf={tf} setTf={setTf} onOpenRecap={() => setWeeklyRecapOpen(true)} />,
-    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
+    today: <HealthMetricsCard log={selectedLog} dateLabel={dayLabel} isToday={selectedDate === today} onJumpToday={() => setSelectedDate(today)} onOpen={() => setLogOpen(true)} dragHandle={handle} trained={trainedSelected} hasCardio={cardioSelected} dayTarget={selectedDayTarget} nutritionUnscored={selectedNutritionUnscored}
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
       foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
       onOpenFood={go && store.settings?.showFoodTab ? () => go({ name: 'food', date: today }) : null} />,
