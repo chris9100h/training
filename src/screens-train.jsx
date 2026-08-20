@@ -529,10 +529,10 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: UI.fontUi };
 
   return (
-    <div data-keyboard
+    <div data-keyboard data-zane-viewport-overlay="true"
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
-      style={{ position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 95,
+      style={{ position: localViewportLayerPosition(), bottom: 0, left: 0, right: 0, zIndex: 95,
       background: 'var(--bg)', backgroundImage: 'var(--bg-texture)',
       padding: `5px 8px calc(env(safe-area-inset-bottom, 0px) + 5px)`,
     }}>
@@ -9370,8 +9370,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* ── Time-based countdown overlay ────────────────────────────────────── */}
       {countdown && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
-          <div style={{ position: 'fixed', inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
+          <div data-zane-viewport-overlay="true" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.92)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
+          <div data-zane-viewport-overlay="true" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 61, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 24px)' }}>
             {/* Fixed light values, not theme tokens, for the same reason the
                 countdown digits use --accent-raw: this scrim is a hardcoded
                 near-black in every theme. On light and paper --ink-soft and
@@ -9396,9 +9396,9 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       {/* ── Warmup overlay ──────────────────────────────────────────────────── */}
       {warmupSetsRemaining && warmupOverlaySet && (
         <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.82)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
-          <div style={{
-            position: 'fixed', bottom: 0, left: 0, right: 0, zIndex: 61,
+          <div data-zane-viewport-overlay="true" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 60, background: 'rgba(8,6,3,0.82)', backdropFilter: 'blur(3px)', WebkitBackdropFilter: 'blur(3px)' }} />
+          <div data-zane-viewport-overlay="true" style={{
+            position: localViewportLayerPosition(), bottom: 0, left: 0, right: 0, zIndex: 61,
             background: 'var(--bg, #080603)',
             backgroundImage: 'var(--bg-texture)',
             borderRadius: '8px 8px 0 0',
@@ -9500,8 +9500,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* ── Post-warmup rest overlay, full-screen dramatic countdown ────────── */}
       {postWarmupRest && (
-        <div style={{
-          position: 'fixed', top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
+        <div data-zane-viewport-overlay="true" style={{
+          position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 61,
           background: 'var(--bg-body)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
           padding: '0 32px',
@@ -9550,7 +9550,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           after the keyboard disappears (iOS fires a synthetic click ~300ms after
           the touch that closed the keyboard). Stays for 400ms after dismissal. */}
       {kbShield && !kbField && (
-        <div style={{ position: 'fixed', bottom: 0, left: 0, right: 0, height: 260, zIndex: 96, touchAction: 'none' }}
+        <div data-zane-viewport-overlay="true" style={{ position: localViewportLayerPosition(), bottom: 0, left: 0, right: 0, height: 260, zIndex: 96, touchAction: 'none' }}
              onPointerDown={e => e.preventDefault()}
              onTouchStart={e => e.preventDefault()} />
       )}

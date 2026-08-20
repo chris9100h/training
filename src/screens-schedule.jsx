@@ -4526,6 +4526,7 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 
 function PlanWizard({ store, setStore, go }) {
   const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
+  const iosLocalLayer = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-browser');
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
   // zIndex 9999: +1 over this wizard's own overlay (9998, see overlayBase
@@ -4593,11 +4594,14 @@ function PlanWizard({ store, setStore, go }) {
   const [vp, setVp] = useStateS(null);
   useEffectS(() => {
     const v = typeof window !== 'undefined' ? window.visualViewport : null;
-    if (!v) return;
-    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    const on = () => setVp(v ? { top: v.offsetTop, height: v.height } : null);
     on();
-    v.addEventListener('resize', on); v.addEventListener('scroll', on);
-    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+    window.addEventListener('resize', on, { passive: true });
+    v?.addEventListener('resize', on); v?.addEventListener('scroll', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      v?.removeEventListener('resize', on); v?.removeEventListener('scroll', on);
+    };
   }, []);
 
   const isDirty = () => !!name.trim() || type !== null || presetKey !== null || weekdaysSel.length > 0 || planMode !== 'standard';
@@ -5008,9 +5012,9 @@ function PlanWizard({ store, setStore, go }) {
       ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height }
       : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
-    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+    <div data-zane-viewport-overlay="true" style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: iosChrome ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: iosLocalLayer ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>

@@ -14,6 +14,11 @@
   var ua = navigator.userAgent || '';
   var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
   var standalone = !!(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
+  // Every iOS surface is WebKit, including an installed PWA. Keep this
+  // separate from ios-browser: the latter selects the document-coordinate
+  // shell used only for browser tabs, while ios-webkit guards controls from
+  // compositor promotion in both browser and standalone modes.
+  if (ios) document.documentElement.classList.add('ios-webkit');
   if (ios && !standalone) {
     document.documentElement.classList.add('ios-browser');
     if (/CriOS\//i.test(ua)) document.documentElement.classList.add('ios-chrome');
@@ -230,14 +235,17 @@
     overflow: hidden;
     opacity: 1;
     transform: translateY(0);
-    transition: max-height 0.18s ease, padding 0.18s ease, opacity 0.12s ease, transform 0.18s ease;
+    /* Only fade the dock. Animating its height/padding/position while
+       pointer-events are restored creates a short window where the painted
+       bar and its hit boxes disagree after keyboard dismissal. */
+    transition: opacity 0.12s ease;
   }
   html.keyboard-input-active [data-zane-tabbar="bottom"] {
     max-height: 0 !important;
     padding-top: 0 !important;
     padding-bottom: 0 !important;
     opacity: 0 !important;
-    transform: translateY(10px);
+    transform: none;
     pointer-events: none !important;
     visibility: hidden;
   }
@@ -387,12 +395,19 @@
      browser chrome moves, so browser-tab fields opt out below. The keyboard
      focus helper still handles caret visibility without this transform. */
   input, textarea { transform: translateZ(0); }
-  html.ios-browser input, html.ios-browser textarea { transform: none; }
+  html.ios-webkit input, html.ios-webkit textarea { transform: none; }
   /* Compact fields keep their normal size at rest. On iOS the focus handler
      adds this class only when a field would otherwise trigger Safari's
      automatic page zoom, so the keyboard can open without shifting the app's
      layout. */
-  .zane-ios-input-zoom-guard { font-size: 16px !important; }
+  .zane-ios-input-zoom-guard {
+    font-size: 16px !important;
+    /* Keep the original field box while Safari's minimum readable size is
+       applied. Without a stable height/line-height a focused compact field
+       can reflow its row and move the controls below it. */
+    height: var(--zane-input-rest-height, auto) !important;
+    line-height: var(--zane-input-rest-line-height, normal) !important;
+  }
   input:-webkit-autofill,
   input:-webkit-autofill:hover,
   input:-webkit-autofill:focus {
@@ -1328,6 +1343,14 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       // larger; the threshold also lets us recover as soon as it is dismissed
       // even when document.activeElement is still the input field.
       var keyboardOpen = !!typing && keyboardGap > 120;
+      var wasKeyboardOpen = keyboardOpenState;
+      keyboardOpenState = keyboardOpen;
+      if (wasKeyboardOpen && !keyboardOpen) {
+        // Safari can keep the input focused after dismissing its keyboard.
+        // Mark the repair explicitly so the next settled pass is not lost
+        // just because no blur event was emitted.
+        layoutRepairPending = true;
+      }
       // The bottom dock is navigation, not part of the active input flow. Hide
       // it only while the native keyboard is genuinely open, not merely while
       // an input retains focus after the keyboard has been dismissed or when a
@@ -1389,6 +1412,12 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
 
       if (!keyboardOpen && (window.pageYOffset || window.pageXOffset)) window.scrollTo(0, 0);
+      // A focus can survive keyboard dismissal on iOS. Once the native
+      // keyboard is actually gone, give any deferred geometry repair a
+      // settled pass instead of waiting for a later navigation or reload.
+      if (!keyboardOpen && layoutRepairPending && typeof requestPendingLayoutRepair === 'function') {
+        requestPendingLayoutRepair(false, 120);
+      }
     });
   };
   var repairScale = function () {
@@ -1435,22 +1464,51 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // Bump this whenever the shell's coordinate model changes. It is separate
   // from the service-worker cache version: a user can be on the newest files
   // while WebKit still retains the compositor geometry from an older layout.
-  var LAYOUT_EPOCH = '2026-08-20-viewport-2';
+  var LAYOUT_EPOCH = '2026-08-20-viewport-3';
   var LAYOUT_EPOCH_KEY = 'logbook-layout-epoch';
   var canonicalViewport = 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content';
   var reflowInFlight = false;
   var lastAutoReflowAt = 0;
   var geometryHealthSamples = 0;
   var lastHiddenAt = 0;
+  var keyboardOpenState = false;
+  var layoutRepairPending = false;
+  var layoutRepairForcePending = false;
+  var layoutRepairTimer = 0;
   var hasTextFocus = function () {
     var ae = document.activeElement;
     return !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
+  };
+  var viewportHasBlockingLayer = function () {
+    return keyboardOpenState
+      || document.documentElement.classList.contains('keyboard-input-active')
+      || Number(window.__zaneOpenSheetCount || 0) > 0
+      || !!document.querySelector('[data-keyboard], [data-zane-viewport-overlay="true"]');
+  };
+  var requestPendingLayoutRepair = function (force, delay) {
+    layoutRepairPending = true;
+    layoutRepairForcePending = layoutRepairForcePending || !!force;
+    if (layoutRepairTimer) return;
+    layoutRepairTimer = window.setTimeout(function () {
+      layoutRepairTimer = 0;
+      if (!layoutRepairPending || viewportHasBlockingLayer()) return;
+      var requestedForce = layoutRepairForcePending;
+      layoutRepairPending = false;
+      layoutRepairForcePending = false;
+      if (typeof maybeRepairViewport === 'function') {
+        maybeRepairViewport({ force: requestedForce });
+      }
+    }, Math.max(0, Number(delay) || 120));
   };
   var rememberLayoutEpoch = function () {
     try { localStorage.setItem(LAYOUT_EPOCH_KEY, LAYOUT_EPOCH); } catch (_) {}
   };
   var forceLayoutReflow = function () {
     if (reflowInFlight || !root.children.length) return false;
+    if (viewportHasBlockingLayer()) {
+      requestPendingLayoutRepair(true, 180);
+      return false;
+    }
     reflowInFlight = true;
     var html = document.documentElement;
     var originalViewport = viewportMeta && viewportMeta.getAttribute('content');
@@ -1493,7 +1551,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return Number.isFinite(value) ? value : fallback;
   };
   var viewportGeometryLooksWrong = function () {
-    if (!root.children.length || hasTextFocus()) return false;
+    if (!root.children.length) return false;
     var rect = root.getBoundingClientRect();
     var expectedTop = cssViewportNumber('--app-viewport-top', 0);
     var expectedHeight = cssViewportNumber('--app-viewport-height', layoutHeight());
@@ -1517,13 +1575,26 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return false;
   };
   var maybeRepairViewport = function ({ force = false } = {}) {
-    if (reflowInFlight || !root.children.length || hasTextFocus()) return false;
-    // A custom keypad and other sheets own their own coordinate space. Wait
-    // until they close instead of recalibrating underneath a live modal.
-    if (Number(window.__zaneOpenSheetCount || 0) > 0) return false;
+    if (reflowInFlight || !root.children.length) return false;
+    // A native keyboard, custom keypad, sheet, or full-screen training
+    // overlay owns the active coordinate space. Defer rather than reflowing
+    // underneath its controls. A focused field with the keyboard dismissed is
+    // deliberately not a blocker: Safari may retain focus while the stale
+    // shell still needs repair.
+    if (viewportHasBlockingLayer()) {
+      requestPendingLayoutRepair(force, 180);
+      return false;
+    }
     var suspicious = viewportGeometryLooksWrong();
     geometryHealthSamples = suspicious ? geometryHealthSamples + 1 : 0;
-    if (!force && geometryHealthSamples < 2) return false;
+    if (!force && geometryHealthSamples < 2) {
+      // Take the second sample automatically. A single stale rect can be an
+      // in-flight toolbar animation; two settled samples are the existing
+      // safety threshold, but waiting for a later navigation made the repair
+      // disappear when focus was retained after keyboard dismissal.
+      if (suspicious) requestPendingLayoutRepair(false, 160);
+      return false;
+    }
     var now = Date.now();
     if (now - lastAutoReflowAt < 1800) return false;
     if (!force && !suspicious) return false;
@@ -1534,6 +1605,10 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     return true;
   };
   window.__zaneRecalibrateViewport = function () {
+    if (viewportHasBlockingLayer()) {
+      requestPendingLayoutRepair(true, 180);
+      return true;
+    }
     var ok = forceLayoutReflow();
     if (ok) {
       lastAutoReflowAt = Date.now();
@@ -1545,7 +1620,11 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   var applyLayoutEpoch = function () {
     var applied = null;
     try { applied = localStorage.getItem(LAYOUT_EPOCH_KEY); } catch (_) {}
-    if (applied === LAYOUT_EPOCH || !root.children.length || hasTextFocus()) return;
+    if (applied === LAYOUT_EPOCH || !root.children.length) return;
+    if (viewportHasBlockingLayer()) {
+      requestPendingLayoutRepair(true, 180);
+      return;
+    }
     if (forceLayoutReflow()) rememberLayoutEpoch();
   };
   // React mounts asynchronously below this script. Observe the first mount so
@@ -1559,6 +1638,19 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       setTimeout(applyLayoutEpoch, 120);
     });
     layoutObserver.observe(root, { childList: true });
+    // Overlay lifecycle is the safe point for a deferred repair. Watching
+    // only the two data attributes keeps this separate from ordinary React
+    // content updates while still catching training overlays/keypads being
+    // mounted and removed from nested screens.
+    var viewportLayerObserver = new MutationObserver(function () {
+      if (layoutRepairPending) requestPendingLayoutRepair(false, 120);
+    });
+    viewportLayerObserver.observe(root, {
+      childList: true,
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['data-keyboard', 'data-zane-viewport-overlay'],
+    });
   }
   setTimeout(applyLayoutEpoch, 1500);
 
@@ -1584,10 +1676,16 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     focusTransitionTimer = window.setTimeout(function () {
       focusTransitionTimer = 0;
       if (!isTyping()) resume('focusout');
+      // Do not require a blur to be delivered: activeElement may still be the
+      // old field even though the native keyboard is gone.
+      requestPendingLayoutRepair(false, 160);
     }, 140);
   };
   document.addEventListener('focusout', deferFocusTransition, true);
   document.addEventListener('focusin', cancelFocusTransition, true);
+  window.addEventListener('zane-sheet-state', function () {
+    if (layoutRepairPending) requestPendingLayoutRepair(false, 100);
+  });
   window.addEventListener('pageshow', function (event) { resume('pageshow', !!event.persisted); });
   window.addEventListener('focus', function () { resume('focus'); });
   document.addEventListener('visibilitychange', function () {

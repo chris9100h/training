@@ -189,11 +189,25 @@ function applyIOSInputZoomGuard(element) {
     || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
   if (!ios || !element || !element.isConnected || !(element.tagName === 'INPUT' || element.tagName === 'TEXTAREA')) return;
   const size = Number.parseFloat(window.getComputedStyle(element).fontSize);
-  if (Number.isFinite(size) && size < 16) element.classList.add('zane-ios-input-zoom-guard');
+  if (Number.isFinite(size) && size < 16) {
+    // Snapshot the resting box once. The guard raises the text to iOS's
+    // readable 16px minimum, but it must not be allowed to change the row's
+    // height or push neighbouring tap targets around while the keyboard opens.
+    if (!element.classList.contains('zane-ios-input-zoom-guard')) {
+      const computed = window.getComputedStyle(element);
+      const rect = element.getBoundingClientRect();
+      if (rect.height > 0) element.style.setProperty('--zane-input-rest-height', `${rect.height}px`);
+      if (computed.lineHeight) element.style.setProperty('--zane-input-rest-line-height', computed.lineHeight);
+    }
+    element.classList.add('zane-ios-input-zoom-guard');
+  }
 }
 
 function removeIOSInputZoomGuard(element) {
-  element?.classList?.remove('zane-ios-input-zoom-guard');
+  if (!element?.classList) return;
+  element.classList.remove('zane-ios-input-zoom-guard');
+  element.style?.removeProperty('--zane-input-rest-height');
+  element.style?.removeProperty('--zane-input-rest-line-height');
 }
 
 // ─── Screen ─────────────────────────────────────────────────────────
@@ -553,6 +567,16 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const activeListenersRef = React.useRef(null);
   const healthIdx = tabs.findIndex(t => t.id === 'health');
   const currentHealthSlot = tabs.find(t => t.id === 'health')?.healthSlot || 'health';
+  const revealGeometry = (barRect, slotIndex) => {
+    const local = localViewportLayerPosition() === 'absolute';
+    const rootRect = local ? document.getElementById('root')?.getBoundingClientRect() : null;
+    const originLeft = rootRect?.left || 0;
+    const originBottom = rootRect?.bottom ?? window.innerHeight;
+    const width = rootRect?.width || window.innerWidth;
+    const rawX = barRect.left + (slotIndex + 0.5) * barRect.width / tabs.length - originLeft;
+    const anchorX = Math.min(Math.max(rawX, 110), Math.max(110, width - 110));
+    return { anchorX, bottom: originBottom - barRect.top + 8 };
+  };
   const cancelPressTimer = () => { if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; } };
   const resolveHealthOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-health-option]')?.getAttribute('data-health-option') || null;
   const openHealthReveal = (buttonEl) => {
@@ -561,11 +585,10 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     const r = barRef.current?.getBoundingClientRect();
     if (!r) return;
     suppressClickRef.current = true;
-    // Clamped so the popup cannot clip off a narrow phone's edge when the
-    // health slot sits in an outer tab position.
-    const rawX = r.left + (healthIdx + 0.5) * r.width / tabs.length;
-    const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
-    setReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+    // Keep the popup and its source bar in the same local coordinate space on
+    // iOS browser tabs; window.innerHeight belongs to a different viewport
+    // after toolbar movement and causes a visible/hit-test drift.
+    setReveal({ ...revealGeometry(r, healthIdx), hoverId: null });
     const onMove = (ev) => {
       ev.preventDefault();
       setReveal(rv => rv && { ...rv, hoverId: resolveHealthOption(ev.clientX, ev.clientY) });
@@ -662,9 +685,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     const r = barRef.current?.getBoundingClientRect();
     if (!r) return;
     suppressClickRef.current = true;
-    const rawX = r.left + (socialIdx + 0.5) * r.width / tabs.length;
-    const anchorX = Math.min(Math.max(rawX, 110), window.innerWidth - 110);
-    setSocialReveal({ anchorX, bottom: window.innerHeight - r.top + 8, hoverId: null });
+    setSocialReveal({ ...revealGeometry(r, socialIdx), hoverId: null });
     const onMove = ev => {
       ev.preventDefault();
       setSocialReveal(rv => rv && { ...rv, hoverId: resolveSocialOption(ev.clientX, ev.clientY) });
@@ -954,7 +975,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     </div>
     {reveal && (
       <div style={{
-        position: 'fixed', left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
+        position: localViewportLayerPosition(), left: reveal.anchorX, bottom: reveal.bottom, transform: 'translateX(-50%)',
         transformOrigin: 'bottom center',
         display: 'flex', gap: 8, padding: 8,
         background: 'rgba(var(--bg-rgb),0.97)',
@@ -965,7 +986,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
         boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
         animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)',
         zIndex: 30,
-      }}>
+      }} data-zane-local-layer="viewport" data-zane-viewport-overlay="true">
         {enabledSlots.filter(id => id !== currentHealthSlot).map(id => {
           const hovered = reveal.hoverId === id;
           return (
@@ -987,12 +1008,12 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     )}
     {socialReveal && (
       <div style={{
-        position: 'fixed', left: socialReveal.anchorX, bottom: socialReveal.bottom, transform: 'translateX(-50%)',
+        position: localViewportLayerPosition(), left: socialReveal.anchorX, bottom: socialReveal.bottom, transform: 'translateX(-50%)',
         transformOrigin: 'bottom center', display: 'flex', gap: 8, padding: 8,
         background: 'rgba(var(--bg-rgb),0.97)', backdropFilter: 'blur(10px)', WebkitBackdropFilter: 'blur(10px)',
         border: `1px solid ${UI.hairStrong}`, borderRadius: 8, boxShadow: '0 10px 24px rgba(0,0,0,0.5)',
         animation: 'tabPopIn 0.2s cubic-bezier(0.34,1.4,0.64,1)', zIndex: 30,
-      }}>
+      }} data-zane-local-layer="viewport" data-zane-viewport-overlay="true">
         {enabledSocialSlots.filter(id => id !== currentSocialSlot).map(id => {
           const hovered = socialReveal.hoverId === id;
           return (
@@ -1450,10 +1471,12 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
+    window.addEventListener('resize', update, { passive: true });
     update();
     return () => {
       vv.removeEventListener('resize', update);
       vv.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
       panelNodeRef.current?.removeEventListener('focusin', onPanelFocusIn);
       clearTimeout(scrollTimer);
       clearTimeout(focusTimer);
@@ -1478,14 +1501,17 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
   // the intensity chain sheets, just vertically centered. Opt-in, so no other
   // sheet changes.
   const cardLike = floating || center;
-  // Chrome iOS uses a layout-height root while its native keyboard is open.
-  // Keep the backdrop in the fixed coordinate space for that frame; the
-  // keyboard padding below is measured in the same layout coordinates. Using
-  // the normal iOS absolute layer here double-counts the keyboard gap and can
-  // move the sheet's hit targets hundreds of pixels away from the controls.
-  // Once the keyboard is gone, return to the local layer so embedded flows
-  // retain their correct stacking context.
-  const sheetPosition = effectiveKbHeight > 0 ? 'fixed' : localViewportLayerPosition();
+  // Keep the sheet and backdrop in one coordinate system across keyboard
+  // open/close. iOS browser tabs use the root's local absolute layer; the
+  // shell already shrinks to the visual viewport while the native keyboard is
+  // open, so adding the detected native gap a second time would move the
+  // painted panel and its hit targets apart. Custom keypads still use the
+  // caller-supplied keyboardHeight because that DOM layer does not resize the
+  // visual viewport.
+  const sheetPosition = localViewportLayerPosition();
+  const nativeKeyboardGap = sheetPosition === 'absolute'
+    ? 0
+    : Math.max(0, effectiveKbHeight - keyboardHeight);
   const edgeColor = accent ? 'rgba(var(--accent-rgb),0.5)' : UI.hairStrong;
   const shadowLayers = [cardLike ? '0 4px 18px rgba(0,0,0,0.4)' : '0 -10px 28px rgba(0,0,0,0.5)'];
   if (cardLike) shadowLayers.push(`0 1px 0 ${edgeColor}`);
@@ -1499,11 +1525,11 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     // all (a separate OS/browser compositing layer), so there's nothing
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
-    <div onClick={onClose} aria-hidden={false} data-zane-local-layer={sheetPosition === 'absolute' ? 'viewport' : undefined} style={{
+    <div onClick={onClose} aria-hidden={false} data-zane-local-layer={sheetPosition === 'absolute' ? 'viewport' : undefined} data-zane-viewport-overlay="true" style={{
       position: sheetPosition, top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
-      paddingBottom: (effectiveKbHeight - keyboardHeight) + (floating ? 10 : 0),
+      paddingBottom: nativeKeyboardGap + (floating ? 10 : 0),
       animation: 'sheet-fade 0.18s ease',
     }}>
       {/* accent: inset a few px off the screen edges so the glow has room

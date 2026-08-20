@@ -1369,6 +1369,7 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   equipment, onEquipment, movementType, setMovementType, logMode, pickLogMode,
   bwMode, setBwMode }) {
   const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
+  const iosLocalLayer = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-browser');
   const [confirming, setConfirming] = useStateL(false);
   // Keep the card inside the VISIBLE viewport so the Name step's text input isn't
   // hidden behind the on-screen keyboard: visualViewport shrinks when the keyboard
@@ -1376,11 +1377,14 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
   const [vp, setVp] = useStateL(null);
   useEffectL(() => {
     const v = typeof window !== 'undefined' ? window.visualViewport : null;
-    if (!v) return;
-    const on = () => setVp({ top: v.offsetTop, height: v.height });
+    const on = () => setVp(v ? { top: v.offsetTop, height: v.height } : null);
     on();
-    v.addEventListener('resize', on); v.addEventListener('scroll', on);
-    return () => { v.removeEventListener('resize', on); v.removeEventListener('scroll', on); };
+    window.addEventListener('resize', on, { passive: true });
+    v?.addEventListener('resize', on); v?.addEventListener('scroll', on);
+    return () => {
+      window.removeEventListener('resize', on);
+      v?.removeEventListener('resize', on); v?.removeEventListener('scroll', on);
+    };
   }, []);
   const applicable = WIZARD_ORDER.filter(s => wizardStepApplicable(s, equipment, movementType));
   const idx = applicable.indexOf(step);
@@ -1483,8 +1487,8 @@ function ExerciseWizard({ step, setStep, onClose, isDirty, store,
       ? { ...overlayBase, position: 'fixed', left: 0, right: 0, top: vp.top, height: vp.height }
       : { ...overlayBase, position: 'fixed', inset: 0 };
   return (
-    <div style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
-      <div style={{ width: '100%', maxWidth: 360, maxHeight: iosChrome ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+    <div data-zane-viewport-overlay="true" style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
+      <div style={{ width: '100%', maxWidth: 360, maxHeight: iosLocalLayer ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard exercise?</div>

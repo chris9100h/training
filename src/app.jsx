@@ -1069,12 +1069,18 @@ function App() {
     document.addEventListener('focusout', releaseZoomGuard, true);
     window.visualViewport?.addEventListener('resize', schedule, { passive: true });
     window.visualViewport?.addEventListener('scroll', schedule, { passive: true });
+    // With interactive-widget=resizes-content iOS can resize the layout
+    // viewport without emitting a visualViewport event. Keep the same focus
+    // correction path for that resize so a low field is rechecked after the
+    // keyboard settles instead of relying on Safari's nested-scroll heuristic.
+    window.addEventListener('resize', schedule, { passive: true });
     return () => {
       cancelScheduled?.();
       document.removeEventListener('focusin', schedule, true);
       document.removeEventListener('focusout', releaseZoomGuard, true);
       window.visualViewport?.removeEventListener('resize', schedule);
       window.visualViewport?.removeEventListener('scroll', schedule);
+      window.removeEventListener('resize', schedule);
     };
   }, []);
   useEffectA(() => {
