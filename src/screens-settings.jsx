@@ -172,6 +172,9 @@ function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, sa
 }
 
 function FullSheet({ open, onClose, title, children }) {
+  const sheetPosition = typeof localViewportLayerPosition === 'function'
+    ? localViewportLayerPosition()
+    : 'fixed';
   const sheetRef = React.useRef(null);
   const keyboardInsetRef = React.useRef(0);
   const baselineHeightRef = React.useRef(
@@ -272,7 +275,9 @@ function FullSheet({ open, onClose, title, children }) {
       role="dialog"
       aria-modal="true"
       data-zane-focus-boundary="true"
-      style={{ position: 'fixed', inset: 0, bottom: keyboardInset ? `${keyboardInset}px` : 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
+      data-zane-local-layer={sheetPosition === 'absolute' ? 'viewport' : undefined}
+      data-zane-viewport-overlay="true"
+      style={{ position: sheetPosition, inset: 0, bottom: keyboardInset ? `${keyboardInset}px` : 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
