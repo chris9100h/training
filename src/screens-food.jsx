@@ -628,6 +628,25 @@ function fdMaterializeSlotEntry(slot, dateISO) {
     createdAt: new Date().toISOString(),
   };
 }
+function fdTemplateEntryMatches(entry, next) {
+  return entry.time === next.time
+    && entry.foodId === next.foodId && entry.foodName === next.foodName
+    && entry.brand === next.brand && entry.source === next.source
+    && entry.quantityG === next.quantityG && entry.calories === next.calories
+    && entry.protein === next.protein && entry.carbs === next.carbs && entry.fat === next.fat
+    && entry.fiber === next.fiber && entry.sugar === next.sugar
+    && entry.satFat === next.satFat && entry.sodiumMg === next.sodiumMg
+    && JSON.stringify(entry.recipeItems ?? null) === JSON.stringify(next.recipeItems ?? null)
+    && entry.recipeId === next.recipeId
+    && entry.loggedTotalPortions === next.loggedTotalPortions
+    && entry.loggedCookedGrams === next.loggedCookedGrams
+    && entry.loggedCookedWeightG === next.loggedCookedWeightG;
+}
+function fdRefreshTemplateEntry(entry, slot) {
+  const next = fdMaterializeSlotEntry(slot, entry.date);
+  if (fdTemplateEntryMatches(entry, next)) return entry;
+  return { ...entry, ...next, id: entry.id, date: entry.date, createdAt: entry.createdAt, planned: true };
+}
 // Does a slot's day_type apply on a given date? ('any' always; 'training' /
 // 'rest' via the plan's training-day check).
 function fdSlotMatchesDate(slot, store, dateISO) {
@@ -1435,8 +1454,26 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const slots = (store.foodTemplateSlots || []).filter(s => s.mealPlanId === activePlanId);
     if (!activePlanId || !slots.length) return;
     const markedDates = new Set((store.foodTemplateDays || []).map(d => d.id));
+    // A template slot is denormalized into each planned log row. Updating a
+    // slot therefore used to leave the already-lookahead rows with the old
+    // food forever (the dedup check saw the same templateSlotId and skipped
+    // them). Refresh only still-planned rows on/after today; a logged row is
+    // history and must never be rewritten. Manual edits detach their row from
+    // the templateSlotId, so they are preserved as well.
+    const slotById = new Map(slots.map(slot => [slot.id, slot]));
+    let refreshedLogs = store.foodLogs || [];
+    let refreshed = false;
+    refreshedLogs = refreshedLogs.map(log => {
+      if (!log.planned || !log.templateSlotId || log.date < today) return log;
+      const slot = slotById.get(log.templateSlotId);
+      if (!slot) return log;
+      const next = fdRefreshTemplateEntry(log, slot);
+      if (next === log) return log;
+      refreshed = true;
+      return next;
+    });
     const existingByDate = new Map();
-    (store.foodLogs || []).forEach(l => {
+    refreshedLogs.forEach(l => {
       if (!l.templateSlotId) return;
       if (!existingByDate.has(l.date)) existingByDate.set(l.date, new Set());
       existingByDate.get(l.date).add(l.templateSlotId);
@@ -1467,12 +1504,24 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         .map(s => fdMaterializeSlotEntry(s, date));
       pending.push({ markerId, date, entries });
     }
-    if (!pending.length) return;
+    if (!pending.length && !refreshed) return;
     setStore(s => {
       // The active plan can change between calculating `pending` and React
       // applying this updater (for example while a settings sync is landing).
       // Never materialize the old plan into the newly selected one.
       if (s.activeMealTemplateId !== activePlanId) return s;
+      const currentSlots = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === activePlanId);
+      const currentSlotById = new Map(currentSlots.map(slot => [slot.id, slot]));
+      let currentLogsChanged = false;
+      let currentLogs = (s.foodLogs || []).map(log => {
+        if (!log.planned || !log.templateSlotId || log.date < today) return log;
+        const slot = currentSlotById.get(log.templateSlotId);
+        if (!slot) return log;
+        const next = fdRefreshTemplateEntry(log, slot);
+        if (next === log) return log;
+        currentLogsChanged = true;
+        return next;
+      });
       const already = new Set((s.foodTemplateDays || []).map(d => d.id));
       const stillPending = pending.filter(p => {
         if (already.has(p.markerId)) return false;
@@ -1480,11 +1529,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         const legacyMarkerId = LB.foodTemplateDayLegacyMarkerId(userId, p.date);
         return !(activePlanId === `mp_${userId}` && already.has(legacyMarkerId));
       });
-      if (!stillPending.length) return s;
+      if (!stillPending.length && !currentLogsChanged) return s;
       const newMarkers = stillPending.map(p => ({ id: p.markerId, date: p.date }));
-      const slotsForPlan = (s.foodTemplateSlots || []).filter(slot => slot.mealPlanId === activePlanId);
+      const slotsForPlan = currentSlots;
       const existingSlotIdsByDate = new Map();
-      (s.foodLogs || []).forEach(log => {
+      currentLogs.forEach(log => {
         if (!log.templateSlotId) return;
         if (!existingSlotIdsByDate.has(log.date)) existingSlotIdsByDate.set(log.date, new Set());
         existingSlotIdsByDate.get(log.date).add(log.templateSlotId);
@@ -1502,10 +1551,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
         ...s,
         foodTemplateDays: [...(s.foodTemplateDays || []), ...newMarkers],
         // Planned entries never touch the daily log, so no patchDaily here.
-        foodLogs: newEntries.length ? [...newEntries, ...(s.foodLogs || [])] : (s.foodLogs || []),
+        foodLogs: newEntries.length ? [...newEntries, ...currentLogs] : currentLogs,
       };
     });
-  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId, store.dailyLogs]);
+  }, [planMode, today, userId, store.foodTemplateSlots, store.foodTemplateDays, store.activeMealTemplateId, store.dailyLogs, store.foodLogs]);
 
   const [tab, setTab] = useStateFd('log');
   // Day-level sugar/sat fat/sodium disclosure (migration 0204), per session.
@@ -1896,7 +1945,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // it from the current macros on the very next render, same as if the
   // field had never been touched. Only derives while pendingFood.custom.
   const [kcal100Str, setKcal100Str, onKcal100Change, kcal100Touched, setKcal100Touched] =
-    useAutoDerivedCalories(p100Str, c100Str, f100Str, pendingFood?.fiberPer100g, !!store.settings?.netCarbs, !!pendingFood?.custom);
+    useAutoDerivedCalories(p100Str, c100Str, f100Str, pendingFood?.fiberPer100g, !!store.settings?.netCarbs, !!pendingFood?.custom || !!pendingFood?.macroEditable);
 
   const [customOpen, setCustomOpen] = useStateFd(false);
   const [customName, setCustomName] = useStateFd('');
@@ -3490,8 +3539,30 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // authoritative cache write still happens server-side at log time (see
   // confirmLogFood -> LB.cacheFood), so a food that isn't cached yet
   // (r.cached false) is cached only once it's actually eaten.
+  function setEditableFoodMacros(food) {
+    setP100Str(food?.proteinPer100g != null ? String(fdRound1(food.proteinPer100g)) : '');
+    setC100Str(food?.carbsPer100g != null ? String(fdRound1(food.carbsPer100g)) : '');
+    setF100Str(food?.fatPer100g != null ? String(fdRound1(food.fatPer100g)) : '');
+    setKcal100Str(food?.kcalPer100g != null ? String(Math.round(food.kcalPer100g)) : '');
+    setKcal100Touched(false);
+  }
+  function markBarcodeMacroOverride() {
+    if (pendingFood?.macroEditable && !pendingFood.macroOverride) {
+      setPendingFood(food => food ? { ...food, macroOverride: true } : food);
+    }
+  }
+  function setBarcodeMacroField(setter, raw) {
+    setter(fdDecimalFilter(raw));
+    markBarcodeMacroOverride();
+  }
+  function setBarcodeCalories(raw) {
+    onKcal100Change(raw);
+    markBarcodeMacroOverride();
+  }
   function pickResult(r) {
-    setPendingFood({ ...r, fromCache: !!r.cached });
+    const barcode = /^\d{8,14}$/.test(String(query || '').trim());
+    setPendingFood({ ...r, fromCache: !!r.cached, macroEditable: barcode, macroOverride: false });
+    if (barcode) setEditableFoodMacros(r);
     setFavedId(existingFavId(`${r.source}:${r.sourceId}`, r.name));
     setQtyFromG(r.servingSizeG != null ? Math.round(r.servingSizeG) : 100);
     openQtySheet();
@@ -3602,7 +3673,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // flows straight into the scaled totals; for a real DB food they come
     // from the fixed rates on pendingFood, its own source's energy value,
     // never derived from macros.
-    const custom = !!pendingFood.custom;
+    const custom = !!pendingFood.custom || !!pendingFood.macroOverride;
     const rate = (s, key) => {
       if (!custom) return pendingFood[key] || 0;
       const n = parseFloat(s);
@@ -3635,7 +3706,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
-  const qtyNameMissing = !!(pendingFood && pendingFood.custom) && !String(pendingFood.name || '').trim();
+  const qtyNameMissing = !!(pendingFood && (pendingFood.custom || pendingFood.macroOverride)) && !String(pendingFood.name || '').trim();
 
   // Every call site that opens the quantity sheet for a (possibly new)
   // pendingFood must go through this instead of setQtySheetOpen(true)
@@ -3714,7 +3785,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // A scanned label rides through the quantity sheet as a custom item
     // (foodId null, source 'custom'): it has per-100g rates to scale by, but
     // no shared-cache identity, so it must never be cached or keyed by source.
-    const custom = !!pendingFood.custom;
+    const custom = !!pendingFood.custom || !!pendingFood.macroOverride;
     const name = (pendingFood.name || '').trim();
     if (custom && !name) return null;
     return {
@@ -4528,8 +4599,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const updated = {
       // ...entry keeps id, date, time, createdAt, planned, recipeId,
       // loggedTotalPortions, loggedCookedGrams, loggedCookedWeightG,
-      // templateSlotId, splitBatch, loggedUnit, foodId, brand, source
+      // splitBatch, loggedUnit, foodId, brand, source. A planned template
+      // row becomes a one-off as soon as its ingredients are edited, so it
+      // must not be overwritten by a later meal-plan slot update.
       ...entry,
+      templateSlotId: entry.planned ? null : entry.templateSlotId,
       foodName: ingredientBaseName || entry.foodName,
       quantityG: Math.round(sum('quantityG')),
       calories: Math.round(fdRecipeItemsCalories(ingredientItems, netCarbs)),
@@ -5913,25 +5987,29 @@ function FoodScreen({ store, setStore, go, userId, date }) {
               </div>
             )}
             {pendingFood.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{pendingFood.brand}</div>}
-            {pendingFood.custom && (
+            {(pendingFood.custom || pendingFood.macroEditable) && (
               <>
-                <Field label="Name" style={{ marginBottom: 14 }}>
-                  <TextInput value={pendingFood.name || ''} onChange={(v) => setPendingFood(pf => pf ? { ...pf, name: v } : pf)} placeholder="e.g. Protein bar" />
-                </Field>
+                {pendingFood.custom && (
+                  <Field label="Name" style={{ marginBottom: 14 }}>
+                    <TextInput value={pendingFood.name || ''} onChange={(v) => setPendingFood(pf => pf ? { ...pf, name: v } : pf)} placeholder="e.g. Protein bar" />
+                  </Field>
+                )}
                 <Bezel style={{ marginBottom: 6 }}>Per 100g</Bezel>
-                <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>Edit if the scan misread.</div>
+                <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>
+                  {pendingFood.custom ? 'Edit if the scan misread.' : 'Barcode nutrition can be wrong. Corrections apply to this item only.'}
+                </div>
                 <Field label="Calories (kcal, from macros)" style={{ marginBottom: 10 }}>
-                  <input value={kcal100Str} onChange={e => onKcal100Change(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+                  <input value={kcal100Str} onChange={e => pendingFood.macroEditable ? setBarcodeCalories(e.target.value) : onKcal100Change(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
                 </Field>
                 <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
                   <Field label="Protein (g)" style={{ flex: 1 }}>
-                    <input value={p100Str} onChange={e => setP100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={p100Str} onChange={e => pendingFood.macroEditable ? setBarcodeMacroField(setP100Str, e.target.value) : setP100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                   <Field label="Carbs (g)" style={{ flex: 1 }}>
-                    <input value={c100Str} onChange={e => setC100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={c100Str} onChange={e => pendingFood.macroEditable ? setBarcodeMacroField(setC100Str, e.target.value) : setC100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                   <Field label="Fat (g)" style={{ flex: 1 }}>
-                    <input value={f100Str} onChange={e => setF100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                    <input value={f100Str} onChange={e => pendingFood.macroEditable ? setBarcodeMacroField(setF100Str, e.target.value) : setF100Str(fdDecimalFilter(e.target.value))} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
                   </Field>
                 </div>
               </>
@@ -7649,7 +7727,16 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
   }
   async function deleteSlot(slot) {
     if (!await confirm(`${slot.foodName}`, { title: 'Remove meal?', ok: 'Remove', cancel: 'Cancel', danger: true })) return;
-    setStore(s => ({ ...s, foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id) }));
+    const todayISO = LB.todayISO();
+    setStore(s => ({
+      ...s,
+      foodTemplateSlots: (s.foodTemplateSlots || []).filter(x => x.id !== slot.id),
+      // Removing a recurring meal also removes its still-open future copies.
+      // Past rows and anything already checked off remain history. This is
+      // what makes remove + add behave like a real swap instead of showing
+      // the deleted meal until the lookahead window finally rolls over.
+      foodLogs: (s.foodLogs || []).filter(log => !(log.planned && log.templateSlotId === slot.id && log.date >= todayISO)),
+    }));
   }
 
   // Manually pull the template back into today's plan: the escape hatch for
@@ -7764,22 +7851,32 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
     setStore(s => {
       const list = s.foodTemplateSlots || [];
       // Edit: update the slot only. Existing materialized entries for today keep
-      // their own (possibly already-eaten) state, not retro-rewritten from here.
+      // their own (possibly already-eaten) state. The auto-fill reconciliation
+      // above refreshes still-planned future copies from the updated snapshot.
       if (draft.id) {
         return { ...s, foodTemplateSlots: list.map(x => x.id === draft.id ? { ...x, ...draftBuilt, ...common } : x) };
       }
       const sortIdx = list.filter(x => x.mealPlanId === viewedPlanId).reduce((m, x) => Math.max(m, x.sortIdx || 0), 0) + 1;
       const slot = { id: LB.uid(), ...draftBuilt, ...common, mealPlanId: viewedPlanId, sortIdx, createdAt: new Date().toISOString() };
-      // Fill today right away so a freshly added fixum shows in today's plan,
-      // not only from tomorrow's auto-fill. ONLY when this plan is the active
-      // one (an inactive plan never auto-fills, so editing it must not leak
-      // into today), the day type matches, and no copy is already there. The
-      // once-per-day marker is unaffected, and templateSlotId dedup keeps the
-      // effect from adding a second copy.
+      // Fill the whole lookahead right away so a freshly added fixum appears
+      // consistently after a remove + add swap. The once-per-day marker is a
+      // guard for the active plan's ordinary auto-fill pass; a genuinely new
+      // slot has a new id, so it is safe to materialize even on dates whose
+      // marker already exists for the previous slot set.
       let foodLogs = s.foodLogs || [];
-      const alreadyToday = foodLogs.some(l => l.date === todayISO && l.templateSlotId === slot.id);
-      if (viewedPlanId === s.activeMealTemplateId && fdSlotMatchesDate(slot, s, todayISO) && !alreadyToday && !LB.foodDayIsClosed(s.dailyLogs, todayISO)) {
-        foodLogs = [fdMaterializeSlotEntry(slot, todayISO), ...foodLogs];
+      if (viewedPlanId === s.activeMealTemplateId) {
+        const existing = new Set(foodLogs.filter(l => l.templateSlotId).map(l => `${l.date}|${l.templateSlotId}`));
+        const additions = [];
+        for (let i = 0; i < FD_PLAN_LOOKAHEAD_DAYS; i++) {
+          const date = LB.shiftDate(todayISO, i);
+          if (date === todayISO && LB.foodDayIsClosed(s.dailyLogs, date)) continue;
+          const key = `${date}|${slot.id}`;
+          if (!existing.has(key) && fdSlotMatchesDate(slot, s, date)) {
+            existing.add(key);
+            additions.push(fdMaterializeSlotEntry(slot, date));
+          }
+        }
+        if (additions.length) foodLogs = [...additions, ...foodLogs];
       }
       return { ...s, foodTemplateSlots: [...list, slot], foodLogs };
     });
@@ -10962,6 +11059,14 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
   // null while browsing. Search/favorites/recent all funnel through this one
   // quantity step before joining `staged`.
   const [qtyItem, setQtyItem] = useStateFd(null);
+  // Barcode results can carry bad nutrition data. Keep the correction local to
+  // this staged ingredient: only after the user edits a field does it stop
+  // referring to the shared food id and become a personal snapshot.
+  const [qtyP100Str, setQtyP100Str] = useStateFd('');
+  const [qtyC100Str, setQtyC100Str] = useStateFd('');
+  const [qtyF100Str, setQtyF100Str] = useStateFd('');
+  const [qtyKcal100Str, setQtyKcal100Str, onQtyKcal100Change, qtyKcal100Touched, setQtyKcal100Touched] =
+    useAutoDerivedCalories(qtyP100Str, qtyC100Str, qtyF100Str, qtyItem?.fiberPer100g, !!store.settings?.netCarbs, !!qtyItem?.macroEditable);
   // Same qtyUseOz/qtyStr/qtyExactG quartet FoodScreen's quantity sheet uses
   // (see the comments there): qtyUseOz is the per-sheet g/oz override
   // (defaults to Settings, flippable here without leaving the flow), the
@@ -11015,6 +11120,7 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     setMName(''); setMG(''); setMP(''); setMC(''); setMF(''); setMFib(''); setMCal(''); setMCalTouched(false);
     setStaged([]);
     setQtyItem(null); setQtyFromG(null); setQtyUnitIdx(null); setQtyCountStr('');
+    setQtyP100Str(''); setQtyC100Str(''); setQtyF100Str(''); setQtyKcal100Str(''); setQtyKcal100Touched(false);
     setExplodeRecipe(null); setExplodeMode('portions'); setExplodePortions(1); setExplodeGramsStr('');
     setScanPickerOpen(false); setScanOpen(false); setLabelScanning(false); setLabelError(null);
   }, [open]);
@@ -11113,20 +11219,44 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     setMFib(fib != null ? String(Math.round(fib)) : '');
   }
 
-  function closeQtySheet() { setQtyItem(null); setQtyFromG(null); setQtyUnitIdx(null); setQtyCountStr(''); }
+  function closeQtySheet() {
+    setQtyItem(null); setQtyFromG(null); setQtyUnitIdx(null); setQtyCountStr('');
+    setQtyP100Str(''); setQtyC100Str(''); setQtyF100Str(''); setQtyKcal100Str(''); setQtyKcal100Touched(false);
+  }
   // Opens the quantity step for a search result: per-100g rates are already
   // right there in the search response, default amount is its stated
   // serving (else 100g), same defaults pickResult uses in FoodScreen.
   function openQtyForResult(r) {
+    const barcode = /^\d{8,14}$/.test(String(query || '').trim());
     setQtyItem({
       name: r.name, brand: r.brand || null, source: r.source, sourceId: r.sourceId,
       kcalPer100g: r.kcalPer100g, proteinPer100g: r.proteinPer100g, carbsPer100g: r.carbsPer100g,
       fatPer100g: r.fatPer100g, fiberPer100g: r.fiberPer100g,
       sugarPer100g: r.sugarPer100g ?? null, satFatPer100g: r.satFatPer100g ?? null, sodiumMgPer100g: r.sodiumMgPer100g ?? null,
-      fromCache: !!r.cached, units: null,
+      fromCache: !!r.cached, units: null, macroEditable: barcode, macroOverride: false,
     });
+    if (barcode) {
+      setQtyP100Str(r.proteinPer100g != null ? String(fdRound1(r.proteinPer100g)) : '');
+      setQtyC100Str(r.carbsPer100g != null ? String(fdRound1(r.carbsPer100g)) : '');
+      setQtyF100Str(r.fatPer100g != null ? String(fdRound1(r.fatPer100g)) : '');
+      setQtyKcal100Str(r.kcalPer100g != null ? String(Math.round(r.kcalPer100g)) : '');
+      setQtyKcal100Touched(false);
+    }
     setQtyUnitIdx(null); setQtyCountStr('');
     setQtyFromG(r.servingSizeG != null ? Math.round(r.servingSizeG) : 100);
+  }
+  function markQtyBarcodeMacroOverride() {
+    if (qtyItem?.macroEditable && !qtyItem.macroOverride) {
+      setQtyItem(item => item ? { ...item, macroOverride: true } : item);
+    }
+  }
+  function setQtyBarcodeMacroField(setter, raw) {
+    setter(fdDecimalFilter(raw));
+    markQtyBarcodeMacroOverride();
+  }
+  function setQtyBarcodeCalories(raw) {
+    onQtyKcal100Change(raw);
+    markQtyBarcodeMacroOverride();
   }
   // Opens the quantity step for a favorite or a past log entry: both only
   // carry already-scaled macros, so per-100g rates are derived from their
@@ -11171,9 +11301,10 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
     const netCarbs = !!store.settings?.netCarbs;
-    const protein = fdRound1((qtyItem.proteinPer100g || 0) * factor);
-    const carbs = fdRound1((qtyItem.carbsPer100g || 0) * factor);
-    const fat = fdRound1((qtyItem.fatPer100g || 0) * factor);
+    const corrected = !!qtyItem.macroOverride;
+    const protein = fdRound1((corrected ? (fdNum(qtyP100Str) || 0) : (qtyItem.proteinPer100g || 0)) * factor);
+    const carbs = fdRound1((corrected ? (fdNum(qtyC100Str) || 0) : (qtyItem.carbsPer100g || 0)) * factor);
+    const fat = fdRound1((corrected ? (fdNum(qtyF100Str) || 0) : (qtyItem.fatPer100g || 0)) * factor);
     const fiber = qtyItem.fiberPer100g != null ? fdRound1(qtyItem.fiberPer100g * factor) : null;
     // Migration 0204 extras, scaled like the rest so an ingredient carries them
     // into the recipe it joins. null stays null ("source does not report it").
@@ -11181,10 +11312,12 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     const satFat = qtyItem.satFatPer100g != null ? fdRound1(qtyItem.satFatPer100g * factor) : null;
     const sodiumMg = qtyItem.sodiumMgPer100g != null ? Math.round(qtyItem.sodiumMgPer100g * factor) : null;
     return {
-      calories: Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
+      calories: corrected
+        ? Math.round((fdNum(qtyKcal100Str) || 0) * factor)
+        : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
       protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
-  }, [qtyItem, qtyStr, qtyExactG, qtyUseOz, store.settings?.netCarbs]);
+  }, [qtyItem, qtyStr, qtyExactG, qtyUseOz, qtyP100Str, qtyC100Str, qtyF100Str, qtyKcal100Str, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
   // the "Add N ingredients" button below) and caches a not-yet-cached DB
   // food right away, same rule confirmLogFood/toggleFavorite use in
@@ -11193,8 +11326,8 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     if (!qtyItem || !qtyPreview) return;
     setStaged(list => [...list, {
       tempId: LB.uid(),
-      foodId: qtyItem.sourceId ? `${qtyItem.source}:${qtyItem.sourceId}` : null,
-      foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.source,
+      foodId: qtyItem.macroOverride || !qtyItem.sourceId ? null : `${qtyItem.source}:${qtyItem.sourceId}`,
+      foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.macroOverride ? 'custom' : qtyItem.source,
       quantityG: qtyGrams(), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
@@ -11203,7 +11336,7 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
       // (4 pcs)" instead of a bare gram number; null for a grams-pick.
       loggedUnit: qtyUnitIdx != null ? (qtyItem.units?.[qtyUnitIdx] || null) : null,
     }]);
-    ensureFoodCached(qtyItem);
+    if (!qtyItem.macroOverride) ensureFoodCached(qtyItem);
     closeQtySheet();
   }
   function removeStaged(tempId) {
@@ -11650,6 +11783,28 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
         {qtyItem && (
           <>
             {qtyItem.brand && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 14 }}>{qtyItem.brand}</div>}
+            {qtyItem.macroEditable && (
+              <>
+                <Bezel style={{ marginBottom: 6 }}>Per 100g</Bezel>
+                <div style={{ fontSize: 10, color: UI.inkFaint, fontFamily: UI.fontUi, marginBottom: 8 }}>
+                  Barcode nutrition can be wrong. Corrections apply to this ingredient only.
+                </div>
+                <Field label="Calories (kcal, from macros)" style={{ marginBottom: 10 }}>
+                  <input value={qtyKcal100Str} onChange={e => setQtyBarcodeCalories(e.target.value)} type="text" inputMode="decimal" placeholder="kcal" style={fdInputStyle} />
+                </Field>
+                <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+                  <Field label="Protein (g)" style={{ flex: 1 }}>
+                    <input value={qtyP100Str} onChange={e => setQtyBarcodeMacroField(setQtyP100Str, e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Carbs (g)" style={{ flex: 1 }}>
+                    <input value={qtyC100Str} onChange={e => setQtyBarcodeMacroField(setQtyC100Str, e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                  <Field label="Fat (g)" style={{ flex: 1 }}>
+                    <input value={qtyF100Str} onChange={e => setQtyBarcodeMacroField(setQtyF100Str, e.target.value)} type="text" inputMode="decimal" placeholder="g" style={fdInputStyle} />
+                  </Field>
+                </div>
+              </>
+            )}
             {qtyItem.units?.length > 0 && (
               <div style={{ display: 'flex', borderRadius: 4, overflow: 'hidden', border: `var(--hair-width) solid ${UI.hairStrong}`, marginBottom: 10, flexWrap: 'wrap' }}>
                 <button onClick={() => selectQtyUnit(null)} style={fdSegBtn(qtyUnitIdx == null)}>Grams</button>

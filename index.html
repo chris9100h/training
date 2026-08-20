@@ -5,14 +5,19 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content" />
 <!-- BUILD_SUPABASE_CONFIG -->
 <script>
-// Chrome on iPhone uses WebKit too, but its iOS fixed-position compositor can
-// paint controls away from their hit-test boxes after the browser chrome moves.
-// Mark that browser early so the app shell can use document positioning there.
+// Every iOS browser uses WebKit, and its fixed-position compositor can paint
+// controls away from their hit-test boxes after the browser chrome moves. Mark
+// browser tabs (but not installed PWAs) early so the app shell can use a local
+// document coordinate system there. Chrome gets the legacy class as well for
+// compatibility with older cached bundles.
 (function () {
   var ua = navigator.userAgent || '';
   var ios = /iPhone|iPad|iPod/i.test(ua) || (/Macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
   var standalone = !!(navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
-  if (ios && /CriOS\//i.test(ua) && !standalone) document.documentElement.classList.add('ios-chrome');
+  if (ios && !standalone) {
+    document.documentElement.classList.add('ios-browser');
+    if (/CriOS\//i.test(ua)) document.documentElement.classList.add('ios-chrome');
+  }
 })();
 </script>
 <meta name="theme-color" content="#07060a" />
@@ -226,11 +231,11 @@
     max-width: calc(440px / 1.12);
     height: calc(var(--app-viewport-height, 100dvh) / 1.12);
   }
-  /* Chrome iOS 26 can paint fixed layers at a stale browser-toolbar offset
+  /* iOS browsers can paint fixed layers at a stale browser-toolbar offset
      while hit-testing against their current CSS geometry. Keep the app shell
-     in document positioning on that browser so paint and input coordinates
-     share the same containing block. */
-  html.ios-chrome body {
+     in document positioning in browser tabs so paint and input coordinates
+     share the same containing block. Installed PWAs keep the fixed shell. */
+  html.ios-browser body {
     /* Make the body the local containing block for the absolute app shell and
        for the small number of body-level portals. Keeping the document itself
        non-scrollable prevents WebKit's page pan from becoming a second,
@@ -244,7 +249,7 @@
     height: calc(var(--app-viewport-height, 100dvh) + var(--app-viewport-top, 0px));
     min-height: calc(var(--app-viewport-height, 100dvh) + var(--app-viewport-top, 0px));
   }
-  html.ios-chrome #root {
+  html.ios-browser #root {
     position: absolute;
     /* Fixed descendants (sheets, alerts, lightboxes) must share the app
        shell's containing block. Otherwise Chrome iOS can paint the shell in
@@ -252,6 +257,11 @@
        viewport coordinates after its browser chrome or keyboard moves. */
     transform: translateZ(0);
   }
+  /* A one-frame compositor reset used after a layout release or from
+     Settings -> Appearance. Removing the root layer transform and forcing a
+     layout read makes WebKit discard stale paint/hit-test geometry without
+     navigating away from a running workout. */
+  html.zane-viewport-reflow #root { transform: none !important; }
   @media (min-width: 768px) {
     #root {
       max-width: 100%;
@@ -341,14 +351,12 @@
   input[type=number]::-webkit-outer-spin-button,
   input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
   input[type=number] { -moz-appearance: textfield; }
-  /* iOS Safari misplaces the native caret in inputs/textareas that sit inside a
-     transformed / position:fixed / overflow-scroll ancestor, and every text field
-     here lives in a Sheet (all three at once), so the caret lands where the field
-     stood before the sheet slid up. Promoting each field to its own compositing
-     layer makes WebKit compute the caret in the field's own coordinate space. This
-     is layer-only (no visual shift) and does not touch the custom numeric keypad,
-     which uses divs, not native inputs. */
+  /* Keep the historical layer promotion for non-iOS browsers. On iOS the
+     promotion itself can preserve a stale compositor/hit-test layer after the
+     browser chrome moves, so browser-tab fields opt out below. The keyboard
+     focus helper still handles caret visibility without this transform. */
   input, textarea { transform: translateZ(0); }
+  html.ios-browser input, html.ios-browser textarea { transform: none; }
   /* Compact fields keep their normal size at rest. On iOS the focus handler
      adds this class only when a field would otherwise trigger Safari's
      automatic page zoom, so the keyboard can open without shifting the app's
@@ -1237,17 +1245,18 @@ window.applyLargeTextPreference(localStorage.getItem('logbook-larger-text') === 
 window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
 <script>
-// Keep the fixed app shell aligned with the mobile visual viewport.
+// Keep the app shell aligned with the mobile visual viewport.
 // iOS can change the visual viewport after keyboard, toolbar, rotation, or
-// background transitions without updating the fixed root's hit-test geometry.
-// That leaves buttons visibly in one place while touch targets drift away.
+// background transitions without updating a fixed root's hit-test geometry.
+// Browser tabs use a local document coordinate system; installed PWAs keep
+// the fixed shell and receive the same measured reflow/reset path below.
 (function () {
   var vv = window.visualViewport;
   var root = document.getElementById('root');
   if (!root) return;
   var raf = 0;
-  var iosChromeTopCorrection = 0;
-  var isIosChrome = document.documentElement.classList.contains('ios-chrome');
+  var iosBrowserTopCorrection = 0;
+  var isIosBrowser = document.documentElement.classList.contains('ios-browser');
   var isStandalone = !!(window.navigator.standalone || (window.matchMedia && window.matchMedia('(display-mode: standalone)').matches));
   var viewportMeta = document.querySelector('meta[name="viewport"]');
   var healthyWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
@@ -1293,7 +1302,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         // focus does not inherit the old keyboard-sized reference.
         keyboardBaselineHeight = Math.max(layout, visualHeight || 0);
       }
-      // Regular Chrome on iOS can leave the visual viewport panned after the
+      // iOS browser tabs can leave the visual viewport panned after the
       // keyboard is dismissed. The old handler only used offsetTop while a
       // field was focused, so the app then remained visibly shifted while its
       // hit-test boxes stayed at the old origin. Keep a correction for the
@@ -1302,26 +1311,26 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       // the older, safer keyboard-only rule because their visualViewport can
       // stay stale after resume.
       var top = 0;
-      if (isIosChrome && !isStandalone) {
+      if (isIosBrowser && !isStandalone) {
         var reportedTop = vv ? Math.max(0, Math.round(vv.offsetTop || 0)) : 0;
         if (keyboardOpen) {
-          iosChromeTopCorrection = reportedTop;
+          iosBrowserTopCorrection = reportedTop;
         } else if (reportedTop > 2) {
-          iosChromeTopCorrection = reportedTop;
-        } else if (iosChromeTopCorrection) {
+          iosBrowserTopCorrection = reportedTop;
+        } else if (iosBrowserTopCorrection) {
           // Some iOS 26 Chrome builds report offsetTop as zero even while the
           // document is still visually panned. The root rect is the
           // observable result of that pan. Do not clear a working correction
           // merely because the rect is now zero: that is exactly what we
           // expect when the correction cancels the stale browser pan.
           var rootTop = root.getBoundingClientRect().top;
-          if (rootTop > 2 && rootTop < 240) iosChromeTopCorrection = 0;
-          else if (rootTop < -2 && rootTop > -240) iosChromeTopCorrection = Math.round(-rootTop);
+          if (rootTop > 2 && rootTop < 240) iosBrowserTopCorrection = 0;
+          else if (rootTop < -2 && rootTop > -240) iosBrowserTopCorrection = Math.round(-rootTop);
         } else if (!typing) {
           var uncorrectedTop = root.getBoundingClientRect().top;
-          if (uncorrectedTop < -2 && uncorrectedTop > -240) iosChromeTopCorrection = Math.round(-uncorrectedTop);
+          if (uncorrectedTop < -2 && uncorrectedTop > -240) iosBrowserTopCorrection = Math.round(-uncorrectedTop);
         }
-        top = iosChromeTopCorrection;
+        top = iosBrowserTopCorrection;
       } else if (keyboardOpen && vv) {
         top = visualOffsetTop;
       }
@@ -1337,8 +1346,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       // still keeps the app at the actual 760px visible height.
       var height = keyboardOpen
         ? Math.max(1, visualHeight || layout)
-        : (isIosChrome && !isStandalone)
-          ? Math.max(1, Math.min(layout, (visualHeight || layout) + iosChromeTopCorrection))
+        : (isIosBrowser && !isStandalone)
+          ? Math.max(1, Math.min(layout, (visualHeight || layout) + iosBrowserTopCorrection))
           : Math.max(1, isStandalone ? Math.max(visualHeight, layout) : (visualHeight || layout));
       document.documentElement.style.setProperty('--app-viewport-top', top + 'px');
       document.documentElement.style.setProperty('--app-viewport-height', height + 'px');
@@ -1375,6 +1384,86 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
     setTimeout(sync, 80);
     setTimeout(sync, 300);
   };
+
+  // A service-worker/cache update refreshes files, but WebKit can retain the
+  // old compositor geometry for a fixed app shell. Keep a separate local
+  // layout epoch so a release can perform one explicit, non-destructive
+  // reflow even when the user is already on the newest SW version.
+  var LAYOUT_EPOCH = '2026-08-20-viewport-1';
+  var LAYOUT_EPOCH_KEY = 'logbook-layout-epoch';
+  var canonicalViewport = 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content';
+  var reflowInFlight = false;
+  var hasTextFocus = function () {
+    var ae = document.activeElement;
+    return !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
+  };
+  var rememberLayoutEpoch = function () {
+    try { localStorage.setItem(LAYOUT_EPOCH_KEY, LAYOUT_EPOCH); } catch (_) {}
+  };
+  var forceLayoutReflow = function () {
+    if (reflowInFlight || !root.children.length) return false;
+    reflowInFlight = true;
+    var html = document.documentElement;
+    var originalViewport = viewportMeta && viewportMeta.getAttribute('content');
+    var finished = false;
+    var finish = function () {
+      if (finished) return;
+      finished = true;
+      if (viewportMeta) viewportMeta.setAttribute('content', originalViewport || canonicalViewport);
+      html.classList.remove('zane-viewport-reflow');
+      // Read the new geometry before asking the normal visualViewport watcher
+      // to publish it. The extra delayed passes cover iOS toolbar/compositor
+      // settling, which often happens after the first animation frame.
+      void root.offsetHeight;
+      sync();
+      setTimeout(sync, 80);
+      setTimeout(sync, 320);
+      setTimeout(function () { reflowInFlight = false; }, 340);
+    };
+    try {
+      html.classList.add('zane-viewport-reflow');
+      if (window.pageYOffset || window.pageXOffset) window.scrollTo(0, 0);
+      // Temporarily remove interactive-widget so WebKit rebuilds the layout
+      // viewport itself; it is restored before the next paint settles.
+      if (viewportMeta) viewportMeta.setAttribute('content', 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1');
+      document.documentElement.style.setProperty('--app-viewport-top', '0px');
+      document.documentElement.style.setProperty('--app-viewport-height', layoutHeight() + 'px');
+      void html.offsetHeight;
+      void root.offsetHeight;
+      requestAnimationFrame(finish);
+      setTimeout(finish, 180);
+      return true;
+    } catch (_) {
+      html.classList.remove('zane-viewport-reflow');
+      reflowInFlight = false;
+      return false;
+    }
+  };
+  window.__zaneRecalibrateViewport = function () {
+    var ok = forceLayoutReflow();
+    if (ok) rememberLayoutEpoch();
+    return ok;
+  };
+  var applyLayoutEpoch = function () {
+    var applied = null;
+    try { applied = localStorage.getItem(LAYOUT_EPOCH_KEY); } catch (_) {}
+    if (applied === LAYOUT_EPOCH || !root.children.length || hasTextFocus()) return;
+    if (forceLayoutReflow()) rememberLayoutEpoch();
+  };
+  // React mounts asynchronously below this script. Observe the first mount so
+  // the one-time recalibration runs after the real shell exists, not against
+  // the empty boot container. The short fallback covers browsers without a
+  // MutationObserver notification during a fast cached boot.
+  if (typeof MutationObserver === 'function') {
+    var layoutObserver = new MutationObserver(function () {
+      if (!root.children.length) return;
+      layoutObserver.disconnect();
+      setTimeout(applyLayoutEpoch, 120);
+    });
+    layoutObserver.observe(root, { childList: true });
+  }
+  setTimeout(applyLayoutEpoch, 1500);
+
   sync();
   if (vv) {
     vv.addEventListener('resize', sync);

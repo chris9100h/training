@@ -1007,6 +1007,13 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   // Larger text is deliberately device-local. It changes presentation only,
   // so it never enters the synced settings row or a backup.
   const [largerText, setLargerText] = useStateSet(() => localStorage.getItem('logbook-larger-text') === 'true');
+  const [viewportRepairMessage, setViewportRepairMessage] = useStateSet(null);
+  const recalibrateViewport = () => {
+    const repair = window.__zaneRecalibrateViewport;
+    const ok = typeof repair === 'function' && repair();
+    setViewportRepairMessage(ok ? 'Layout recalibrated on this device.' : 'Layout recalibration is unavailable right now.');
+    window.setTimeout(() => setViewportRepairMessage(null), 2600);
+  };
   // Starts wherever the watermark is ALREADY sitting today (the same
   // per-theme/per-image defaults screens-home.jsx falls back to when
   // watermarkOpacity is unset), so the slider doesn't jump to an arbitrary
@@ -3841,6 +3848,19 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           </Row>
           <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '-2px 0 8px', lineHeight: 1.4 }}>
             Increases text and controls on this device only.
+          </div>
+          <div className="knurl" />
+          <div style={{ padding: '10px 0 4px' }}>
+            <div className="micro" style={{ marginBottom: 5 }}>Touch layout</div>
+            <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, lineHeight: 1.4 }}>
+              Use this if buttons appear visibly correct but respond a little above or below where you tap.
+            </div>
+            <Btn kind="ghost" style={{ width: '100%', marginTop: 10 }} onClick={recalibrateViewport}>Recalibrate layout</Btn>
+            {viewportRepairMessage && (
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: 'var(--accent)', textAlign: 'center', marginTop: 8 }}>
+                {viewportRepairMessage}
+              </div>
+            )}
           </div>
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">

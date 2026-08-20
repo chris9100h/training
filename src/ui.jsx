@@ -46,14 +46,14 @@ function isLightCanvasActive() {
   return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
 }
 
-// Chrome on iOS has a WebKit viewport bug where fixed layers can be painted
+// iOS browsers share a WebKit viewport bug where fixed layers can be painted
 // against the browser's old toolbar/keyboard geometry while their hit-test
 // boxes use the current geometry. The app shell creates a local containing
-// block for those layers on that browser; portals mounted directly under body
-// need the same absolute-vs-fixed choice explicitly.
+// block for browser tabs; portals mounted directly under body need the same
+// absolute-vs-fixed choice explicitly.
 function localViewportLayerPosition() {
   return typeof document !== 'undefined'
-    && document.documentElement.classList.contains('ios-chrome')
+    && document.documentElement.classList.contains('ios-browser')
     ? 'absolute'
     : 'fixed';
 }
@@ -2680,6 +2680,17 @@ function VolumeTrendChart({ trend }) {
 // Shared block recap used by Home, Training and Library confirmation sheets.
 function BlockRecap({ recap, evidence = null, escalation = 0, volumeTrend = null }) {
   const u = UI.unit();
+  const [showAllGains, setShowAllGains] = React.useState(false);
+  const loadPRs = [...(recap.loadPRs || [])]
+    .filter(g => g && Number(g.weightDelta) > 0)
+    .sort((a, b) => (Number(b.weightDelta) - Number(a.weightDelta)) || String(a.name).localeCompare(String(b.name)));
+  const setGains = [...(recap.setGains || [])]
+    .filter(g => g && Number(g.setDelta) > 0)
+    .sort((a, b) => (Number(b.setDelta) - Number(a.setDelta)) || String(a.name).localeCompare(String(b.name)));
+  const visibleLoadPRs = showAllGains ? loadPRs : loadPRs.slice(0, 6);
+  const visibleSetGains = showAllGains ? setGains : setGains.slice(0, 6);
+  const totalImprovements = loadPRs.length + setGains.length;
+  const hiddenGainCount = (loadPRs.length - visibleLoadPRs.length) + (setGains.length - visibleSetGains.length);
   const tile = (k, v) => (
     <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 12px' }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{k}</div>
@@ -2693,11 +2704,11 @@ function BlockRecap({ recap, evidence = null, escalation = 0, volumeTrend = null
         {tile('Sessions', recap.sessionCount)}
       </div>
       {volumeTrend && <VolumeTrendChart trend={volumeTrend} />}
-      {recap.loadPRs.length > 0 && (<>
+      {loadPRs.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>WHAT YOU BUILT</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {recap.loadPRs.map((g, i) => (
+          {visibleLoadPRs.map((g, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.weightDelta} {u}</span>
@@ -2705,11 +2716,11 @@ function BlockRecap({ recap, evidence = null, escalation = 0, volumeTrend = null
           ))}
         </div>
       </>)}
-      {recap.setGains.some(g => g.setDelta > 0) && (<>
+      {setGains.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>MORE SETS</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-          {recap.setGains.filter(g => g.setDelta > 0).map((g, i) => (
+          {visibleSetGains.map((g, i) => (
             <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '7px 10px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6 }}>
               <span style={{ fontFamily: UI.fontUi, fontSize: 13, color: UI.ink, minWidth: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{g.name}</span>
               <span style={{ fontFamily: UI.fontNum, fontSize: 12, fontWeight: 700, color: 'var(--accent)', flexShrink: 0, marginLeft: 10 }}>+{g.setDelta} set{g.setDelta > 1 ? 's' : ''}</span>
@@ -2717,6 +2728,14 @@ function BlockRecap({ recap, evidence = null, escalation = 0, volumeTrend = null
           ))}
         </div>
       </>)}
+      {hiddenGainCount > 0 && (
+        <button
+          onClick={() => setShowAllGains(value => !value)}
+          style={{ width: '100%', marginBottom: 16, padding: '9px 12px', borderRadius: 5, border: `1px solid ${UI.hairStrong}`, background: 'transparent', color: 'var(--accent)', fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, letterSpacing: '0.08em', cursor: 'pointer' }}
+        >
+          {showAllGains ? 'SHOW LESS' : `SHOW ALL ${totalImprovements} IMPROVEMENTS`}
+        </button>
+      )}
       {evidence && evidence.length > 0 && (<>
         <div className="micro" style={{ color: UI.inkFaint, marginBottom: 6 }}>{escalation > 0 ? 'THE FATIGUE, STILL CLIMBING' : 'THE FATIGUE'}</div>
         <div className="knurl" style={{ marginBottom: 10 }} />
