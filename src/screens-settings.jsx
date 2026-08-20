@@ -679,7 +679,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut }) {
+function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut, tapDebugEnabled = false, onTapDebugChange }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -3860,6 +3860,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
             <Btn kind="ghost" style={{ width: '100%', marginTop: 10 }} onClick={recalibrateViewport}>Recalibrate layout</Btn>
           </div>
+          {isAdmin && (
+            <>
+              <div className="knurl" />
+              <Row label="Tap geometry debug">
+                <Toggle on={!!tapDebugEnabled} onToggle={() => onTapDebugChange?.(!tapDebugEnabled)} />
+              </Row>
+              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '-2px 0 8px', lineHeight: 1.4 }}>
+                Admin-only, this device only. Shows the last tap and the element the browser actually hit; it never blocks interaction.
+              </div>
+            </>
+          )}
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">
               <Toggle on={paperAccentEnabled} onToggle={() => {

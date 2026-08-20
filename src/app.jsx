@@ -19,6 +19,111 @@ const INTENTIONAL_SIGNOUT_TTL_MS = 30000;
 const SYNC_RECONNECT_DELAYS_MS = [5000, 15000, 30000, 60000];
 
 const ADMIN_SUPPORT_EMAIL = 'office@btc-prime.biz';
+const TAP_DEBUG_KEY = 'logbook-tap-debug';
+
+// Local, admin-only tap geometry probe. It deliberately lives in the app
+// shell instead of a screen so it can inspect every route and overlay. The
+// layer never receives pointer events; the marker and target outline are
+// diagnostic paint only and cannot change what the tap activates.
+function TapDebugOverlay({ enabled }) {
+  const [sample, setSample] = useStateA(null);
+  const clearTimer = useRefA(null);
+
+  useEffectA(() => {
+    if (!enabled) {
+      if (clearTimer.current) window.clearTimeout(clearTimer.current);
+      clearTimer.current = null;
+      setSample(null);
+      return undefined;
+    }
+
+    const onPointerDown = (event) => {
+      if (event.isPrimary === false) return;
+      const root = document.getElementById('root');
+      if (!root) return;
+      const rootRect = root.getBoundingClientRect();
+      const rawTarget = document.elementFromPoint(event.clientX, event.clientY);
+      const target = rawTarget?.closest?.(
+        'button, a, input, textarea, select, [role="button"], [role="switch"], [data-tap-anchor]'
+      ) || rawTarget;
+      const targetRect = target?.getBoundingClientRect?.();
+      const localPoint = {
+        x: event.clientX - rootRect.left,
+        y: event.clientY - rootRect.top,
+      };
+      const localRect = targetRect ? {
+        left: targetRect.left - rootRect.left,
+        top: targetRect.top - rootRect.top,
+        width: targetRect.width,
+        height: targetRect.height,
+      } : null;
+      const rawLabel = target?.getAttribute?.('aria-label')
+        || target?.getAttribute?.('title')
+        || target?.innerText
+        || target?.textContent
+        || '';
+      const label = String(rawLabel).replace(/\s+/g, ' ').trim().slice(0, 58);
+      const tag = target?.tagName ? target.tagName.toLowerCase() : 'none';
+      const centerX = localRect ? localRect.left + localRect.width / 2 : localPoint.x;
+      const centerY = localRect ? localRect.top + localRect.height / 2 : localPoint.y;
+
+      setSample({
+        clientX: event.clientX,
+        clientY: event.clientY,
+        localPoint,
+        localRect,
+        target: `${tag}${label ? ` · ${label}` : ''}`,
+        deltaX: Math.round(localPoint.x - centerX),
+        deltaY: Math.round(localPoint.y - centerY),
+        pointerType: event.pointerType || 'unknown',
+      });
+      if (clearTimer.current) window.clearTimeout(clearTimer.current);
+      clearTimer.current = window.setTimeout(() => {
+        clearTimer.current = null;
+        setSample(null);
+      }, 5000);
+    };
+
+    window.addEventListener('pointerdown', onPointerDown, true);
+    return () => {
+      window.removeEventListener('pointerdown', onPointerDown, true);
+      if (clearTimer.current) window.clearTimeout(clearTimer.current);
+      clearTimer.current = null;
+    };
+  }, [enabled]);
+
+  if (!enabled || !sample) return null;
+  const point = sample.localPoint;
+  const rect = sample.localRect;
+  return (
+    <div
+      data-zane-tap-debug="true"
+      aria-hidden="true"
+      style={{ position: 'absolute', inset: 0, zIndex: 30000, pointerEvents: 'none', fontFamily: UI.fontUi }}
+    >
+      {rect && (
+        <div style={{
+          position: 'absolute', left: rect.left, top: rect.top, width: rect.width, height: rect.height,
+          boxSizing: 'border-box', border: '2px solid var(--accent)', borderRadius: 6,
+          background: 'rgba(var(--accent-rgb),0.08)', boxShadow: '0 0 0 2px rgba(0,0,0,0.7), 0 0 18px rgba(var(--accent-rgb),0.65)',
+        }} />
+      )}
+      <div style={{ position: 'absolute', left: point.x, top: point.y, width: 24, height: 24, transform: 'translate(-50%, -50%)', border: '2px solid var(--danger)', borderRadius: '50%', boxSizing: 'border-box', boxShadow: '0 0 0 2px rgba(0,0,0,0.8), 0 0 14px rgba(var(--danger-rgb),0.8)' }} />
+      <div style={{ position: 'absolute', left: point.x, top: point.y - 17, width: 2, height: 34, transform: 'translateX(-50%)', background: 'var(--danger)', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+      <div style={{ position: 'absolute', left: point.x - 17, top: point.y, width: 34, height: 2, transform: 'translateY(-50%)', background: 'var(--danger)', boxShadow: '0 0 3px rgba(0,0,0,0.8)' }} />
+      <div style={{
+        position: 'absolute', top: 10, left: 10, maxWidth: 'calc(100% - 20px)', boxSizing: 'border-box',
+        padding: '9px 11px', border: '1px solid var(--accent)', borderRadius: 6,
+        background: 'rgba(12,10,16,0.94)', color: UI.ink, boxShadow: '0 5px 20px rgba(0,0,0,0.4)',
+        fontSize: 10.5, lineHeight: 1.35, letterSpacing: '0.02em', textShadow: 'none',
+      }}>
+        <div style={{ color: 'var(--accent)', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase', marginBottom: 3 }}>Tap debug · admin</div>
+        <div style={{ color: UI.inkSoft }}>hit: <span style={{ color: UI.ink }}>{sample.target}</span></div>
+        <div style={{ color: UI.inkFaint }}>client {Math.round(sample.clientX)},{Math.round(sample.clientY)} · {sample.pointerType} · offset {sample.deltaX >= 0 ? '+' : ''}{sample.deltaX},{sample.deltaY >= 0 ? '+' : ''}{sample.deltaY}</div>
+      </div>
+    </div>
+  );
+}
 
 // Entries newer than the last-seen id. New users / first run after the feature
 // shipped (no stored id) get just the latest, not the whole back catalogue.
@@ -867,6 +972,12 @@ function App() {
   const [onboardingState, setOnboardingState] = useStateA(null); // null | { phase:'prompt' } | { phase:'tour', tourKey }
   const [lifetimeCongratsPending, setLifetimeCongratsPending] = useStateA(false);
   const [pwaInstallPending, setPwaInstallPending] = useStateA(false);
+  // Tap geometry diagnostics are deliberately device-local. The render is
+  // additionally gated by the signed-in admin identity below, so a stored
+  // toggle can never expose the probe to another account on this device.
+  const [tapDebugEnabled, setTapDebugEnabled] = useStateA(() => {
+    try { return localStorage.getItem(TAP_DEBUG_KEY) === 'true'; } catch (_) { return false; }
+  });
   const onboardingChecked = useRefA(false);
   // Live snapshot of store, read (not subscribed to) by the What's New effect
   // below so it can peek at the current onboarding-relevant fields without
@@ -874,6 +985,24 @@ function App() {
   // exactly like before whatsnew.js became a lazy load.
   const storeRefA = useRefA(store);
   storeRefA.current = store;
+  const isAdminUser = store?.user?.email === ADMIN_SUPPORT_EMAIL;
+  const setTapDebug = useCallbackA((next) => {
+    if (store?.user?.email !== ADMIN_SUPPORT_EMAIL) return;
+    const value = !!next;
+    try {
+      if (value) localStorage.setItem(TAP_DEBUG_KEY, 'true');
+      else localStorage.removeItem(TAP_DEBUG_KEY);
+    } catch (_) {}
+    setTapDebugEnabled(value);
+  }, [store?.user?.email]);
+  useEffectA(() => {
+    // Do not clear while boot is still loading: the admin identity has not
+    // been resolved yet. Once a user is known, a non-admin account cannot
+    // inherit the local diagnostic switch from a previous admin session.
+    if (!store?.user || isAdminUser || !tapDebugEnabled) return;
+    setTapDebugEnabled(false);
+    try { localStorage.removeItem(TAP_DEBUG_KEY); } catch (_) {}
+  }, [store?.user?.email, isAdminUser, tapDebugEnabled]);
   // Support unread counts are UI state, not part of the persisted user store.
   // Keep a synchronous copy so a boot merge cannot race a realtime callback
   // that has not rendered yet.
@@ -3680,7 +3809,7 @@ function App() {
     && openSheetCount === 0
     && !textEntryFocused;
 
-  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut };
+  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut, tapDebugEnabled, onTapDebugChange: setTapDebug };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water,
@@ -3894,6 +4023,7 @@ function App() {
       {lifetimeCongratsPending && safeForLifetimeCongrats && (
         <LifetimePremiumCongratsModal onDone={dismissLifetimeCongrats} />
       )}
+      {isAdminUser && tapDebugEnabled && <TapDebugOverlay enabled />}
     </>
   );
 }
