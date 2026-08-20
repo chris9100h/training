@@ -527,7 +527,6 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
             value={body}
             onChange={e => setBody(e.target.value)}
             rows={2}
-            onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
             onPaste={onPasteMessage}
             placeholder="Message…"
             style={{ flex: 1, minHeight: 40, resize: 'vertical', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: '10px 16px', fontFamily: UI.fontUi, fontSize: 14, color: UI.ink, outline: 'none' }}

@@ -5197,7 +5197,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
                       placeholder="Reply…" rows={2} style={{ ...iStyle, width: 'auto', minWidth: 0, flex: 1, minHeight: 40, resize: 'vertical', padding: '10px 16px' }}
                       onPaste={onPasteAdminMessage}
-                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdminReply(); } }}
                     />
                     <button onClick={handleAdminReply} disabled={supportAdminSending || (!supportAdminDraft.trim() && !adminImageFile)} aria-label="Send reply" style={{ width: 40, height: 40, borderRadius: 6, border: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'var(--accent)' : 'transparent', color: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'var(--accent-ink)' : UI.inkFaint, textShadow: 'none', cursor: supportAdminSending || (!supportAdminDraft.trim() && !adminImageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
                       {supportAdminSending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
