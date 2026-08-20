@@ -2644,22 +2644,27 @@ function VolumeTrendChart({ trend }) {
   const plotWidth = width - left - right;
   const plotHeight = height - top - bottom;
   const values = points.map(p => Math.max(0, Number(p.averageVolume) || 0));
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, 0);
-  const range = max - min || 1;
+  const dataMax = Math.max(...values, 0);
+  const dataMin = Math.min(...values);
+  // Keep the plot focused on the actual block trend. A zero baseline makes
+  // meaningful cycle-to-cycle changes look flat, especially for high-volume
+  // users. Keep zero only when the data itself reaches zero.
+  const domainMin = dataMin > 0 ? dataMin * 0.95 : dataMin;
+  const domainMax = dataMax > 0 ? dataMax * 1.05 : 1;
+  const range = Math.max(domainMax - domainMin, 1);
   const xAt = i => points.length === 1 ? left + plotWidth / 2 : left + (i / (points.length - 1)) * plotWidth;
-  const yAt = value => top + ((max - value) / range) * plotHeight;
+  const yAt = value => top + ((domainMax - value) / range) * plotHeight;
   const fmt = value => Math.round(value).toLocaleString('en-US');
   const polyline = points.map((p, i) => `${xAt(i)},${yAt(values[i])}`).join(' ');
   const labelStep = points.length > 8 ? Math.ceil(points.length / 8) : 1;
-  const gridValues = [max, min + range / 2, min];
+  const gridValues = [domainMax, domainMin + range / 2, domainMin];
   return (
     <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 10px 8px', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>AVG VOLUME PER {String(trend.unitLabel || 'unit').toUpperCase()}</div>
         <div className="micro" style={{ color: UI.inkFaint }}>SINCE BLOCK START</div>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Average volume per ${trend.unitLabel || 'unit'} since block start`} style={{ display: 'block', width: '100%', height: 'auto', overflow: 'visible' }}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Average volume per ${trend.unitLabel || 'unit'} since block start`} style={{ display: 'block', width: '100%', height: 'auto', overflow: 'hidden' }}>
         {gridValues.map((value, i) => {
           const y = yAt(value);
           return <g key={i}>
