@@ -222,14 +222,14 @@
     overflow: hidden;
   }
   /* Optional accessibility scale. This is deliberately a device-local
-     presentation setting, not a database preference. Keeping the root's
-     layout box at the inverse zoom means the larger type still fits the same
-     viewport instead of introducing a second horizontal scroll surface. */
-  html.large-text #root {
-    zoom: 1.12;
-    width: calc(100% / 1.12);
-    max-width: calc(440px / 1.12);
-    height: calc(var(--app-viewport-height, 100dvh) / 1.12);
+     presentation setting, not a database preference. Scale text rather than
+     the app shell: zooming #root also enlarged cards, gaps and fixed widths,
+     which made compact rows wrap into each other. Text inflation lets the
+     content become taller and use its normal scroll surface while buttons and
+     hit targets keep their geometry. */
+  html.large-text {
+    -webkit-text-size-adjust: 112%;
+    text-size-adjust: 112%;
   }
   /* iOS browsers can paint fixed layers at a stale browser-toolbar offset
      while hit-testing against their current CSS geometry. Keep the app shell
