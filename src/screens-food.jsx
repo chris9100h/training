@@ -468,6 +468,58 @@ async function ensureFoodCached(pendingFoodOrItem) {
   }
   return true;
 }
+
+// Barcode corrections are personal overlays, not edits to the shared
+// zane_foods provider cache. Keep the client key deterministic so the same
+// correction merges cleanly between devices and syncStore can upsert the
+// natural (user, source, barcode) key in Supabase.
+function fdFoodBarcodeOverrideKey(source, sourceId) {
+  return `${String(source || '').toLowerCase()}:${String(sourceId || '')}`;
+}
+
+function fdApplyFoodBarcodeOverrides(results, overrides) {
+  if (!Array.isArray(results) || !Array.isArray(overrides) || !overrides.length) return results || [];
+  const byKey = new Map(overrides.map(o => [fdFoodBarcodeOverrideKey(o.source, o.sourceId), o]));
+  return results.map(result => {
+    const override = byKey.get(fdFoodBarcodeOverrideKey(result.source, result.sourceId));
+    if (!override) return result;
+    return {
+      ...result,
+      name: override.foodName || result.name,
+      brand: override.brand ?? result.brand ?? null,
+      kcalPer100g: override.kcalPer100g,
+      proteinPer100g: override.proteinPer100g,
+      carbsPer100g: override.carbsPer100g,
+      fatPer100g: override.fatPer100g,
+    };
+  });
+}
+
+function fdRememberFoodBarcodeOverride(setStore, item, values) {
+  const source = String(item?.source || '').toLowerCase();
+  const sourceId = String(item?.sourceId || '').trim();
+  if (source !== 'off' || !/^\d{8,14}$/.test(sourceId)) return;
+  const number = value => {
+    if (value === '' || value == null || !Number.isFinite(Number(value)) || Number(value) < 0) return null;
+    return Number(value);
+  };
+  const kcalPer100g = number(values?.kcalPer100g);
+  const proteinPer100g = number(values?.proteinPer100g);
+  const carbsPer100g = number(values?.carbsPer100g);
+  const fatPer100g = number(values?.fatPer100g);
+  if ([kcalPer100g, proteinPer100g, carbsPer100g, fatPer100g].some(v => v == null)) return;
+  const now = new Date().toISOString();
+  const row = {
+    id: fdFoodBarcodeOverrideKey(source, sourceId), source, sourceId,
+    foodName: String(item.name || '').trim() || 'Barcode food', brand: item.brand || null,
+    kcalPer100g, proteinPer100g, carbsPer100g, fatPer100g,
+    createdAt: item.overrideCreatedAt || now, updatedAt: now,
+  };
+  setStore(state => ({
+    ...state,
+    foodBarcodeOverrides: [row, ...(state.foodBarcodeOverrides || []).filter(o => o.id !== row.id)],
+  }));
+}
 // English ordinal suffix for the meal-of-choice weekly counter ("1st", "2nd",
 // "3rd", "4th", …), 11th/12th/13th excepted from the 1/2/3 rule.
 function fdOrdinal(n) {
@@ -3407,7 +3459,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const res = await LB.searchFoods(q, src);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); setBarcodeMiss(null); return; }
-    setResults(res.results);
+    setResults(fdApplyFoodBarcodeOverrides(res.results, store.foodBarcodeOverrides));
     // A barcode that finds nothing is a dead end the user is uniquely well
     // placed to get out of: the product is in their hand and the camera was
     // open a second ago. Barcode lookup only exists for Open Food Facts, so a
@@ -3938,6 +3990,12 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function confirmLogFood(planned = false) {
     const built = buildQtyEntry();
     if (!built) return;
+    if (pendingFood?.macroOverride) {
+      fdRememberFoodBarcodeOverride(setStore, pendingFood, {
+        kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+        carbsPer100g: c100Str, fatPer100g: f100Str,
+      });
+    }
     // Editing one row of a "Describe a meal" review list: write the edited
     // amount/macros back into that row and return to the list (still open
     // underneath, see mealItems' Sheet below), nothing is staged/logged yet.
@@ -7612,7 +7670,7 @@ function FoodTemplateScreenOpen({ open, onClose, store, setStore, userId, picker
     const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickerSource);
     setPickerSearching(false);
     if (!res.ok) { setPickerSearchError(res.error || 'Search failed. Try again.'); setPickerResults([]); return; }
-    setPickerResults(res.results);
+    setPickerResults(fdApplyFoodBarcodeOverrides(res.results, store.foodBarcodeOverrides));
   }
   // Third way into the config sheet, alongside openAddFood/openAddRecipe:
   // a fresh database pick instead of something already in the user's
@@ -11136,7 +11194,7 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     const res = await LB.searchFoods(q, srcOverride !== undefined ? srcOverride : pickSource);
     setSearching(false);
     if (!res.ok) { setSearchError(res.error || 'Search failed. Try again.'); setResults([]); return; }
-    setResults(res.results);
+    setResults(fdApplyFoodBarcodeOverrides(res.results, store.foodBarcodeOverrides));
   }
   // A scanned barcode runs straight through the normal search (same as
   // FoodScreen's handleScan): the found product shows as a result to tap.
@@ -11324,6 +11382,12 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
   // FoodScreen (a recipe is as durable a record as a favorite).
   function confirmStageItem() {
     if (!qtyItem || !qtyPreview) return;
+    if (qtyItem.macroOverride) {
+      fdRememberFoodBarcodeOverride(setStore, qtyItem, {
+        kcalPer100g: qtyKcal100Str, proteinPer100g: qtyP100Str,
+        carbsPer100g: qtyC100Str, fatPer100g: qtyF100Str,
+      });
+    }
     setStaged(list => [...list, {
       tempId: LB.uid(),
       foodId: qtyItem.macroOverride || !qtyItem.sourceId ? null : `${qtyItem.source}:${qtyItem.sourceId}`,

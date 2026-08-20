@@ -5948,41 +5948,55 @@ async function testAsync(name, fn) {
 
   // ── Autoreg v2 P2: block recap aggregation ───────────────────────────────────
   {
-    const S = (id, gains, opts = {}) => ({ id, ended: (opts.date || '2026-07-05') + 'T10:00:00Z', date: opts.date || '2026-07-05', signalWeight: opts.signalWeight, mesoRecap: { gains } });
+    const E = (name, kg, exId = name.toLowerCase()) => ({ exId, name, sets: [{ kg, reps: 8, done: true }] });
+    const S = (id, gains, opts = {}) => ({ id, ended: (opts.date || '2026-07-05') + 'T10:00:00Z', date: opts.date || '2026-07-05', signalWeight: opts.signalWeight, entries: opts.entries || [], mesoRecap: { gains } });
 
-    test('buildBlockRecap: folds set + weight deltas across the block', () => {
+    test('buildBlockRecap: compares actual start/end loads and still folds set gains', () => {
       const r = LB.buildBlockRecap([
-        S('a', [{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }], { date: '2026-07-02' }),
-        S('b', [{ name: 'Bench', weightDelta: 2.5, setDelta: 0 }, { name: 'Squat', weightDelta: 5, setDelta: 2 }], { date: '2026-07-04' }),
+        S('a', [{ name: 'Bench', weightDelta: 2.5, setDelta: 1 }], { date: '2026-07-02', entries: [E('Bench', 100), E('Squat', 80)] }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5, setDelta: 0 }, { name: 'Squat', weightDelta: 5, setDelta: 2 }], { date: '2026-07-04', entries: [E('Bench', 102.5), E('Squat', 85)] }),
       ]);
       assert.strictEqual(r.sessionCount, 2);
-      assert.strictEqual(r.prCount, 3, 'three positive weight deltas across the block');
+      assert.strictEqual(r.prCount, 2, 'one net load improvement per exercise');
       assert.strictEqual(r.setGains.find(x => x.name === 'Bench').setDelta, 1);
       assert.strictEqual(r.setGains.find(x => x.name === 'Squat').setDelta, 2);
-      assert.strictEqual(r.loadPRs.find(x => x.name === 'Bench').weightDelta, 5, 'Bench kg folds 2.5+2.5');
+      assert.strictEqual(r.loadPRs.find(x => x.name === 'Bench').weightDelta, 2.5, 'Bench uses actual start/end kg, not cumulative earns');
+      assert.strictEqual(r.loadPRs.find(x => x.name === 'Squat').weightDelta, 5);
     });
     test('buildBlockRecap: best session is the one with the most PRs', () => {
       const r = LB.buildBlockRecap([
-        S('a', [{ name: 'Bench', weightDelta: 2.5 }], { date: '2026-07-02' }),
-        S('b', [{ name: 'Bench', weightDelta: 2.5 }, { name: 'Row', weightDelta: 2.5 }], { date: '2026-07-04' }),
+        S('a', [{ name: 'Bench', weightDelta: 2.5 }], { date: '2026-07-02', entries: [E('Bench', 100), E('Row', 50)] }),
+        S('b', [{ name: 'Bench', weightDelta: 2.5 }, { name: 'Row', weightDelta: 2.5 }], { date: '2026-07-04', entries: [E('Bench', 102.5), E('Row', 52.5)] }),
       ]);
       assert.strictEqual(r.bestSession.date, '2026-07-04');
       assert.strictEqual(r.bestSession.prs, 2);
     });
     test('buildBlockRecap: a deload (signalWeight none) session is excluded, a rough (discounted) PR still counts', () => {
       const r = LB.buildBlockRecap([
-        S('none', [{ name: 'Bench', weightDelta: 2.5 }], { signalWeight: 'none' }),
-        S('rough', [{ name: 'Squat', weightDelta: 2.5 }], { signalWeight: 'discounted' }),
+        S('none', [{ name: 'Bench', weightDelta: 2.5 }], { signalWeight: 'none', entries: [E('Bench', 90)] }),
+        S('rough-a', [], { signalWeight: 'discounted', entries: [E('Squat', 80)] }),
+        S('rough-b', [{ name: 'Squat', weightDelta: 2.5 }], { signalWeight: 'discounted', entries: [E('Squat', 82.5)] }),
       ]);
-      assert.strictEqual(r.sessionCount, 1, 'the none session is dropped');
+      assert.strictEqual(r.sessionCount, 2, 'the none session is dropped');
       assert.strictEqual(r.prCount, 1, 'the discounted PR is real and counts');
       assert.strictEqual(r.loadPRs[0].name, 'Squat');
     });
     test('buildBlockRecap: a negative weight delta (rep-miss cut) is not a PR', () => {
-      const r = LB.buildBlockRecap([S('a', [{ name: 'Bench', weightDelta: -2.5, setDelta: 0 }])]);
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Bench', weightDelta: -2.5, setDelta: 0 }], { entries: [E('Bench', 100)] }),
+        S('b', [], { date: '2026-07-06', entries: [E('Bench', 97.5)] }),
+      ]);
       assert.strictEqual(r.prCount, 0);
       assert.strictEqual(r.loadPRs.length, 0, 'a cut is never a load PR');
       assert.strictEqual(r.bestSession, null);
+    });
+    test('buildBlockRecap: a declined earn with no actual load change is not shown as progress', () => {
+      const r = LB.buildBlockRecap([
+        S('a', [{ name: 'Lateral raise', weightDelta: 2.5 }], { entries: [E('Lateral raise', 6)] }),
+        S('b', [{ name: 'Lateral raise', weightDelta: 2.5 }], { date: '2026-07-06', entries: [E('Lateral raise', 6)] }),
+      ]);
+      assert.strictEqual(r.prCount, 0);
+      assert.strictEqual(r.loadPRs.length, 0);
     });
 
     const volumeSession = (id, date, kg, opts = {}) => ({

@@ -729,7 +729,7 @@ function ErrorScreen({ onRetry }) {
 
 const STAGED_BOOT_COLLECTIONS = [
   'exercises', 'schedules', 'skips', 'cardioLogs', 'cardioPlans', 'dailyLogs',
-  'statusPeriods', 'waterLogs', 'foodLogs', 'foodFavorites', 'foodRecipes',
+  'statusPeriods', 'waterLogs', 'foodLogs', 'foodFavorites', 'foodBarcodeOverrides', 'foodRecipes',
   'foodTemplateSlots', 'foodTemplateDays', 'foodMealPlans', 'foodShoppingPrefs',
   'medicationPlans', 'medications', 'medicationScheduleSlots', 'medicationLogs',
   'medicationPlanItems', 'medicationPillboxChecks', 'glucoseLogs',
@@ -2272,6 +2272,10 @@ function App() {
             const serverFavIds = new Set((fresh.foodFavorites || []).map(f => f.id));
             const baseFavIds = base ? new Set((base.foodFavorites || []).map(f => f.id)) : null;
             const localOnlyFavorites = (cur.foodFavorites || []).filter(x => !serverFavIds.has(x.id) && !baseFavIds?.has(x.id));
+            const barcodeOverridesLoaded = Array.isArray(fresh.foodBarcodeOverrides);
+            const serverBarcodeOverrideIds = new Set((fresh.foodBarcodeOverrides || []).map(o => o.id));
+            const baseBarcodeOverrideIds = base ? new Set((base.foodBarcodeOverrides || []).map(o => o.id)) : null;
+            const localOnlyBarcodeOverrides = (cur.foodBarcodeOverrides || []).filter(x => !serverBarcodeOverrideIds.has(x.id) && !baseBarcodeOverrideIds?.has(x.id));
             const serverRecipeIds = new Set((fresh.foodRecipes || []).map(r => r.id));
             const baseRecipeIds = base ? new Set((base.foodRecipes || []).map(r => r.id)) : null;
             const localOnlyRecipes = (cur.foodRecipes || []).filter(x => !serverRecipeIds.has(x.id) && !baseRecipeIds?.has(x.id));
@@ -2352,6 +2356,8 @@ function App() {
             const delFoodIds = baseFoodIds ? new Set([...baseFoodIds].filter(id => !curFoodIdSet.has(id))) : null;
             const curFavIdSet = new Set((cur.foodFavorites || []).map(f => f.id));
             const delFavIds = baseFavIds ? new Set([...baseFavIds].filter(id => !curFavIdSet.has(id))) : null;
+            const curBarcodeOverrideIdSet = new Set((cur.foodBarcodeOverrides || []).map(o => o.id));
+            const delBarcodeOverrideIds = baseBarcodeOverrideIds ? new Set([...baseBarcodeOverrideIds].filter(id => !curBarcodeOverrideIdSet.has(id))) : null;
             const curRecipeIdSet = new Set((cur.foodRecipes || []).map(r => r.id));
             const delRecipeIds = baseRecipeIds ? new Set([...baseRecipeIds].filter(id => !curRecipeIdSet.has(id))) : null;
             const curTemplateSlotIdSet = new Set((cur.foodTemplateSlots || []).map(t => t.id));
@@ -2498,6 +2504,12 @@ function App() {
               waterLogs: [...localOnlyWaterLogs, ...LB.mergeWindowedCollectionById(fresh.waterLogs, cur.waterLogs, base?.waterLogs, delWaterIds, 'waterLogs')],
               foodLogs: [...localOnlyFoodLogs, ...LB.mergeWindowedCollectionById(fresh.foodLogs, cur.foodLogs, base?.foodLogs, delFoodIds, 'foodLogs')],
               foodFavorites: [...localOnlyFavorites, ...mergeById(fresh.foodFavorites, cur.foodFavorites, base?.foodFavorites, delFavIds)],
+              // Essential boot results intentionally omit the deferred Food
+              // collections. Keep the cached overrides intact until the full
+              // background load supplies an explicit (possibly empty) list.
+              foodBarcodeOverrides: barcodeOverridesLoaded
+                ? [...localOnlyBarcodeOverrides, ...mergeById(fresh.foodBarcodeOverrides, cur.foodBarcodeOverrides, base?.foodBarcodeOverrides, delBarcodeOverrideIds)]
+                : (cur.foodBarcodeOverrides || []),
               foodRecipes: [...localOnlyRecipes, ...mergeById(fresh.foodRecipes, cur.foodRecipes, base?.foodRecipes, delRecipeIds)],
               foodTemplateSlots: [...localOnlyTemplateSlots, ...mergeById(fresh.foodTemplateSlots, cur.foodTemplateSlots, base?.foodTemplateSlots, delTemplateSlotIds)],
               foodTemplateDays: [...localOnlyTemplateDays, ...LB.mergeWindowedCollectionById(fresh.foodTemplateDays, cur.foodTemplateDays, base?.foodTemplateDays, delTemplateDayIds, 'foodTemplateDays')],

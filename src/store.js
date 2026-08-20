@@ -1605,6 +1605,7 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_water_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_logs').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_favorites').delete().eq('user_id', userId)),
+    unwrap(_supabase.from('zane_food_barcode_overrides').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_recipes').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_template_slots').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_food_meal_plans').delete().eq('user_id', userId)),
@@ -1889,6 +1890,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     + (backup.adaptiveTdeeHistory?.length ? 1 : 0)
     + (backup.foodLogs?.length ? 1 : 0)
     + (backup.foodFavorites?.length ? 1 : 0)
+    + (backup.foodBarcodeOverrides?.length ? 1 : 0)
     + (backup.foodRecipes?.length ? 1 : 0)
     + (backup.foodTemplateSlots?.length ? 1 : 0)
     + (backup.foodTemplateDays?.length ? 1 : 0)
@@ -2130,6 +2132,20 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         fiber: f.fiber ?? null, sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
         units: f.units ?? [],
       }))
+    ));
+    stepsDone++;
+  }
+  if (backup.foodBarcodeOverrides?.length) {
+    prog('Restoring barcode corrections…');
+    await unwrap(_supabase.from('zane_food_barcode_overrides').upsert(
+      backup.foodBarcodeOverrides.map(o => ({
+        user_id: userId, source: o.source, source_id: o.sourceId,
+        food_name: o.foodName, brand: o.brand ?? null,
+        kcal_per_100g: o.kcalPer100g, protein_per_100g: o.proteinPer100g,
+        carbs_per_100g: o.carbsPer100g, fat_per_100g: o.fatPer100g,
+        created_at: o.createdAt ?? new Date().toISOString(),
+        updated_at: o.updatedAt ?? o.createdAt ?? new Date().toISOString(),
+      })), { onConflict: 'user_id,source,source_id' }
     ));
     stepsDone++;
   }
@@ -2393,6 +2409,8 @@ async function exportBackup(store, userId) {
     // back after importing a backup.
     _supabase.from('zane_food_template_days').select('id, date')
       .eq('user_id', userId).order('date', { ascending: false }),
+    _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at')
+      .eq('user_id', userId).order('updated_at', { ascending: false }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
@@ -2403,7 +2421,7 @@ async function exportBackup(store, userId) {
     );
   }
 
-  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, foodTemplateDaysRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
+  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, foodTemplateDaysRes, foodBarcodeOverridesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
 
   // Import is delete-then-restore, so a silent partial fetch would produce an
   // incomplete backup that later wipes the missing data. Fail loudly instead.
@@ -2412,6 +2430,7 @@ async function exportBackup(store, userId) {
   if (medicationLogsRes.error) throw medicationLogsRes.error;
   if (adaptiveTdeeHistoryRes.error) throw adaptiveTdeeHistoryRes.error;
   if (foodTemplateDaysRes.error) throw foodTemplateDaysRes.error;
+  if (foodBarcodeOverridesRes.error) throw foodBarcodeOverridesRes.error;
   if (notesRes?.error) throw notesRes.error;
   if (threadsRes?.error) throw threadsRes.error;
   if (macrosRes?.error) throw macrosRes.error;
@@ -2444,6 +2463,16 @@ async function exportBackup(store, userId) {
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
     })),
     foodTemplateDays: (foodTemplateDaysRes.data || []).map(d => ({ id: d.id, date: d.date })),
+    foodBarcodeOverrides: (foodBarcodeOverridesRes.data || []).map(o => ({
+      id: `${o.source}:${o.source_id}`,
+      source: o.source, sourceId: o.source_id,
+      foodName: o.food_name, brand: o.brand ?? null,
+      kcalPer100g: parseFloat(o.kcal_per_100g),
+      proteinPer100g: parseFloat(o.protein_per_100g),
+      carbsPer100g: parseFloat(o.carbs_per_100g),
+      fatPer100g: parseFloat(o.fat_per_100g),
+      createdAt: o.created_at, updatedAt: o.updated_at ?? o.created_at,
+    })),
     adaptiveTdeeHistory: (adaptiveTdeeHistoryRes.data || []).map(mapAdaptiveTdeeHistoryRow),
     coaching: allCoachingIds.length ? {
       relationships: store.coaching,
@@ -2785,6 +2814,7 @@ function buildEssentialLoadResult({
     waterLogs: [],
     foodLogs: [],
     foodFavorites: [],
+    foodBarcodeOverrides: [],
     foodRecipes: [],
     foodTemplateSlots: [],
     foodTemplateDays: [],
@@ -2948,6 +2978,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // pushMealPlanToClient fetches the client's recipes directly when it needs
     // them for its dedup.
     isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    // Per-user barcode corrections. The shared zane_foods cache remains the
+    // provider snapshot; these rows are the owner's private overlay.
+    isCoachLoad ? null : _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }),
     isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, cooked_weight_g, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
@@ -2990,7 +3023,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // resume or start training. Query builders are lazy, so secondary requests
   // do not hit the network until the second Promise.all below.
   const coreQueryIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 23];
-  const medicationQueryIndexes = [34, 35, 36, 37, 38, 39];
+  const medicationQueryIndexes = [35, 36, 37, 38, 39, 40];
   const queryResults = new Array(queries.length);
   await runDbTaskBatch(coreQueryIndexes, async idx => {
     queryResults[idx] = await queries[idx];
@@ -3114,7 +3147,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
          coachInfoRes, coachClientsRes, unreadNotesRes, coachingRowRes, selfRowRes,
          cardioLogsRes, cardioPlansRes, dailyLogsRes, statusPeriodsRes,
          supportTicketsRes, glucoseLogsRes, bloodPressureLogsRes, bodyTempLogsRes, templatesRes, mesoStatesRes,
-         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
+         checkinTemplatesRes, planDraftsRes, waterLogsRes, foodLogsRes, foodFavoritesRes, foodBarcodeOverridesRes, foodRecipesRes, foodTemplateSlotsRes, foodTemplateDaysRes, foodMealPlansRes,
          foodShoppingPrefsRes, medicationPlansRes, medicationsRes, medicationScheduleSlotsRes, medicationLogsRes,
          medicationPlanItemsRes, medicationPillboxChecksRes] = queryResults;
 
@@ -3174,6 +3207,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   }
   if (checkinTemplatesRes?.error) throw checkinTemplatesRes.error;
   if (foodFavoritesRes?.error) throw foodFavoritesRes.error;
+  if (foodBarcodeOverridesRes?.error) throw foodBarcodeOverridesRes.error;
   if (foodRecipesRes?.error) throw foodRecipesRes.error;
   if (foodTemplateSlotsRes?.error) throw foodTemplateSlotsRes.error;
   if (foodTemplateDaysRes?.error) throw foodTemplateDaysRes.error;
@@ -3331,6 +3365,16 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
       sodiumMg: f.sodium_mg != null ? parseFloat(f.sodium_mg) : null,
       units: f.units || [],
       createdAt: f.created_at,
+    })),
+    foodBarcodeOverrides: (foodBarcodeOverridesRes?.data || []).map(o => ({
+      id: `${o.source}:${o.source_id}`,
+      source: o.source, sourceId: o.source_id,
+      foodName: o.food_name, brand: o.brand ?? null,
+      kcalPer100g: parseFloat(o.kcal_per_100g),
+      proteinPer100g: parseFloat(o.protein_per_100g),
+      carbsPer100g: parseFloat(o.carbs_per_100g),
+      fatPer100g: parseFloat(o.fat_per_100g),
+      createdAt: o.created_at, updatedAt: o.updated_at ?? o.created_at,
     })),
     foodRecipes: (foodRecipesRes?.data || []).map(r => ({
       id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1,
@@ -3985,6 +4029,25 @@ async function syncStore(prev, next, userId) {
       units: f.units ?? [],
     }))));
     if (removed.length) ops.push(_supabase.from('zane_food_favorites').delete().in('id', removed.map(f => f.id)));
+  }
+
+  if (prev.foodBarcodeOverrides !== next.foodBarcodeOverrides) {
+    const { upsert, removed } = diffCollectionById(prev.foodBarcodeOverrides, next.foodBarcodeOverrides);
+    if (upsert.length) ops.push(_supabase.from('zane_food_barcode_overrides').upsert(upsert.map(o => ({
+      user_id: userId, source: o.source, source_id: o.sourceId,
+      food_name: o.foodName, brand: o.brand ?? null,
+      kcal_per_100g: o.kcalPer100g, protein_per_100g: o.proteinPer100g,
+      carbs_per_100g: o.carbsPer100g, fat_per_100g: o.fatPer100g,
+      created_at: o.createdAt ?? new Date().toISOString(),
+      updated_at: o.updatedAt ?? new Date().toISOString(),
+    })), { onConflict: 'user_id,source,source_id' }));
+    // The store uses a deterministic source:sourceId key so the same row
+    // merges cleanly across devices. Delete by the natural key rather than a
+    // client-only synthetic id.
+    for (const o of removed) {
+      ops.push(_supabase.from('zane_food_barcode_overrides').delete()
+        .eq('user_id', userId).eq('source', o.source).eq('source_id', o.sourceId));
+    }
   }
 
   if (prev.foodRecipes !== next.foodRecipes) {
@@ -13125,35 +13188,88 @@ function blockSessions(sessions, mesoState, statusPeriods) {
   });
 }
 
-// Aggregate a block-level recap over the block's sessions (spec 5.1). Reads each
-// session's durably persisted mesoRecap.gains ({ name, weightDelta kg, setDelta })
-// and folds them across the whole block. signalWeight discipline (spec 4.3): a
-// 'none' (deload) session is excluded, but a 'discounted' (rough-day) session
-// still counts, a PR on a tired day is real and earns. Nothing is pre-aggregated
-// (there is no persisted PR count or "best session"), so both are derived here.
+// Aggregate a block-level recap over the block's sessions (spec 5.1). Set gains
+// still come from each session's durable mesoRecap, but load progress is derived
+// from the actual logged working weights: first observation versus last
+// observation for each exercise. The old implementation added every positive
+// mesoRecap.weightDelta, which made a boost that was later declined look like
+// permanent progress. signalWeight discipline (spec 4.3): a 'none' (deload)
+// session is excluded, but a 'discounted' (rough-day) session still counts.
 // Returns { sessionCount, setGains:[{name,setDelta}], loadPRs:[{name,weightDelta}],
 //   prCount, bestSession:{date,prs,weightGain}|null }. Pure/testable.
 function buildBlockRecap(sessions) {
-  const list = (sessions || []).filter(s => s && s.ended && (s.signalWeight || 'full') !== 'none');
+  const list = (sessions || [])
+    .filter(s => s && s.ended && (s.signalWeight || 'full') !== 'none')
+    .slice()
+    .sort((a, b) => String(a.ended || a.date || '').localeCompare(String(b.ended || b.date || '')));
   const byExSet = {};  // exercise name -> net set delta
-  const byExLoad = {}; // exercise name -> net kg delta
-  let prCount = 0;
-  let best = null;
+  // exercise key -> chronological observations of the actual best working
+  // weight used in each session. The key prefers exId so two exercises with
+  // the same display name cannot be folded together accidentally.
+  const loadObservations = new Map();
   for (const s of list) {
     const gains = (s.mesoRecap && Array.isArray(s.mesoRecap.gains)) ? s.mesoRecap.gains : [];
-    let sessionPrs = 0, sessionWeightGain = 0;
     for (const g of gains) {
       if (!g || !g.name) continue;
       if (g.setDelta) byExSet[g.name] = (byExSet[g.name] || 0) + g.setDelta;
-      if (g.weightDelta) {
-        byExLoad[g.name] = (byExLoad[g.name] || 0) + g.weightDelta;
-        if (g.weightDelta > 0) { prCount += 1; sessionPrs += 1; sessionWeightGain += g.weightDelta; }
+    }
+    for (const entry of (s.entries || [])) {
+      if (!entry || entry.isCardio) continue;
+      const weights = (entry.sets || [])
+        .filter(st => st && !st.warmup && !st.skipped && st.kg != null && Number.isFinite(Number(st.kg)))
+        .map(st => Number(st.kg));
+      if (!weights.length) continue;
+      const key = entry.exId != null
+        ? `id:${entry.exId}`
+        : `name:${String(entry.name || '').trim().toLowerCase()}`;
+      if (key === 'name:') continue;
+      const load = Math.max(...weights);
+      const rows = loadObservations.get(key) || [];
+      const last = rows[rows.length - 1];
+      const sessionKey = s.id || `${s.ended || ''}|${s.date || ''}`;
+      // An exercise can occur more than once in one session. Collapse those
+      // occurrences to the best working weight for that session, rather than
+      // manufacturing an intra-session "progression" point.
+      if (last && last.sessionId === sessionKey) {
+        if (load > last.load) last.load = load;
+        if (!last.name && entry.name) last.name = entry.name;
+      } else {
+        rows.push({ sessionId: sessionKey, date: s.date || (s.ended || '').slice(0, 10), load, name: entry.name || key.slice(3) });
+        loadObservations.set(key, rows);
       }
     }
-    if (sessionPrs > 0) {
-      const better = best == null || sessionPrs > best.prs || (sessionPrs === best.prs && sessionWeightGain > best.weightGain);
-      if (better) best = { date: s.date || (s.ended || '').slice(0, 10), prs: sessionPrs, weightGain: sessionWeightGain };
+  }
+
+  const byExLoad = {};
+  let prCount = 0;
+  let best = null;
+  const sessionProgress = new Map();
+  for (const rows of loadObservations.values()) {
+    if (rows.length < 2) continue;
+    const first = rows[0];
+    const last = rows[rows.length - 1];
+    const netDelta = Math.round((last.load - first.load) * 1000) / 1000;
+    if (netDelta > 0) {
+      const name = last.name || first.name;
+      byExLoad[name] = (byExLoad[name] || 0) + netDelta;
+      prCount += 1;
     }
+
+    // Keep the existing best-session field useful, but base it on real load
+    // changes between observations instead of mesoRecap earnings as well.
+    for (let i = 1; i < rows.length; i += 1) {
+      const delta = rows[i].load - rows[i - 1].load;
+      if (!(delta > 0)) continue;
+      const date = rows[i].date;
+      const score = sessionProgress.get(date) || { prs: 0, weightGain: 0 };
+      score.prs += 1;
+      score.weightGain += delta;
+      sessionProgress.set(date, score);
+    }
+  }
+  for (const [date, score] of sessionProgress.entries()) {
+    const better = !best || score.prs > best.prs || (score.prs === best.prs && score.weightGain > best.weightGain);
+    if (better) best = { date, prs: score.prs, weightGain: score.weightGain };
   }
   const setGains = Object.entries(byExSet).filter(([, v]) => v !== 0).map(([name, setDelta]) => ({ name, setDelta }));
   const loadPRs = Object.entries(byExLoad).filter(([, v]) => v > 0).map(([name, weightDelta]) => ({ name, weightDelta }));
