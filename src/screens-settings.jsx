@@ -1077,6 +1077,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [lightboxSrc, setLightboxSrc] = useStateSet(null); // chat/support attachment tapped for fullscreen view
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
+  const [supportAdminComposerFocused, setSupportAdminComposerFocused] = useStateSet(false);
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
   const [supportEditingNoteId, setSupportEditingNoteId] = useStateSet(null);
   const [supportEditingBody, setSupportEditingBody] = useStateSet('');
@@ -1521,6 +1522,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   useEffectSet(() => {
     adminBottomRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [supportTicketNotes]);
+
+  useEffectSet(() => {
+    // A newly opened ticket starts in the normal bottom-composer mode. The
+    // focused mode is only a temporary keyboard-safe editor surface.
+    setSupportAdminComposerFocused(false);
+  }, [supportTicket?.coachingId]);
 
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
@@ -5073,6 +5080,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
             const revealAdminComposer = (event) => {
               const target = event.currentTarget;
+              setSupportAdminComposerFocused(true);
               const reveal = () => {
                 if (document.activeElement !== target || !target.isConnected) return;
                 // The reply field is the last item in the same scroll owner as
@@ -5089,7 +5097,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               window.setTimeout(reveal, 320);
             };
             return (
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Back + meta */}
                 <div style={{ padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button onClick={() => { setSupportTicket(null); setSupportAdminDraft(''); }}
@@ -5113,12 +5121,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* Keep the thread and composer in one scroll owner. If the
-                    composer is a sibling of this scroller, iOS can keep it
-                    below the keyboard while all swipes only move the thread.
-                    Making it part of this same surface lets the shared focus
-                    helper scroll the reply field into the visual viewport. */}
-                <div ref={adminThreadRef} style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
+                {/* The thread is the only scrolling surface in the ticket. The
+                    composer is a positioned layer owned by this ticket, so it
+                    can move to a stable top position while iOS owns the bottom
+                    of the screen for its keyboard. */}
+                <div ref={adminThreadRef} style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', paddingBottom: supportAdminComposerFocused ? 16 : 280, minHeight: 0 }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
@@ -5170,11 +5177,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     });
                   })()}
                   <div ref={adminBottomRef} />
-                  {/* Compose stays in the same scroll surface as the thread.
-                      This is deliberate: sticky/fixed positioning on a sibling
-                      cannot be reached by the nested iOS scroller when the
-                      keyboard is open. */}
-                  <div style={{ position: 'sticky', bottom: 0, zIndex: 3, flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, margin: '6px -20px -16px', padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                </div>
+                {/* The editor is deliberately not a flex sibling of the
+                    scroller. In normal mode it sits at the bottom of the
+                    ticket; on focus it moves to the top of the ticket, which
+                    is always above the iOS keyboard regardless of WebKit's
+                    visual-viewport resize behavior. */}
+                <div style={{ position: 'absolute', left: 0, right: 0, top: supportAdminComposerFocused ? 0 : 'auto', bottom: supportAdminComposerFocused ? 'auto' : 'var(--zane-keyboard-inset, 0px)', zIndex: 5, boxSizing: 'border-box', borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -5185,6 +5194,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
                       placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
                       onFocus={revealAdminComposer}
+                      onBlur={e => window.setTimeout(() => {
+                        if (document.activeElement !== e.currentTarget) setSupportAdminComposerFocused(false);
+                      }, 120)}
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
@@ -5213,7 +5225,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}
-                </div>
                 </div>
               </div>
             );
