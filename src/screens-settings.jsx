@@ -228,6 +228,13 @@ function FullSheet({ open, onClose, title, children }) {
 
       const baseline = Math.max(baselineHeightRef.current, layoutHeight);
       const gap = Math.max(0, Math.round(baseline - visualBottom));
+      // Use the sheet's actual painted bottom as a second signal. On iOS the
+      // layout viewport can stay full-height while the keyboard overlays it,
+      // so the baseline/root heuristic may say "already resized" even though
+      // this dialog still extends underneath the keyboard. The overlap is in
+      // the same getBoundingClientRect coordinate space as visualViewport.
+      const sheetRect = sheet.getBoundingClientRect();
+      const sheetOverlap = Math.max(0, Math.round(sheetRect.bottom - visualBottom));
       const rootRect = document.getElementById('root')?.getBoundingClientRect();
       const shellAlreadyResized = !!rootRect
         && rootRect.height < baseline - 100
@@ -239,7 +246,7 @@ function FullSheet({ open, onClose, title, children }) {
       // the visual viewport, do not apply the same inset a second time.
       // Otherwise the sheet would collapse to almost no height under
       // interactive-widget=resizes-content.
-      const next = shellAlreadyResized ? 0 : (gap > 100 ? gap : 0);
+      const next = Math.max(sheetOverlap, shellAlreadyResized ? 0 : (gap > 100 ? gap : 0));
       if (next !== keyboardInsetRef.current) {
         keyboardInsetRef.current = next;
         setKeyboardInset(next);
@@ -277,7 +284,7 @@ function FullSheet({ open, onClose, title, children }) {
       data-zane-focus-boundary="true"
       data-zane-local-layer={sheetPosition === 'absolute' ? 'viewport' : undefined}
       data-zane-viewport-overlay="true"
-      style={{ position: sheetPosition, inset: 0, bottom: keyboardInset ? `${keyboardInset}px` : 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
+      style={{ position: sheetPosition, inset: 0, bottom: keyboardInset ? `${keyboardInset}px` : 0, '--zane-keyboard-inset': `${keyboardInset}px`, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
@@ -5143,7 +5150,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div ref={adminBottomRef} />
                 </div>
                 {/* Compose, sticks to bottom */}
-                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ position: 'sticky', bottom: 'var(--zane-keyboard-inset, 0px)', zIndex: 3, flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
