@@ -105,6 +105,28 @@ function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
 }
 
+// The admin inbox is a chat, not a full-screen settings page.  Keep the
+// dialog itself on the same Sheet implementation as the working coaching
+// chat, then give the thread one bounded flex column: header/status controls
+// and composer stay in normal flow while only the messages list scrolls.
+// In particular, do not put this back inside FullSheet.  FullSheet owns a
+// second viewport/keyboard coordinate system and was the reason the reply
+// field kept disappearing behind the iOS keyboard.
+function AdminSupportChatFrame({ children, detail = false }) {
+  return (
+    <div
+      data-zane-admin-chat="true"
+      style={{
+        display: 'flex', flexDirection: 'column', minHeight: detail ? 280 : 240,
+        height: 'min(65vh, 560px)', maxHeight: 'calc(100dvh - 96px)',
+        overflow: 'hidden', overscrollBehavior: 'contain',
+      }}
+    >
+      {children}
+    </div>
+  );
+}
+
 function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, saving, onToggleMetric }) {
   const groups = [...new Set(catalog.map(metric => metric.group))];
   const [openGroups, setOpenGroups] = useStateSet({ Activity: true });
@@ -5047,8 +5069,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         })()}
       </FullSheet>
 
-      {/* ══ Support inbox full-screen sheet (admin), inbox list + ticket detail in one ══ */}
-      <FullSheet
+      {/* ══ Support inbox chat sheet (admin), inbox list + ticket detail in one ══ */}
+      <SettingsSheet
         open={supportInboxSheet}
         onClose={supportTicket
           ? () => { setSupportTicket(null); setSupportAdminDraft(''); }
@@ -5056,7 +5078,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         }
         title={supportTicket ? (supportTicket.clientName || supportTicket.clientEmail) : 'Support inbox'}
       >
-        {(() => {
+        <AdminSupportChatFrame detail={!!supportTicket}>
+          {(() => {
           const CATS = { feature_request: 'Feature', bug: 'Bug', question: 'Question' };
           const iStyle = SETTINGS_TEXTAREA_STYLE;
 
@@ -5206,7 +5229,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           ];
           const filtered = supportCatFilter === 'all' ? supportInbox : supportInbox.filter(t => t.support_category === supportCatFilter);
           return (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '16px 20px' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: '16px 20px', minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain' }}>
               <div style={{ display: 'flex', gap: 6, marginBottom: 16, flexWrap: 'wrap' }}>
                 {filterDefs.map(f => (
                   <button key={f.key} onClick={() => setSupportCatFilter(f.key)} style={{
@@ -5254,8 +5277,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
               </div>
             </div>
           );
-        })()}
-      </FullSheet>
+          })()}
+        </AdminSupportChatFrame>
+      </SettingsSheet>
 
 
       {/* ══ All users sheet (admin) ══, folds in what used to be separate
