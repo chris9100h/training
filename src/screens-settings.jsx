@@ -172,9 +172,108 @@ function SocialMetricSharingSheet({ open, onClose, profile, catalog, message, sa
 }
 
 function FullSheet({ open, onClose, title, children }) {
+  const sheetRef = React.useRef(null);
+  const keyboardInsetRef = React.useRef(0);
+  const baselineHeightRef = React.useRef(
+    Math.max(window.innerHeight || 0, window.visualViewport?.height || 0)
+  );
+  const focusCancelRef = React.useRef(null);
+  const [keyboardInset, setKeyboardInset] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!open) {
+      keyboardInsetRef.current = 0;
+      setKeyboardInset(0);
+      focusCancelRef.current?.();
+      focusCancelRef.current = null;
+      return undefined;
+    }
+
+    const vv = window.visualViewport;
+    const isTextEntry = el => !!el && (
+      el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable
+    );
+    const scheduleFocus = target => {
+      if (!isTextEntry(target) || !sheetRef.current?.contains(target)) return;
+      focusCancelRef.current?.();
+      focusCancelRef.current = typeof scheduleFocusedInputVisibility === 'function'
+        ? scheduleFocusedInputVisibility(target, { boundary: sheetRef.current })
+        : null;
+    };
+    const measure = () => {
+      const sheet = sheetRef.current;
+      if (!sheet) return;
+      const active = document.activeElement;
+      const typing = isTextEntry(active) && sheet.contains(active);
+      const layoutHeight = Math.max(window.innerHeight || 0, document.documentElement?.clientHeight || 0);
+      const visualHeight = vv?.height || layoutHeight;
+      const visualBottom = (vv?.offsetTop || 0) + visualHeight;
+
+      // Keep a keyboard-free reference. On iOS with interactive-widget=
+      // resizes-content, innerHeight and visualViewport.height can shrink
+      // together, so their current difference alone is not enough to find the
+      // keyboard. The reference is only refreshed when no Support field owns
+      // focus, and therefore remains stable throughout the keyboard animation.
+      if (!typing) {
+        baselineHeightRef.current = Math.max(layoutHeight, visualHeight);
+        if (keyboardInsetRef.current) {
+          keyboardInsetRef.current = 0;
+          setKeyboardInset(0);
+        }
+        return;
+      }
+
+      const baseline = Math.max(baselineHeightRef.current, layoutHeight);
+      const gap = Math.max(0, Math.round(baseline - visualBottom));
+      const rootRect = document.getElementById('root')?.getBoundingClientRect();
+      const shellAlreadyResized = !!rootRect
+        && rootRect.height < baseline - 100
+        && rootRect.bottom <= visualBottom + 80;
+      // Browser chrome is normally well below this threshold; only reserve
+      // space for a real on-screen keyboard. Applying the inset to the sheet
+      // moves its composer above the keyboard even when the browser did not
+      // resize the fixed root itself. If the app shell has already resized to
+      // the visual viewport, do not apply the same inset a second time.
+      // Otherwise the sheet would collapse to almost no height under
+      // interactive-widget=resizes-content.
+      const next = shellAlreadyResized ? 0 : (gap > 100 ? gap : 0);
+      if (next !== keyboardInsetRef.current) {
+        keyboardInsetRef.current = next;
+        setKeyboardInset(next);
+      }
+      scheduleFocus(active);
+    };
+    const onFocusIn = event => {
+      if (!sheetRef.current?.contains(event.target) || !isTextEntry(event.target)) return;
+      scheduleFocus(event.target);
+      window.setTimeout(measure, 40);
+      window.setTimeout(measure, 220);
+    };
+
+    document.addEventListener('focusin', onFocusIn, true);
+    vv?.addEventListener('resize', measure, { passive: true });
+    vv?.addEventListener('scroll', measure, { passive: true });
+    window.addEventListener('resize', measure, { passive: true });
+    measure();
+    return () => {
+      document.removeEventListener('focusin', onFocusIn, true);
+      vv?.removeEventListener('resize', measure);
+      vv?.removeEventListener('scroll', measure);
+      window.removeEventListener('resize', measure);
+      focusCancelRef.current?.();
+      focusCancelRef.current = null;
+    };
+  }, [open]);
+
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}>
+    <div
+      ref={sheetRef}
+      role="dialog"
+      aria-modal="true"
+      data-zane-focus-boundary="true"
+      style={{ position: 'fixed', inset: 0, bottom: keyboardInset ? `${keyboardInset}px` : 0, zIndex: 200, background: UI.bg, backgroundImage: 'var(--bg-texture)', display: 'flex', flexDirection: 'column', paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)' }}
+    >
       <div style={{ display: 'flex', alignItems: 'center', padding: '14px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, background: UI.bgRaised }}>
         <div style={{ flex: 1, fontFamily: UI.fontDisplay, fontSize: 22, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--accent)' }}>{title}</div>
         <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 8, color: UI.inkFaint, WebkitTapHighlightColor: 'transparent', display: 'flex', alignItems: 'center' }}>
