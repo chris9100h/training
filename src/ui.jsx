@@ -60,6 +60,11 @@ function useFreshMountGuard(ms = 350, key = 0) {
   return inert;
 }
 
+// Keep the helper available through the shared UI namespace as well as the
+// window export. Screens use the namespace so this must exist before app.jsx
+// renders an async overlay during boot.
+UI.useFreshMountGuard = useFreshMountGuard;
+
 // iOS browsers share a WebKit viewport bug where fixed layers can be painted
 // against the browser's old toolbar/keyboard geometry while their hit-test
 // boxes use the current geometry. The app shell creates a local containing
