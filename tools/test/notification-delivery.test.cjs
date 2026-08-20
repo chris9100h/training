@@ -1,76 +1,43 @@
 #!/usr/bin/env node
 /* Executes the actual shared notification helper with mocked providers. The
    reminder state must advance only for a provider handoff that returned 2xx. */
-const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
-const Babel = require('@babel/standalone');
+const { loadTypeScriptModule } = require('./_helpers.cjs');
 
 const root = path.join(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'notifications.ts'), 'utf8');
-const compiled = Babel.transform(source, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: 'supabase/functions/_shared/notifications.ts',
-}).code;
-const sandboxModule = { exports: {} };
 const env = new Map([
   ['SUPABASE_URL', 'https://supabase.test'],
   ['SUPABASE_SERVICE_ROLE_KEY', 'service-key'],
   ['PUSHOVER_TOKEN', 'push-token'],
 ]);
-const sandbox = {
-  module: sandboxModule,
-  exports: sandboxModule.exports,
-  console,
-  Promise,
-  JSON,
-  AbortController,
-  setTimeout,
-  clearTimeout,
-  Deno: { env: { get: key => env.get(key) ?? '' } },
-  fetch: async (url) => {
-    if (url === 'https://api.pushover.net/1/messages.json') return fakeResponse(500, 'provider down');
-    if (url.includes('/functions/v1/web-push')) return fakeResponse(200, 'accepted');
-    throw new Error(`unexpected fetch: ${url}`);
-  },
+let fetchImpl = async (url) => {
+  if (url === 'https://api.pushover.net/1/messages.json') return fakeResponse(500, 'provider down');
+  if (url.includes('/functions/v1/web-push')) return fakeResponse(200, 'accepted');
+  throw new Error(`unexpected fetch: ${url}`);
 };
-vm.runInNewContext(compiled, sandbox, { filename: 'notifications.ts' });
-const { sendNotification } = sandboxModule.exports;
-
-const socialResultSource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'social-notification-result.ts'), 'utf8');
-const socialResultCompiled = Babel.transform(socialResultSource, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: 'supabase/functions/_shared/social-notification-result.ts',
-}).code;
-const socialResultModule = { exports: {} };
-vm.runInNewContext(socialResultCompiled, { module: socialResultModule, exports: socialResultModule.exports }, { filename: 'social-notification-result.ts' });
-const { socialAuthFailureStatus, socialNotificationStatus } = socialResultModule.exports;
-
-const medicationSource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'medication-reminder.ts'), 'utf8');
-const medicationCompiled = Babel.transform(medicationSource, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: 'supabase/functions/_shared/medication-reminder.ts',
-}).code;
-const medicationModule = { exports: {} };
-vm.runInNewContext(medicationCompiled, { module: medicationModule, exports: medicationModule.exports }, { filename: 'medication-reminder.ts' });
-const { canonicalMedicationReminderEntries, medicationClaimedIds } = medicationModule.exports;
-
-const webPushSecuritySource = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'web-push-security.ts'), 'utf8');
-const webPushSecurityCompiled = Babel.transform(webPushSecuritySource, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: 'supabase/functions/_shared/web-push-security.ts',
-}).code;
-const webPushSecurityModule = { exports: {} };
-vm.runInNewContext(webPushSecurityCompiled, {
-  module: webPushSecurityModule,
-  exports: webPushSecurityModule.exports,
-  URL,
-}, { filename: 'web-push-security.ts' });
-const { isAllowedWebPushEndpoint } = webPushSecurityModule.exports;
+const { sendNotification } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'notifications.ts'),
+  {
+    console,
+    Promise,
+    JSON,
+    AbortController,
+    setTimeout,
+    clearTimeout,
+    Deno: { env: { get: key => env.get(key) ?? '' } },
+    fetch: (...args) => fetchImpl(...args),
+  },
+);
+const { socialAuthFailureStatus, socialNotificationStatus } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'social-notification-result.ts'),
+);
+const { canonicalMedicationReminderEntries, medicationClaimedIds } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'medication-reminder.ts'),
+);
+const { isAllowedWebPushEndpoint } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'web-push-security.ts'),
+  { URL },
+);
 
 function fakeResponse(status, body) {
   return { ok: status >= 200 && status < 300, status, text: async () => String(body), json: async () => body };
@@ -133,7 +100,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   });
   assert(webPushAccepted === true, 'a subscription plus immediate web-push handoff was not accepted');
 
-  sandbox.fetch = async (url) => {
+  fetchImpl = async (url) => {
     if (url.includes('/functions/v1/web-push')) return fakeResponse(202, 'scheduled');
     throw new Error(`unexpected fetch: ${url}`);
   };
@@ -142,7 +109,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   });
   assert(delayedHandoff === false, 'a delayed web-push schedule was treated as delivered');
 
-  sandbox.fetch = async (url) => url.includes('/functions/v1/web-push')
+  fetchImpl = async (url) => url.includes('/functions/v1/web-push')
     ? fakeResponse(503, 'no subscription accepted')
     : (() => { throw new Error(`unexpected fetch: ${url}`); })();
   const noSubscription = await sendNotification({
@@ -154,7 +121,7 @@ function assert(condition, message) { if (!condition) throw new Error(message); 
   // to Web Push, which hardcoded 300 seconds, so a reminder meant to stay
   // deliverable for 12 hours expired in five minutes on that channel.
   let webPushBody = null;
-  sandbox.fetch = async (url, init) => {
+  fetchImpl = async (url, init) => {
     if (url.includes('/functions/v1/web-push')) { webPushBody = JSON.parse(init.body); return fakeResponse(200, 'accepted'); }
     throw new Error(`unexpected fetch: ${url}`);
   };

@@ -2,21 +2,14 @@
 /* Executes the actual shared reminder clock after TypeScript erasure. This
    pins DST-aware IANA conversion and the fixed-offset compatibility fallback
    without requiring a local Deno/Supabase runtime. */
-const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
-const Babel = require('@babel/standalone');
+const { loadTypeScriptModule } = require('./_helpers.cjs');
 
 const root = path.join(__dirname, '..', '..');
-const source = fs.readFileSync(path.join(root, 'supabase', 'functions', '_shared', 'time.ts'), 'utf8');
-const compiled = Babel.transform(source, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: 'supabase/functions/_shared/time.ts',
-}).code;
-const sandboxModule = { exports: {} };
-vm.runInNewContext(compiled, { module: sandboxModule, exports: sandboxModule.exports, Intl, Date, Object, Math }, { filename: 'time.ts' });
-const { localClock } = sandboxModule.exports;
+const { localClock } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'time.ts'),
+  { Intl, Date, Object, Math },
+);
 
 function assert(condition, message) {
   if (!condition) throw new Error(message);

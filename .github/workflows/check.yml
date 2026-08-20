@@ -28,9 +28,9 @@ jobs:
       # their syntax covered by the same CI job so a deploy cannot hide a
       # broken cron/helper file from the green app check.
       - run: node tools/check-edge-functions.cjs
-      - run: node tools/test/reminder-time.test.cjs
-      - run: node tools/test/notification-delivery.test.cjs
-      - run: node tools/test/store.test.cjs
+      # One runner keeps the focused unit suite in one place and also includes
+      # the coaching-drive storage helper test that used to be easy to miss.
+      - run: npm test
       # Replays all migrations and verifies schema.sql + docs/database.md
       # were updated alongside them (offline half of the DB drift checks;
       # the live half runs weekly via db-drift.yml).

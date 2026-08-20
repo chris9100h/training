@@ -1,7 +1,8 @@
 {
   "private": true,
   "scripts": {
-    "build": "node tools/build.cjs"
+    "build": "node tools/build.cjs",
+    "test": "node tools/test/run.cjs"
   },
   "devDependencies": {
     "@babel/standalone": "7.29.0"

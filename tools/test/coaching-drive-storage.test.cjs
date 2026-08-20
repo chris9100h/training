@@ -1,22 +1,10 @@
 #!/usr/bin/env node
 const assert = require('assert');
-const fs = require('fs');
 const path = require('path');
-const vm = require('vm');
-const Babel = require('@babel/standalone');
+const { loadTypeScriptModule } = require('./_helpers.cjs');
 
 const helperPath = path.join(__dirname, '..', '..', 'supabase', 'functions', '_shared', 'storage-cleanup.ts');
-const source = fs.readFileSync(helperPath, 'utf8');
-const code = Babel.transform(source, {
-  presets: ['typescript', ['env', { modules: 'commonjs' }]],
-  sourceType: 'module',
-  filename: helperPath,
-}).code;
-const mod = { exports: {} };
-const context = { module: mod, exports: mod.exports };
-vm.runInNewContext(code, context, { filename: helperPath });
-
-const isMissing = mod.exports.isMissingStorageObjectResponse;
+const { isMissingStorageObjectResponse: isMissing } = loadTypeScriptModule(helperPath);
 assert.strictEqual(typeof isMissing, 'function');
 assert.strictEqual(isMissing(404), true);
 assert.strictEqual(isMissing(400, '{"error":"NotFound","message":"Object not found"}'), true);
