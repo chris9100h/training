@@ -5176,44 +5176,40 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   })()}
                   <div ref={adminBottomRef} />
                 </div>
-                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent', padding: '10px 20px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {/* Chat composer: keep this compact and identical in shape to
+                    the working Coaching Chat. The ticket actions live in a
+                    small utility row; they must never push the editor below
+                    the keyboard. */}
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent' }}>
                   {adminImagePreview && (
-                    <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
-                      <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
+                    <div style={{ padding: '10px 16px 0', display: 'flex' }}>
+                      <div style={{ position: 'relative', display: 'inline-block' }}>
+                      <img src={adminImagePreview} alt="" style={{ maxHeight: 80, maxWidth: 120, borderRadius: 4, display: 'block', objectFit: 'cover', border: `var(--hair-width) solid ${UI.hairStrong}` }} />
                       <button onClick={() => { setAdminImageFile(null); setAdminImagePreview(null); }} style={{ position: 'absolute', top: -6, right: -6, width: 20, height: 20, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontSize: 11, textShadow: 'none' }}>×</button>
+                      </div>
                     </div>
                   )}
-                  <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
-                    <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
-                      placeholder="Reply…" rows={3} style={{ ...iStyle, width: 'auto', minWidth: 0, flex: 1 }}
-                      onPaste={onPasteAdminMessage}
-                      onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
-                    />
-                    <label style={{ cursor: 'pointer', flexShrink: 0, width: 36, height: 36, display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: 6, background: adminImageFile ? 'rgba(var(--accent-rgb),0.22)' : UI.bgInset, border: `var(--hair-width) solid ${adminImageFile ? 'rgba(var(--accent-rgb),0.4)' : UI.hairStrong}`, color: adminImageFile ? 'var(--accent)' : UI.inkFaint }}>
-                      <input type="file" accept="image/*" style={{ display: 'none' }} onChange={handleAdminImagePick} />
+                  <div style={{ padding: '10px 16px', display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <label style={{ width: 40, height: 40, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, background: UI.bgInset, cursor: 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: UI.inkSoft }}>
                       <i className="fa-solid fa-image" style={{ fontSize: 15 }} />
+                      <input type="file" accept="image/*" onChange={handleAdminImagePick} style={{ display: 'none' }} />
                     </label>
+                    <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
+                      placeholder="Reply…" rows={2} style={{ ...iStyle, width: 'auto', minWidth: 0, flex: 1, minHeight: 40, resize: 'vertical', padding: '10px 16px' }}
+                      onPaste={onPasteAdminMessage}
+                      onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAdminReply(); } }}
+                    />
+                    <button onClick={handleAdminReply} disabled={supportAdminSending || (!supportAdminDraft.trim() && !adminImageFile)} aria-label="Send reply" style={{ width: 40, height: 40, borderRadius: 6, border: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'none' : `var(--hair-width) solid ${UI.hair}`, background: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'var(--accent)' : 'transparent', color: (supportAdminDraft.trim() || adminImageFile) && !supportAdminSending ? 'var(--accent-ink)' : UI.inkFaint, textShadow: 'none', cursor: supportAdminSending || (!supportAdminDraft.trim() && !adminImageFile) ? 'default' : 'pointer', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                      {supportAdminSending ? <span style={{ fontFamily: UI.fontUi, fontSize: 14 }}>…</span> : <i className="fa-solid fa-arrow-up" style={{ fontSize: 15 }} />}
+                    </button>
                   </div>
-                  <Btn onClick={handleAdminReply} disabled={(!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending}>
-                    {supportAdminSending ? 'Sending…' : 'Send reply'}
-                  </Btn>
-                  {currentStatus === 'resolved' && (
-                    <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
-                      <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
-                    </Btn>
-                  )}
-                  {confirmDeleteTicket ? (
-                    <div style={{ display: 'flex', gap: 6 }}>
-                      <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
-                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.3)' }}>
-                        {deletingTicket ? 'Deleting…' : 'Confirm delete'}
-                      </Btn>
-                    </div>
-                  ) : (
-                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>
-                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
-                    </Btn>
-                  )}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 12, padding: '0 16px 4px' }}>
+                    {currentStatus === 'resolved' && <button onClick={handleArchiveTicket} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}><i className="fa-solid fa-box-archive" style={{ marginRight: 5 }} />Archive</button>}
+                    {confirmDeleteTicket ? <>
+                      <button onClick={() => setConfirmDeleteTicket(false)} style={{ background: 'none', border: 'none', padding: 0, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>Cancel</button>
+                      <button onClick={handleDeleteTicket} disabled={deletingTicket} style={{ background: 'none', border: 'none', padding: 0, color: 'rgba(var(--danger-rgb),0.9)', fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}>{deletingTicket ? 'Deleting…' : 'Confirm delete'}</button>
+                    </> : <button onClick={() => setConfirmDeleteTicket(true)} style={{ background: 'none', border: 'none', padding: 0, color: 'rgba(var(--danger-rgb),0.7)', fontFamily: UI.fontUi, fontSize: 10, cursor: 'pointer' }}><i className="fa-solid fa-trash" style={{ marginRight: 5 }} />Delete ticket</button>}
+                  </div>
                   <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
                 </div>
               </div>
