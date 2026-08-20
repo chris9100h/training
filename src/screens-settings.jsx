@@ -1077,8 +1077,6 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [lightboxSrc, setLightboxSrc] = useStateSet(null); // chat/support attachment tapped for fullscreen view
   const [supportTicketLoading, setSupportTicketLoading] = useStateSet(false);
   const [supportAdminDraft, setSupportAdminDraft] = useStateSet('');
-  const [supportAdminComposerFocused, setSupportAdminComposerFocused] = useStateSet(false);
-  const [supportAdminComposerHeight, setSupportAdminComposerHeight] = useStateSet(0);
   const [supportAdminSending, setSupportAdminSending] = useStateSet(false);
   const [supportEditingNoteId, setSupportEditingNoteId] = useStateSet(null);
   const [supportEditingBody, setSupportEditingBody] = useStateSet('');
@@ -1521,47 +1519,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   }, [supportActiveNotes]);
 
   useEffectSet(() => {
-    const thread = adminThreadRef.current;
-    if (thread) thread.scrollTop = thread.scrollHeight;
-    else adminBottomRef.current?.scrollIntoView({ behavior: 'auto' });
+    adminBottomRef.current?.scrollIntoView({ behavior: 'auto' });
   }, [supportTicketNotes]);
-
-  useEffectSet(() => {
-    // A newly opened ticket starts in the normal bottom-composer mode. The
-    // focused mode is only a temporary keyboard-safe editor surface.
-    setSupportAdminComposerFocused(false);
-  }, [supportTicket?.coachingId]);
-
-  // The focused admin composer is a top layer on iOS so the keyboard cannot
-  // cover it. Reserve its measured height in the message scroller; otherwise
-  // the newest client message would be painted underneath the editor.
-  useEffectSet(() => {
-    if (!supportAdminComposerFocused) {
-      setSupportAdminComposerHeight(prev => prev ? 0 : prev);
-      return undefined;
-    }
-    const node = adminComposerRef.current;
-    if (!node) return undefined;
-    const measure = () => {
-      const height = Math.ceil(node.getBoundingClientRect().height || 0);
-      if (height > 0) setSupportAdminComposerHeight(prev => prev === height ? prev : height);
-      window.requestAnimationFrame(() => {
-        const thread = adminThreadRef.current;
-        if (thread) thread.scrollTop = thread.scrollHeight;
-      });
-    };
-    measure();
-    let observer = null;
-    if (typeof ResizeObserver !== 'undefined') {
-      observer = new ResizeObserver(measure);
-      observer.observe(node);
-    }
-    const timer = window.setTimeout(measure, 160);
-    return () => {
-      observer?.disconnect();
-      window.clearTimeout(timer);
-    };
-  }, [supportAdminComposerFocused, adminImagePreview, supportAdminSending]);
 
   const markSignupSeen = (uid) => {
     setSeenSignups(prev => {
@@ -1611,8 +1570,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const countdownIntervalRef = useRefSet(null);
   const supportBottomRef = useRefSet(null);
   const adminBottomRef = useRefSet(null);
-  const adminThreadRef = useRefSet(null);
-  const adminComposerRef = useRefSet(null);
   const [pendingCountdown, setPendingCountdown] = useStateSet(120);
   // Also roll back a still-pending push verification on unmount. Leaving the
   // screen mid-verification used to leave a live row in zane_push_subscriptions
@@ -5113,26 +5070,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const sColor = { open: UI.danger, in_progress: UI.inkFaint, resolved: 'var(--accent)' };
             const sBg    = { open: 'rgba(var(--danger-rgb),0.18)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.22)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
-            const revealAdminComposer = (event) => {
-              const target = event.currentTarget;
-              setSupportAdminComposerFocused(true);
-              const reveal = () => {
-                if (document.activeElement !== target || !target.isConnected) return;
-                // Keep the newest message at the visible end of the thread.
-                // The focused composer reserves its own top space, so this no
-                // longer puts the last client message underneath the editor.
-                const thread = adminThreadRef.current;
-                if (thread) thread.scrollTop = thread.scrollHeight;
-                if (typeof scheduleFocusedInputVisibility === 'function') {
-                  scheduleFocusedInputVisibility(target, { boundary: thread || null });
-                }
-              };
-              window.requestAnimationFrame(reveal);
-              window.setTimeout(reveal, 120);
-              window.setTimeout(reveal, 320);
-            };
             return (
-              <div style={{ position: 'relative', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden' }}>
                 {/* Back + meta */}
                 <div style={{ padding: '12px 20px', borderBottom: `var(--hair-width) solid ${UI.hair}`, flexShrink: 0, display: 'flex', alignItems: 'center', gap: 10 }}>
                   <button onClick={() => { setSupportTicket(null); setSupportAdminDraft(''); }}
@@ -5156,11 +5095,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* The thread is the only scrolling surface in the ticket. The
-                    composer is a positioned layer owned by this ticket, so it
-                    can move to a stable top position while iOS owns the bottom
-                    of the screen for its keyboard. */}
-                <div ref={adminThreadRef} style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, paddingTop: supportAdminComposerFocused ? Math.max(12, supportAdminComposerHeight + 12) : 16, paddingRight: 20, paddingBottom: supportAdminComposerFocused ? 16 : 280, paddingLeft: 20, minHeight: 0 }}>
+                {/* Keep one scroll owner for the messages and keep the reply
+                    editor in normal flex flow, exactly like the working
+                    coaching chat. iOS can then shrink this list above the
+                    keyboard instead of making two layers fight for the same
+                    coordinates. */}
+                <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '12px 20px 8px' }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
@@ -5213,12 +5153,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   })()}
                   <div ref={adminBottomRef} />
                 </div>
-                {/* The editor is deliberately not a flex sibling of the
-                    scroller. In normal mode it sits at the bottom of the
-                    ticket; on focus it moves to the top of the ticket, which
-                    is always above the iOS keyboard regardless of WebKit's
-                    visual-viewport resize behavior. */}
-                <div ref={adminComposerRef} style={{ position: 'absolute', left: 0, right: 0, top: supportAdminComposerFocused ? 0 : 'auto', bottom: supportAdminComposerFocused ? 'auto' : 'var(--zane-keyboard-inset, 0px)', zIndex: 5, boxSizing: 'border-box', borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent', padding: '10px 20px 0', display: 'flex', flexDirection: 'column', gap: 8 }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -5227,11 +5162,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   )}
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
-                      placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
-                      onFocus={revealAdminComposer}
-                      onBlur={e => window.setTimeout(() => {
-                        if (document.activeElement !== e.currentTarget) setSupportAdminComposerFocused(false);
-                      }, 120)}
+                      placeholder="Reply…" rows={3} style={{ ...iStyle, width: 'auto', minWidth: 0, flex: 1 }}
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
@@ -5243,25 +5174,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <Btn onClick={handleAdminReply} disabled={(!supportAdminDraft.trim() && !adminImageFile) || supportAdminSending}>
                     {supportAdminSending ? 'Sending…' : 'Send reply'}
                   </Btn>
-                  {!supportAdminComposerFocused && <>
-                    {currentStatus === 'resolved' && (
-                      <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
-                        <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
+                  {currentStatus === 'resolved' && (
+                    <Btn kind="ghost" onClick={handleArchiveTicket} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: UI.inkFaint, borderColor: UI.hairStrong }}>
+                      <i className="fa-solid fa-box-archive" style={{ fontSize: 12 }} /> Archive ticket
+                    </Btn>
+                  )}
+                  {confirmDeleteTicket ? (
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
+                      <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.3)' }}>
+                        {deletingTicket ? 'Deleting…' : 'Confirm delete'}
                       </Btn>
-                    )}
-                    {confirmDeleteTicket ? (
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(false)} style={{ flex: 1, color: UI.inkFaint, borderColor: UI.hairStrong }}>Cancel</Btn>
-                        <Btn onClick={handleDeleteTicket} disabled={deletingTicket} style={{ flex: 1, background: 'rgba(var(--danger-rgb),0.15)', color: 'rgba(var(--danger-rgb),1)', border: 'var(--hair-width) solid rgba(var(--danger-rgb),0.3)' }}>
-                          {deletingTicket ? 'Deleting…' : 'Confirm delete'}
-                        </Btn>
-                      </div>
-                    ) : (
-                      <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>
-                        <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
-                      </Btn>
-                    )}
-                  </>}
+                    </div>
+                  ) : (
+                    <Btn kind="ghost" onClick={() => setConfirmDeleteTicket(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7, color: 'rgba(var(--danger-rgb),0.7)', background: 'rgba(var(--danger-rgb),0.08)', borderColor: 'rgba(var(--danger-rgb),calc(0.25 * var(--danger-border-boost)))' }}>
+                      <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
+                    </Btn>
+                  )}
+                  <div style={{ height: 'env(safe-area-inset-bottom, 0px)' }} />
                 </div>
               </div>
             );
