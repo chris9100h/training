@@ -73,37 +73,82 @@ function keepFocusedInputVisible(element = (typeof document !== 'undefined' ? do
   const vv = window.visualViewport;
   const viewportTop = vv ? vv.offsetTop : 0;
   const viewportBottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
-  let scroller = null;
+  const isScrollable = (node) => {
+    if (!node || node === document.body || node === document.documentElement) return false;
+    const style = window.getComputedStyle(node);
+    const overflowY = style.overflowY;
+    // Do not touch overflow:hidden surfaces: some of them deliberately clip
+    // a sheet/card and changing scrollTop there would move an invisible layer.
+    return (overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
+      && node.scrollHeight > node.clientHeight + 1;
+  };
+  const scrollers = [];
+  const clipAncestors = [];
   let parent = el.parentElement;
-  while (parent && parent !== document.body) {
+  while (parent && parent !== document.body && parent !== document.documentElement) {
     const style = window.getComputedStyle(parent);
     const overflowY = style.overflowY;
-    if ((overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay')
-      && parent.scrollHeight > parent.clientHeight + 1) {
-      scroller = parent;
-      break;
+    if (isScrollable(parent)) scrollers.push(parent);
+    // A non-scrollable wrapper can still clip a field (cards and fixed
+    // overlays frequently use overflow:hidden). Include those rectangles in
+    // the visible intersection so we move the right scroll parent instead of
+    // declaring the field visible merely because it is inside a larger list.
+    if (overflowY === 'hidden' || overflowY === 'clip' || overflowY === 'auto' || overflowY === 'scroll' || overflowY === 'overlay') {
+      clipAncestors.push(parent);
     }
     if (boundary && parent === boundary) break;
     parent = parent.parentElement;
   }
+  // A panel may not have overflowed in the first focus tick, but can become
+  // scrollable after the keyboard shrinks it. Include the explicit boundary
+  // so the next delayed pass can adjust it without relying on scrollIntoView.
+  if (boundary && boundary.isConnected && !scrollers.includes(boundary) && isScrollable(boundary)) scrollers.push(boundary);
 
-  const fieldRect = el.getBoundingClientRect();
-  const containerRect = scroller?.getBoundingClientRect?.();
-  const visibleTop = Math.max(viewportTop, containerRect?.top ?? viewportTop) + margin;
-  const visibleBottom = Math.min(viewportBottom, containerRect?.bottom ?? viewportBottom) - margin;
-  let delta = 0;
-  if (fieldRect.bottom > visibleBottom) delta = fieldRect.bottom - visibleBottom;
-  else if (fieldRect.top < visibleTop) delta = fieldRect.top - visibleTop;
-  if (!delta) return false;
-
-  if (scroller) {
-    scroller.scrollTop += delta;
+  let changed = false;
+  const adjustScroller = (scroller) => {
+    const fieldRect = el.getBoundingClientRect();
+    const containerRect = scroller.getBoundingClientRect();
+    let visibleTop = Math.max(viewportTop, containerRect.top);
+    let visibleBottom = Math.min(viewportBottom, containerRect.bottom);
+    clipAncestors.forEach(node => {
+      const rect = node.getBoundingClientRect();
+      visibleTop = Math.max(visibleTop, rect.top);
+      visibleBottom = Math.min(visibleBottom, rect.bottom);
+    });
+    visibleTop += margin;
+    visibleBottom -= margin;
+    let delta = 0;
+    if (fieldRect.bottom > visibleBottom) delta = fieldRect.bottom - visibleBottom;
+    else if (fieldRect.top < visibleTop) delta = fieldRect.top - visibleTop;
+    if (!delta) return false;
+    const maxScroll = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+    const next = Math.min(maxScroll, Math.max(0, scroller.scrollTop + delta));
+    if (Math.abs(next - scroller.scrollTop) < 0.5) return false;
+    scroller.scrollTop = next;
     return true;
+  };
+
+  // Adjust the nearest list first, then its parent/sheet. Re-measuring after
+  // each move matters: scrolling an inner list changes the field rect seen by
+  // the outer panel, and the old implementation stopped after the first
+  // ancestor and could leave the field behind a second clipping boundary.
+  scrollers.forEach(scroller => { if (adjustScroller(scroller)) changed = true; });
+
+  if (!changed) {
+    const fieldRect = el.getBoundingClientRect();
+    const visibleTop = viewportTop + margin;
+    const visibleBottom = viewportBottom - margin;
+    const outsideViewport = fieldRect.bottom > visibleBottom || fieldRect.top < visibleTop;
+    if (outsideViewport && scrollers.length === 0) {
+      // The document/root is intentionally locked by the app shell. Calling
+      // scrollIntoView here would therefore often scroll Safari's hidden page
+      // instead of the visible surface and create the exact tap drift this
+      // helper is meant to prevent. A later keyboard-settle pass will see the
+      // now-overflowing panel and use the explicit scroller above.
+      return false;
+    }
   }
-  // A non-scrollable intermediate wrapper can still contain a Screen or
-  // Sheet that becomes scrollable after the keyboard settles.
-  try { el.scrollIntoView({ block: 'nearest', behavior: 'auto' }); } catch (_) { el.scrollIntoView(); }
-  return true;
+  return changed;
 }
 
 // Keyboard animation and WebKit's layout pass do not finish in the same tick
@@ -111,7 +156,7 @@ function keepFocusedInputVisible(element = (typeof document !== 'undefined' ? do
 // the keyboard has had time to settle. The repeated call is intentionally
 // bounded; it avoids an endless scroll/resize feedback loop while still
 // covering Safari's delayed visualViewport update.
-function scheduleFocusedInputVisibility(element = (typeof document !== 'undefined' ? document.activeElement : null)) {
+function scheduleFocusedInputVisibility(element = (typeof document !== 'undefined' ? document.activeElement : null), { boundary = null } = {}) {
   if (typeof window === 'undefined') return () => {};
   const target = element;
   if (!target || !(target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) return () => {};
@@ -119,7 +164,7 @@ function scheduleFocusedInputVisibility(element = (typeof document !== 'undefine
   const timers = [];
   const run = () => {
     if (document.activeElement !== target || !target.isConnected) return;
-    keepFocusedInputVisible(target);
+    keepFocusedInputVisible(target, { boundary });
   };
   frame = window.requestAnimationFrame(() => {
     frame = 0;
@@ -1349,8 +1394,27 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
-    if (!vv) return;
-    let prevKb = 0, scrollTimer = null;
+    let prevKb = 0, scrollTimer = null, focusTimer = null;
+    const schedulePanelFocus = () => {
+      const panel = panelNodeRef.current;
+      const el = document.activeElement;
+      if (!panel || !el || !panel.contains(el) || !(el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)) return;
+      clearTimeout(focusTimer);
+      // Focus can move between fields while visualViewport.height stays
+      // unchanged. The old keyboard-growth-only path missed that transition,
+      // leaving the second field behind the keyboard. Keep the boundary
+      // explicit so nested result lists never make Safari scroll the body.
+      focusTimer = setTimeout(() => {
+        const current = document.activeElement;
+        if (current && panel.contains(current)) keepFocusedInputVisible(current, { boundary: panel });
+      }, 70);
+    };
+    const onPanelFocusIn = () => schedulePanelFocus();
+    panelNodeRef.current?.addEventListener('focusin', onPanelFocusIn);
+    if (!vv) return () => {
+      panelNodeRef.current?.removeEventListener('focusin', onPanelFocusIn);
+      clearTimeout(focusTimer);
+    };
     const update = () => {
       // Only treat the innerHeight↔visualViewport gap as keyboard height while a
       // field is actually focused. Otherwise a persistent iOS viewport offset
@@ -1387,7 +1451,13 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);
     update();
-    return () => { vv.removeEventListener('resize', update); vv.removeEventListener('scroll', update); clearTimeout(scrollTimer); };
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      panelNodeRef.current?.removeEventListener('focusin', onPanelFocusIn);
+      clearTimeout(scrollTimer);
+      clearTimeout(focusTimer);
+    };
   }, [open]);
 
   if (!open) return null;
@@ -1429,7 +1499,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
     // all (a separate OS/browser compositing layer), so there's nothing
     // underneath for the backdrop to block, it keeps its full extent
     // (bottom: 0) and reserves the gap via paddingBottom exactly as before.
-    <div onClick={onClose} aria-hidden={false} style={{
+    <div onClick={onClose} aria-hidden={false} data-zane-local-layer={sheetPosition === 'absolute' ? 'viewport' : undefined} style={{
       position: sheetPosition, top: 0, left: 0, right: 0, bottom: keyboardHeight,
       background: 'rgba(0,0,0,0.7)', zIndex,
       display: 'flex', alignItems: center ? 'center' : 'flex-end', justifyContent: 'center',
@@ -1452,7 +1522,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
             which needs a separate static one for elevation) also avoids
             fighting over the same property while animating. */}
         {accent && <div className="intensity-glow-raw" style={{ position: 'absolute', inset: 0, borderRadius: cardLike ? 6 : '6px 6px 0 0', pointerEvents: 'none' }} />}
-        <div ref={setPanelRef} role="dialog" aria-modal="true" aria-labelledby={title ? titleIdRef.current : undefined} aria-label={title ? undefined : 'Dialog'} tabIndex={-1} onClick={e => e.stopPropagation()} style={{
+        <div ref={setPanelRef} role="dialog" data-zane-focus-boundary="sheet" aria-modal="true" aria-labelledby={title ? titleIdRef.current : undefined} aria-label={title ? undefined : 'Dialog'} tabIndex={-1} onClick={e => e.stopPropagation()} style={{
           width: '100%', boxSizing: 'border-box',
           backgroundColor: UI.bgRaised, backgroundImage: 'var(--bg-texture)',
           borderRadius: cardLike ? 6 : '6px 6px 0 0',

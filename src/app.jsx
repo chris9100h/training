@@ -582,6 +582,7 @@ function LifetimePremiumCongratsModal({ onDone }) {
   const modal = (
     <div
       role="dialog"
+      data-zane-local-layer="viewport"
       aria-modal="true"
       aria-labelledby="lifetime-premium-congrats-title"
       aria-describedby="lifetime-premium-congrats-copy"
@@ -1057,7 +1058,11 @@ function App() {
       if (!isTextEntryElement(target)) return;
       applyIOSInputZoomGuard(target);
       cancelScheduled?.();
-      cancelScheduled = scheduleFocusedInputVisibility(target);
+      // A field can live in a Sheet, a chat list, or another nested dialog.
+      // Pass the nearest explicit boundary so the shared helper never falls
+      // back to Safari's document-level scroll surface.
+      const boundary = target.closest?.('[data-zane-focus-boundary], [role="dialog"]') || null;
+      cancelScheduled = scheduleFocusedInputVisibility(target, { boundary });
     };
     const releaseZoomGuard = event => removeIOSInputZoomGuard(event?.target);
     document.addEventListener('focusin', schedule, true);

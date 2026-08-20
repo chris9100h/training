@@ -793,7 +793,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
 
   return <>
     {toast && ReactDOM.createPortal(
-      <div role="status" aria-live="polite" style={{
+      <div role="status" aria-live="polite" data-zane-local-layer="viewport" style={{
         position: localViewportLayerPosition(), inset: 0, zIndex: 180, padding: 16,
         pointerEvents: 'none', color: UI.ink,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -6581,12 +6581,12 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           Inside <Screen> (overflow:hidden), iOS WebKit clips position:fixed
           children to the screen box, capping the flash at the clock. */}
       {screenFlash && ReactDOM.createPortal(
-        <div style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: UI.gold, opacity: 0.28, pointerEvents: 'none' }} />,
         document.body
       )}
       {/* Block keyboard and content interaction while any overlay is visible */}
       {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
-        <div style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
 
@@ -6594,7 +6594,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* New best (personal record) overlay */}
       {newBestSet && ReactDOM.createPortal(
-        <div style={{
+        <div data-zane-local-layer="viewport" style={{
           position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 155, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
@@ -6622,7 +6622,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       )}
 
       {improvedSet && ReactDOM.createPortal(
-        <div style={{
+        <div data-zane-local-layer="viewport" style={{
           position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
@@ -6648,7 +6648,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       )}
       {/* Regression overlay */}
       {regressionSet && ReactDOM.createPortal(
-        <div style={{
+        <div data-zane-local-layer="viewport" style={{
           position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 150, pointerEvents: 'none',
           background: 'var(--bg-body)',
           animation: 'improvedFade 2.5s ease forwards',
@@ -6676,7 +6676,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
           sheet, an earned weight bump either gets confirmed or declined by
           the user, it never resolves itself silently. */}
       {progressionUnlocked && ReactDOM.createPortal(
-        <div style={{
+        <div data-zane-local-layer="viewport" style={{
           position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 160,
           background: 'var(--bg-body)',
           display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
@@ -6721,7 +6721,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
 
       {/* Outlier confirmation (reps / kg / both) */}
       {outlierConfirm && ReactDOM.createPortal(
-        <div style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, display: 'flex', flexDirection: 'column', justifyContent: 'flex-end', alignItems: 'center', background: 'rgba(0,0,0,0.55)' }}>
           <div style={{ background: UI.bg, backgroundImage: 'var(--bg-texture)', borderRadius: '6px 6px 0 0', borderTop: `var(--hair-width) solid ${UI.hairStrong}`, width: '100%', maxWidth: 480, padding: '20px 20px 44px' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
               <i className="fa-solid fa-triangle-exclamation" style={{ color: UI.gold, fontSize: 14 }} />

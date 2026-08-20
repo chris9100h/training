@@ -257,6 +257,17 @@
        viewport coordinates after its browser chrome or keyboard moves. */
     transform: translateZ(0);
   }
+  /* Body-level portals use the same corrected document viewport as #root.
+     `inset:0` alone is subtly wrong when Safari has panned the visual
+     viewport: body includes the correction span, so an absolute portal would
+     be centred between document y=0 and the root instead of over the root.
+     Only portals explicitly marked by the app are adjusted; root children
+     keep their normal local `inset:0` geometry. */
+  html.ios-browser body > [data-zane-local-layer="viewport"] {
+    top: var(--app-viewport-top, 0px) !important;
+    height: var(--app-viewport-height, 100dvh) !important;
+    bottom: auto !important;
+  }
   /* A one-frame compositor reset used after a layout release or from
      Settings -> Appearance. Removing the root layer transform and forcing a
      layout read makes WebKit discard stale paint/hit-test geometry without
@@ -1376,23 +1387,36 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       sync();
     }, 50);
   };
-  var resume = function () {
+  var resume = function (reason, persisted) {
     repairScale();
     sync();
     // WebKit sometimes reports the old viewport for the first resize tick
     // after a PWA resumes. Re-read it after its compositor has settled.
     setTimeout(sync, 80);
     setTimeout(sync, 300);
+    // A compositor can keep stale hit-test coordinates even when the first
+    // CSS-var sync looks correct. Give it two settled frames, then let the
+    // health guard perform one non-destructive reflow if the geometry still
+    // looks suspicious (or if the page came back from a real background).
+    setTimeout(function () {
+      maybeRepairViewport({ force: persisted === true || reason === 'visibility' && lastHiddenAt && Date.now() - lastHiddenAt > 600 });
+    }, 420);
   };
 
   // A service-worker/cache update refreshes files, but WebKit can retain the
   // old compositor geometry for a fixed app shell. Keep a separate local
   // layout epoch so a release can perform one explicit, non-destructive
   // reflow even when the user is already on the newest SW version.
-  var LAYOUT_EPOCH = '2026-08-20-viewport-1';
+  // Bump this whenever the shell's coordinate model changes. It is separate
+  // from the service-worker cache version: a user can be on the newest files
+  // while WebKit still retains the compositor geometry from an older layout.
+  var LAYOUT_EPOCH = '2026-08-20-viewport-2';
   var LAYOUT_EPOCH_KEY = 'logbook-layout-epoch';
   var canonicalViewport = 'width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, interactive-widget=resizes-content';
   var reflowInFlight = false;
+  var lastAutoReflowAt = 0;
+  var geometryHealthSamples = 0;
+  var lastHiddenAt = 0;
   var hasTextFocus = function () {
     var ae = document.activeElement;
     return !!(ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA' || ae.isContentEditable));
@@ -1439,9 +1463,58 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       return false;
     }
   };
+  var cssViewportNumber = function (name, fallback) {
+    var value = parseFloat(document.documentElement.style.getPropertyValue(name));
+    return Number.isFinite(value) ? value : fallback;
+  };
+  var viewportGeometryLooksWrong = function () {
+    if (!root.children.length || hasTextFocus()) return false;
+    var rect = root.getBoundingClientRect();
+    var expectedTop = cssViewportNumber('--app-viewport-top', 0);
+    var expectedHeight = cssViewportNumber('--app-viewport-height', layoutHeight());
+    var clientWidth = Math.max(window.innerWidth || 0, document.documentElement.clientWidth || 0);
+    var rootMaxWidth = String(window.getComputedStyle(root).maxWidth || '').trim();
+    // Desktop deliberately renders a centred phone-width shell (max 440px),
+    // so comparing that box with a 1440px browser would report a permanent
+    // "drift" and trigger a reflow on every resume. Only compare width when
+    // CSS says the shell tracks the viewport or when the viewport is phone-
+    // sized; the top/height checks still run on every device.
+    var widthTracksViewport = clientWidth <= 600 || rootMaxWidth.endsWith('%') || rootMaxWidth === 'none' || rootMaxWidth === 'auto';
+    // These checks intentionally compare the live painted box with the values
+    // the shell published, rather than trusting visualViewport alone. Safari
+    // has reported a healthy visual viewport while the fixed/absolute root's
+    // hit-test box remained one toolbar height out of date.
+    if (Math.abs(rect.top - expectedTop) > 3) return true;
+    if (expectedHeight > 100 && Math.abs(rect.height - expectedHeight) > 3) return true;
+    if (widthTracksViewport && clientWidth > 100 && Math.abs(rect.width - clientWidth) > 3) return true;
+    if (Math.abs(window.pageYOffset || 0) > 1 || Math.abs(window.pageXOffset || 0) > 1) return true;
+    if (vv && Number.isFinite(vv.scale) && Math.abs(vv.scale - 1) > 0.02) return true;
+    return false;
+  };
+  var maybeRepairViewport = function ({ force = false } = {}) {
+    if (reflowInFlight || !root.children.length || hasTextFocus()) return false;
+    // A custom keypad and other sheets own their own coordinate space. Wait
+    // until they close instead of recalibrating underneath a live modal.
+    if (Number(window.__zaneOpenSheetCount || 0) > 0) return false;
+    var suspicious = viewportGeometryLooksWrong();
+    geometryHealthSamples = suspicious ? geometryHealthSamples + 1 : 0;
+    if (!force && geometryHealthSamples < 2) return false;
+    var now = Date.now();
+    if (now - lastAutoReflowAt < 1800) return false;
+    if (!force && !suspicious) return false;
+    if (!forceLayoutReflow()) return false;
+    lastAutoReflowAt = now;
+    geometryHealthSamples = 0;
+    rememberLayoutEpoch();
+    return true;
+  };
   window.__zaneRecalibrateViewport = function () {
     var ok = forceLayoutReflow();
-    if (ok) rememberLayoutEpoch();
+    if (ok) {
+      lastAutoReflowAt = Date.now();
+      geometryHealthSamples = 0;
+      rememberLayoutEpoch();
+    }
     return ok;
   };
   var applyLayoutEpoch = function () {
@@ -1471,11 +1544,39 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   }
   window.addEventListener('resize', sync);
   window.addEventListener('orientationchange', sync);
-  window.addEventListener('focusout', resume);
-  window.addEventListener('pageshow', resume);
-  window.addEventListener('focus', resume);
+  // Do not sync/reset the keyboard baseline synchronously on every focusout.
+  // iOS dispatches focusout for the old field before focusin for the next one;
+  // treating that tiny gap as "keyboard closed" records the short viewport as
+  // the new baseline and is a direct cause of shifted fields/tap targets.
+  var focusTransitionTimer = 0;
+  var cancelFocusTransition = function () {
+    if (focusTransitionTimer) window.clearTimeout(focusTransitionTimer);
+    focusTransitionTimer = 0;
+    sync();
+  };
+  var deferFocusTransition = function () {
+    if (focusTransitionTimer) window.clearTimeout(focusTransitionTimer);
+    focusTransitionTimer = window.setTimeout(function () {
+      focusTransitionTimer = 0;
+      if (!isTyping()) resume('focusout');
+    }, 140);
+  };
+  document.addEventListener('focusout', deferFocusTransition, true);
+  document.addEventListener('focusin', cancelFocusTransition, true);
+  window.addEventListener('pageshow', function (event) { resume('pageshow', !!event.persisted); });
+  window.addEventListener('focus', function () { resume('focus'); });
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'visible') resume();
+    if (document.visibilityState === 'hidden') {
+      lastHiddenAt = Date.now();
+      return;
+    }
+    if (document.visibilityState === 'visible') {
+      resume('visibility');
+      // Keep the duration for the delayed health check, then reset it so a
+      // later focus event cannot mistake a normal foreground focus for a
+      // background return.
+      window.setTimeout(function () { lastHiddenAt = 0; }, 500);
+    }
   });
 })();
 </script>

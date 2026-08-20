@@ -607,7 +607,7 @@ function CardioPROverlay({ pr, onDone }) {
   // Portaled to <body> so the flash covers the whole screen (incl. behind the
   // status bar); inside a <Screen> (overflow:hidden) iOS clips position:fixed.
   return ReactDOM.createPortal(
-    <div onClick={onDone} style={{
+    <div data-zane-local-layer="viewport" onClick={onDone} style={{
       position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'var(--bg-body)',
       animation: 'improvedFade 3.8s ease forwards',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,

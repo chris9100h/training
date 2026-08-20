@@ -5408,7 +5408,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
           becomes visible while the camera capture is running; the ref is
           therefore already available when the button is tapped. */}
       {mealDetail && ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: mealDetailCapturing ? 'block' : 'none' }}>
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: mealDetailCapturing ? 'block' : 'none' }}>
           <FdMealDetailPoster captureRef={mealDetailCaptureRef} meal={mealDetail} expandedRecipes={mealDetailExpandedRecipes}
             logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
         </div>,
@@ -8985,7 +8985,7 @@ function ShoppingListScreenOpen({ open, onClose, store, setStore, today, userId,
           animation restarts from zero, so measuring happens against a moving
           ancestor. Out here there is nothing above the poster to move. */}
       {ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
         <div ref={captureRef} style={{ padding: '26px 28px 32px', width: 480, margin: '0 auto', position: 'relative', background: UI.bg, fontFamily: UI.fontUi, color: UI.ink, textShadow: 'none' }}>
           {_shotGridOn && <SvgGrid />}
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', pointerEvents: 'none', zIndex: 0, overflow: 'hidden' }}>
@@ -9880,7 +9880,7 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
           transform or scroll. It inherits nothing from the sheet either, which
           is fine: RecipePoster sets its own font, colour and background. */}
       {ReactDOM.createPortal(
-        <div style={{ position: 'fixed', inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
+        <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), inset: 0, zIndex: 500, background: UI.bg, overflow: 'auto', display: capturing ? 'block' : 'none' }}>
           <RecipePoster captureRef={captureRef} name={name} items={items} portions={portions} totals={totals} netCarbs={netCarbs}
             logo={_shotLogo} logoStyle={_shotIsCustom ? _shotCustomStyle : _shotDefaultStyle} grid={_shotGridOn} />
         </div>,
