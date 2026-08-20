@@ -826,7 +826,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const ICON_SZ = 24;    // glyph size in the bottom dock (sidebar untouched)
   return (
     <>
-    <div style={{
+    <div data-zane-tabbar="bottom" style={{
       flexShrink: 0,
       padding: `10px 12px calc(env(safe-area-inset-bottom, 8px) + 10px)`,
       background: 'transparent',

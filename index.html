@@ -221,6 +221,26 @@
     display: flex; flex-direction: column;
     overflow: hidden;
   }
+  /* While a native keyboard is open, the bottom dock is not useful and takes
+     away exactly the space needed by the focused field. Keep the dock mounted
+     so its state and hit-test geometry are preserved, but collapse its shell
+     rather than leaving an invisible strip or unmounting it mid-edit. */
+  [data-zane-tabbar="bottom"] {
+    max-height: 180px;
+    overflow: hidden;
+    opacity: 1;
+    transform: translateY(0);
+    transition: max-height 0.18s ease, padding 0.18s ease, opacity 0.12s ease, transform 0.18s ease;
+  }
+  html.keyboard-input-active [data-zane-tabbar="bottom"] {
+    max-height: 0 !important;
+    padding-top: 0 !important;
+    padding-bottom: 0 !important;
+    opacity: 0 !important;
+    transform: translateY(10px);
+    pointer-events: none !important;
+    visibility: hidden;
+  }
   /* Optional accessibility scale. This is deliberately a device-local
      presentation setting, not a database preference. Scale text rather than
      the app shell: zooming #root also enlarged cards, gaps and fixed widths,
@@ -1308,6 +1328,11 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
       // larger; the threshold also lets us recover as soon as it is dismissed
       // even when document.activeElement is still the input field.
       var keyboardOpen = !!typing && keyboardGap > 120;
+      // The bottom dock is navigation, not part of the active input flow. Hide
+      // it only while the native keyboard is genuinely open, not merely while
+      // an input retains focus after the keyboard has been dismissed or when a
+      // desktop/hardware keyboard is in use.
+      document.documentElement.classList.toggle('keyboard-input-active', keyboardOpen);
       if (typing && !keyboardOpen && keyboardGap < 80) {
         // Refresh the baseline after the keyboard has returned, so a later
         // focus does not inherit the old keyboard-sized reference.
