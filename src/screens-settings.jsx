@@ -1570,6 +1570,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const countdownIntervalRef = useRefSet(null);
   const supportBottomRef = useRefSet(null);
   const adminBottomRef = useRefSet(null);
+  const adminThreadRef = useRefSet(null);
   const [pendingCountdown, setPendingCountdown] = useStateSet(120);
   // Also roll back a still-pending push verification on unmount. Leaving the
   // screen mid-verification used to leave a live row in zane_push_subscriptions
@@ -5070,6 +5071,23 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             const sColor = { open: UI.danger, in_progress: UI.inkFaint, resolved: 'var(--accent)' };
             const sBg    = { open: 'rgba(var(--danger-rgb),0.18)', in_progress: UI.bgInset, resolved: 'rgba(var(--accent-rgb),0.22)' };
             const currentStatus = supportInbox.find(t => t.coaching_id === supportTicket.coachingId)?.support_status || supportTicket.status || 'open';
+            const revealAdminComposer = (event) => {
+              const target = event.currentTarget;
+              const reveal = () => {
+                if (document.activeElement !== target || !target.isConnected) return;
+                // The reply field is the last item in the same scroll owner as
+                // the thread. Move that owner to its end first; the shared
+                // viewport helper then applies the exact keyboard-safe delta.
+                const thread = adminThreadRef.current;
+                if (thread) thread.scrollTop = thread.scrollHeight;
+                if (typeof scheduleFocusedInputVisibility === 'function') {
+                  scheduleFocusedInputVisibility(target, { boundary: thread || null });
+                }
+              };
+              window.requestAnimationFrame(reveal);
+              window.setTimeout(reveal, 120);
+              window.setTimeout(reveal, 320);
+            };
             return (
               <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
                 {/* Back + meta */}
@@ -5095,8 +5113,12 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     }}>{s.label}</button>
                   ))}
                 </div>
-                {/* Thread, scrollable, takes remaining height */}
-                <div style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
+                {/* Keep the thread and composer in one scroll owner. If the
+                    composer is a sibling of this scroller, iOS can keep it
+                    below the keyboard while all swipes only move the thread.
+                    Making it part of this same surface lets the shared focus
+                    helper scroll the reply field into the visual viewport. */}
+                <div ref={adminThreadRef} style={{ flex: 1, overflowY: 'auto', overscrollBehavior: 'contain', display: 'flex', flexDirection: 'column', gap: 10, padding: '16px 20px', minHeight: 0 }}>
                   {supportTicketLoading && <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '12px 0' }}>Loading…</div>}
                   {!supportTicketLoading && supportTicketNotes.length === 0 && (
                     <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, textAlign: 'center', padding: '24px 0' }}>No messages yet.</div>
@@ -5148,9 +5170,11 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                     });
                   })()}
                   <div ref={adminBottomRef} />
-                </div>
-                {/* Compose, sticks to bottom */}
-                <div style={{ position: 'sticky', bottom: 'var(--zane-keyboard-inset, 0px)', zIndex: 3, flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
+                  {/* Compose stays in the same scroll surface as the thread.
+                      This is deliberate: sticky/fixed positioning on a sibling
+                      cannot be reached by the nested iOS scroller when the
+                      keyboard is open. */}
+                  <div style={{ position: 'sticky', bottom: 0, zIndex: 3, flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, margin: '6px -20px -16px', padding: '14px 20px', paddingBottom: 'calc(env(safe-area-inset-bottom, 8px) + 14px)', display: 'flex', flexDirection: 'column', gap: 8, background: UI.bgRaised }}>
                   {adminImagePreview && (
                     <div style={{ position: 'relative', display: 'inline-block', alignSelf: 'flex-start' }}>
                       <img src={adminImagePreview} alt="" style={{ maxHeight: 100, maxWidth: 160, borderRadius: 6, display: 'block', objectFit: 'cover' }} />
@@ -5160,6 +5184,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end' }}>
                     <textarea value={supportAdminDraft} onChange={e => setSupportAdminDraft(e.target.value)}
                       placeholder="Reply…" rows={3} style={{ ...iStyle, flex: 1 }}
+                      onFocus={revealAdminComposer}
                       onPaste={onPasteAdminMessage}
                       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) handleAdminReply(); }}
                     />
@@ -5188,6 +5213,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       <i className="fa-solid fa-trash" style={{ fontSize: 12 }} /> Delete ticket
                     </Btn>
                   )}
+                </div>
                 </div>
               </div>
             );
