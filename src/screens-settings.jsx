@@ -3860,17 +3860,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
             <Btn kind="ghost" style={{ width: '100%', marginTop: 10 }} onClick={recalibrateViewport}>Recalibrate layout</Btn>
           </div>
-          {isAdmin && (
-            <>
-              <div className="knurl" />
-              <Row label="Tap geometry debug">
-                <Toggle on={!!tapDebugEnabled} onToggle={() => onTapDebugChange?.(!tapDebugEnabled)} />
-              </Row>
-              <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, margin: '-2px 0 8px', lineHeight: 1.4 }}>
-                Admin-only, this device only. Shows the last tap and the element the browser actually hit; it never blocks interaction.
-              </div>
-            </>
-          )}
           {darkMode === 'paper' && (
             <Row label="Full accent color in Paper">
               <Toggle on={paperAccentEnabled} onToggle={() => {
@@ -4549,6 +4538,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Database stability" hint={runtimeConfig?.socialMode === 'maintenance' ? 'Friends paused' : (runtimeConfig?.socialTransport === 'broadcast' && runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Mixed')} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
                 <NavRow label="Update tools" onTap={() => setUpdateToolsSheet(true)} />
+              </Frame>
+              <Frame style={{ padding: '0 14px' }}>
+                <Row label="Tap geometry debug" first>
+                  <Toggle on={!!tapDebugEnabled} onToggle={() => onTapDebugChange?.(!tapDebugEnabled)} />
+                </Row>
+                <div style={{ fontFamily: UI.fontUi, fontSize: 10.5, color: UI.inkFaint, paddingBottom: 10, lineHeight: 1.4 }}>
+                  This device only. Shows the last tap and the element the browser actually hit; it never blocks interaction.
+                </div>
               </Frame>
               <div style={{ borderTop: `var(--hair-width) solid ${UI.hair}`, paddingTop: 16 }}>
                 <Btn onClick={() => setSupportInboxSheet(true)} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8, width: '100%', fontSize: 15, padding: '14px 16px' }}>
