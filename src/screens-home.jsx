@@ -579,10 +579,16 @@ const CARDIO_LIVE_KEY = 'logbook-cardio-live-start'; // epoch ms of a running li
 // personal best (★ NEW BEST) or the last same-type session (↑ IMPROVEMENT).
 // Mirrors the strength-training overlays (same animations + gold treatment).
 function CardioPROverlay({ pr, onDone }) {
+  const [pressable, setPressable] = useState(false);
   useEffect(() => {
-    if (!pr) return;
+    if (!pr) { setPressable(false); return undefined; }
+    // The overlay can appear in the same frame as the tap that completed the
+    // cardio log. Do not let that in-flight tap dismiss the new flash; after a
+    // short gesture window the user can tap it normally.
+    setPressable(false);
+    const gate = setTimeout(() => setPressable(true), 300);
     const t = setTimeout(onDone, 3800);
-    return () => clearTimeout(t);
+    return () => { clearTimeout(gate); clearTimeout(t); };
   }, [pr]);
   if (!pr) return null;
 
@@ -607,7 +613,7 @@ function CardioPROverlay({ pr, onDone }) {
   // Portaled to <body> so the flash covers the whole screen (incl. behind the
   // status bar); inside a <Screen> (overflow:hidden) iOS clips position:fixed.
   return ReactDOM.createPortal(
-    <div data-zane-local-layer="viewport" onClick={onDone} style={{
+    <div data-zane-local-layer="viewport" onClick={() => { if (pressable) onDone(); }} style={{
       position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 200, background: 'var(--bg-body)',
       animation: 'improvedFade 3.8s ease forwards',
       display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6,
@@ -1121,7 +1127,6 @@ function PullHintChevron({ pullDelta, onOpen }) {
       height: Math.max(16, Math.min(pullDelta * 0.4, 28)),
       overflow: 'hidden',
       display: 'flex', alignItems: 'flex-end', justifyContent: 'center',
-      transition: pullDelta === 0 ? 'height 0.25s ease' : 'none',
     }}>
       <button onClick={onOpen} style={{
         display: 'flex', alignItems: 'center', gap: 6, padding: '4px 14px',

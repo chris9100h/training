@@ -854,9 +854,12 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
         input.style.position = 'fixed';
         input.style.opacity = '0';
         document.body.appendChild(input);
-        input.select();
-        if (!document.execCommand('copy')) throw new Error('Copy unavailable');
-        input.remove();
+        try {
+          input.select();
+          if (!document.execCommand('copy')) throw new Error('Copy unavailable');
+        } finally {
+          input.remove();
+        }
       }
       setCopiedGroupId(group.id);
       window.setTimeout(() => setCopiedGroupId(current => current === group.id ? null : current), 1600);
@@ -877,9 +880,12 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
         input.style.position = 'fixed';
         input.style.opacity = '0';
         document.body.appendChild(input);
-        input.select();
-        if (!document.execCommand('copy')) throw new Error('Copy unavailable');
-        input.remove();
+        try {
+          input.select();
+          if (!document.execCommand('copy')) throw new Error('Copy unavailable');
+        } finally {
+          input.remove();
+        }
       }
       setCopiedOwnCode(true);
       window.setTimeout(() => setCopiedOwnCode(false), 1600);

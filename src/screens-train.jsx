@@ -529,7 +529,7 @@ function CustomKeyboard({ visible, field, onType, onBackspace, onAdjust, onConfi
   const act = { ...base, background: 'var(--bg-inset)', color: 'var(--ink-soft)', fontSize: 13, fontFamily: UI.fontUi };
 
   return (
-    <div data-keyboard data-zane-viewport-overlay="true"
+    <div data-keyboard data-zane-custom-keyboard="true" data-zane-viewport-overlay="true"
       onPointerDown={e => { e.preventDefault(); e.stopPropagation(); }}
       onTouchStart={e => { e.preventDefault(); e.stopPropagation(); }}
       style={{ position: localViewportLayerPosition(), bottom: 0, left: 0, right: 0, zIndex: 95,
@@ -717,9 +717,17 @@ function TrainingScreen(props) {
 function TrainingSocialFeedback({ sessionId, userId }) {
   const [comments, setComments] = useStateT([]);
   const [toast, setToast] = useStateT(null);
+  const [toastPressable, setToastPressable] = useStateT(false);
   const [open, setOpen] = useStateT(false);
   const seenRef = useRefT(new Set());
   const toastTimerRef = useRefT(null);
+
+  useEffectT(() => {
+    if (!toast) { setToastPressable(false); return undefined; }
+    setToastPressable(false);
+    const timer = window.setTimeout(() => setToastPressable(true), 300);
+    return () => window.clearTimeout(timer);
+  }, [toast]);
 
   const cheerMessageText = body => String(body || '').replace(/^\s*(?:💥|💪|🙌|🚀|🔥)\s*/u, '').trim();
 
@@ -793,7 +801,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
 
   return <>
     {toast && ReactDOM.createPortal(
-      <div role="status" aria-live="polite" data-zane-local-layer="viewport" style={{
+      <div key={toast.id} role="status" aria-live="polite" data-zane-local-layer="viewport" style={{
         position: localViewportLayerPosition(), inset: 0, zIndex: 180, padding: 16,
         pointerEvents: 'none', color: UI.ink,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
@@ -804,7 +812,7 @@ function TrainingSocialFeedback({ sessionId, userId }) {
           borderRadius: 8, border: `var(--hair-width) solid ${toast.kind === 'cheer' ? UI.goldSoft : UI.hairStrong}`,
           background: toast.kind === 'cheer' ? `linear-gradient(145deg, rgba(var(--accent-rgb),0.26), ${UI.bgRaised})` : UI.bgRaised,
           boxShadow: toast.kind === 'cheer' ? undefined : '0 8px 32px rgba(0,0,0,0.45)',
-          color: UI.ink, cursor: 'pointer', pointerEvents: 'auto',
+          color: UI.ink, cursor: 'pointer', pointerEvents: toastPressable ? 'auto' : 'none',
           textAlign: 'center', animation: 'fadeUp 0.7s ease both', WebkitTapHighlightColor: 'transparent',
         }}>
           {toast.kind === 'cheer' ? (
@@ -2913,6 +2921,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const [improvedSet, setImprovedSet] = useStateT(false);
   const [regressionSet, setRegressionSet] = useStateT(false);
   const [newBestSet, setNewBestSet] = useStateT(false);
+  const anyFlashVisible = improvedSet || regressionSet || newBestSet;
   // Time-based (log_mode 'time') countdown overlay: { setIdx, total, startedAt }.
   const [countdown, setCountdown] = useStateT(null);
   const countdownRef = useRefT(null);
@@ -4817,6 +4826,10 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // shield at the keyboard's screen position so iOS ghost clicks (fired 200-300ms
   // after the touch that closed the keyboard) don't land on revealed content.
   const armKbShield = () => {
+    // Only a keypad dismissal can produce the ghost click this shield exists
+    // for. Guarding this keeps an invisible bottom barrier from appearing
+    // after an unrelated training action.
+    if (!kbField) return;
     setKbShield(true);
     clearTimeout(kbShieldTimerRef.current);
     kbShieldTimerRef.current = setTimeout(() => setKbShield(false), 400);
@@ -5015,7 +5028,18 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     setKbRaw(val);
     setTimeout(() => {
       const el = document.querySelector(`[data-kb-row="${setIdx}"]`);
-      if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      if (!el) return;
+      // Do not animate the whole exercise list under the user's finger. The
+      // row only needs to move when the custom keypad actually covers it.
+      const keypad = document.querySelector('[data-zane-custom-keyboard]');
+      const rowRect = el.getBoundingClientRect();
+      const list = el.closest('[data-kb-list]') || el.parentElement;
+      const listRect = list?.getBoundingClientRect?.();
+      const keypadTop = keypad?.getBoundingClientRect?.().top ?? window.innerHeight;
+      const visibleTop = Math.max(listRect?.top ?? 0, 8);
+      const visibleBottom = Math.min(listRect?.bottom ?? window.innerHeight, keypadTop - 8);
+      if (rowRect.top >= visibleTop && rowRect.bottom <= visibleBottom) return;
+      el.scrollIntoView({ behavior: 'auto', block: 'nearest' });
     }, 80);
   };
 
@@ -6585,7 +6609,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         document.body
       )}
       {/* Block keyboard and content interaction while any overlay is visible */}
-      {(improvedSet || regressionSet || newBestSet || !!progressionUnlocked) && ReactDOM.createPortal(
+      {(anyFlashVisible || !!progressionUnlocked) && ReactDOM.createPortal(
         <div data-zane-local-layer="viewport" style={{ position: localViewportLayerPosition(), top: 'env(safe-area-inset-top, 0px)', left: 0, right: 0, bottom: 0, zIndex: 100 }} />,
         document.body
       )}
@@ -6918,7 +6942,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
         })}
       </div>
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div data-kb-list="true" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', padding: '0 22px 20px', display: 'flex', flexDirection: 'column', gap: 16 }}>
       {entry ? (<>
 
         {/* Exercise name */}

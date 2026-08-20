@@ -280,6 +280,7 @@ function isTextEntryElement(el) {
 }
 
 function UpdateBanner({ onUpdate, onDefer, updating, compact = false }) {
+  const inert = UI.useFreshMountGuard(350, compact);
   if (compact) {
     return (
       <div style={{
@@ -291,6 +292,7 @@ function UpdateBanner({ onUpdate, onDefer, updating, compact = false }) {
         border: `1px solid ${UI.goldSoft}`,
         boxShadow: '0 12px 28px rgba(0,0,0,0.35)',
         textShadow: 'var(--text-lift)',
+        pointerEvents: inert ? 'none' : 'auto',
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 12, fontWeight: 700, letterSpacing: '0.06em' }}>
@@ -330,6 +332,7 @@ function UpdateBanner({ onUpdate, onDefer, updating, compact = false }) {
         display: 'flex', flexDirection: 'column', alignItems: 'center',
         gap: 10, textAlign: 'center',
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 var(--hair-width) rgba(var(--accent-rgb),0.2)',
+        pointerEvents: inert ? 'none' : 'auto',
       }}>
         <div style={{
           width: 48, height: 48, borderRadius: 6,

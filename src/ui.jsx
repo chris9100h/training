@@ -46,6 +46,20 @@ function isLightCanvasActive() {
   return (0.2126 * parts[0] + 0.7152 * parts[1] + 0.0722 * parts[2]) > 140;
 }
 
+// Async overlays can appear in the same frame as a tap that started on the
+// surface underneath them. Keep a newly mounted overlay inert for one short
+// gesture window, but only for that overlay's own controls. This avoids an
+// accidental ACCEPT/UPDATE without making the whole app unresponsive.
+function useFreshMountGuard(ms = 350, key = 0) {
+  const [inert, setInert] = React.useState(true);
+  React.useEffect(() => {
+    setInert(true);
+    const timer = window.setTimeout(() => setInert(false), ms);
+    return () => window.clearTimeout(timer);
+  }, [ms, key]);
+  return inert;
+}
+
 // iOS browsers share a WebKit viewport bug where fixed layers can be painted
 // against the browser's old toolbar/keyboard geometry while their hit-test
 // boxes use the current geometry. The app shell creates a local containing
@@ -563,7 +577,8 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
   const pressTimerRef = React.useRef(null);
   const pressStartRef = React.useRef(null);
   const pressButtonRef = React.useRef(null);
-  const suppressClickRef = React.useRef(false);
+  const suppressClickRef = React.useRef(null);
+  const CLICK_SUPPRESSION_MS = 300;
   const activeListenersRef = React.useRef(null);
   const healthIdx = tabs.findIndex(t => t.id === 'health');
   const currentHealthSlot = tabs.find(t => t.id === 'health')?.healthSlot || 'health';
@@ -578,13 +593,19 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     return { anchorX, bottom: originBottom - barRect.top + 8 };
   };
   const cancelPressTimer = () => { if (pressTimerRef.current) { clearTimeout(pressTimerRef.current); pressTimerRef.current = null; } };
+  const suppressNextClick = slot => { suppressClickRef.current = { at: Date.now(), slot }; };
+  const consumeClickSuppression = slot => {
+    const armed = suppressClickRef.current;
+    if (!armed || armed.slot !== slot) return false;
+    suppressClickRef.current = null;
+    return Date.now() - armed.at < CLICK_SUPPRESSION_MS;
+  };
   const resolveHealthOption = (x, y) => document.elementFromPoint(x, y)?.closest?.('[data-health-option]')?.getAttribute('data-health-option') || null;
   const openHealthReveal = (buttonEl) => {
     if (activeListenersRef.current || !enabledSlots.length) return;
     cancelPressTimer();
     const r = barRef.current?.getBoundingClientRect();
     if (!r) return;
-    suppressClickRef.current = true;
     // Keep the popup and its source bar in the same local coordinate space on
     // iOS browser tabs; window.innerHeight belongs to a different viewport
     // after toolbar movement and causes a visible/hit-test drift.
@@ -602,19 +623,22 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       pressStartRef.current = null;
       pressButtonRef.current = null;
       setReveal(null);
+      suppressClickRef.current = null;
       const pick = resolveHealthOption(ev.clientX, ev.clientY);
       if (cancelled) {
-        suppressClickRef.current = false;
+        // Nothing follows a cancelled gesture.
       } else if (pick) {
         // Popup entries are concrete routes. Passing the shared `health` slot
         // through routeForTab would cycle once more from Food to Medications.
         navigateRoute(pick, 'health');
         // The release landed on a popup option, so no native click follows
         // on the original health button. Clear the suppression immediately.
-        suppressClickRef.current = false;
       } else if (!buttonEl?.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
         // No trailing click is coming after a release outside the source.
-        suppressClickRef.current = false;
+      } else {
+        // A long-press released back on its source produces a native click on
+        // the next turn; suppress only that exact slot and only briefly.
+        suppressNextClick('health');
       }
     };
     activeListenersRef.current = { onMove, onUp };
@@ -635,24 +659,32 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (enabledSlots.length <= 1) return; // nothing else to reveal
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
-    pressStartRef.current = { x: e.clientX, y: e.clientY };
+    pressStartRef.current = { x: e.clientX, y: e.clientY, at: Date.now() };
     pressButtonRef.current = e.currentTarget;
     const buttonEl = e.currentTarget;
     cancelPressTimer();
     pressTimerRef.current = setTimeout(() => {
       pressTimerRef.current = null;
       openHealthReveal(buttonEl);
-    }, 200);
+    }, 450);
   };
   const healthOnPointerMove = (e) => {
     if (!pressTimerRef.current || !pressStartRef.current) return;
-    if (Math.hypot(e.clientX - pressStartRef.current.x, e.clientY - pressStartRef.current.y) > 10) {
-      // Moving toward a shortcut is itself an intentional gesture. Open the
-      // popup at the movement threshold instead of treating that movement as
-      // a cancelled long press.
+    const dx = e.clientX - pressStartRef.current.x;
+    const dy = e.clientY - pressStartRef.current.y;
+    if (Math.hypot(dx, dy) > 10) {
+      // Only a deliberate upward drag after a short hold opens the shortcut
+      // popup. Sideways/downward movement is ordinary scrolling or aiming and
+      // must not turn a short tap into a hidden navigation gesture.
       e.preventDefault();
-      cancelPressTimer();
-      openHealthReveal(pressButtonRef.current);
+      if (dy <= -16 && Date.now() - pressStartRef.current.at >= 180) {
+        cancelPressTimer();
+        openHealthReveal(pressButtonRef.current);
+      } else {
+        cancelPressTimer();
+        pressStartRef.current = null;
+        pressButtonRef.current = null;
+      }
     }
   };
   const healthOnPointerUp = () => {
@@ -663,7 +695,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     }
   };
   const healthOnClick = (id) => {
-    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    if (consumeClickSuppression('health')) return;
     handleTabClick(id);
   };
 
@@ -684,7 +716,6 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     cancelSocialPressTimer();
     const r = barRef.current?.getBoundingClientRect();
     if (!r) return;
-    suppressClickRef.current = true;
     setSocialReveal({ ...revealGeometry(r, socialIdx), hoverId: null });
     const onMove = ev => {
       ev.preventDefault();
@@ -699,14 +730,16 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
       socialPressStartRef.current = null;
       socialPressButtonRef.current = null;
       setSocialReveal(null);
+      suppressClickRef.current = null;
       const pick = resolveSocialOption(ev.clientX, ev.clientY);
       if (cancelled) {
-        suppressClickRef.current = false;
+        // Nothing follows a cancelled gesture.
       } else if (pick) {
         navigateRoute(pick, 'social');
-        suppressClickRef.current = false;
       } else if (!buttonEl?.contains(document.elementFromPoint(ev.clientX, ev.clientY))) {
-        suppressClickRef.current = false;
+        // No trailing click is coming after a release outside the source.
+      } else {
+        suppressNextClick('social');
       }
     };
     socialListenersRef.current = { onMove, onUp };
@@ -718,21 +751,29 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     if (e.pointerType === 'mouse' && e.button !== 0) return;
     if (enabledSocialSlots.length <= 1) return;
     try { e.currentTarget.setPointerCapture?.(e.pointerId); } catch (_) {}
-    socialPressStartRef.current = { x: e.clientX, y: e.clientY };
+    socialPressStartRef.current = { x: e.clientX, y: e.clientY, at: Date.now() };
     socialPressButtonRef.current = e.currentTarget;
     const buttonEl = e.currentTarget;
     cancelSocialPressTimer();
     socialPressTimerRef.current = setTimeout(() => {
       socialPressTimerRef.current = null;
       openSocialReveal(buttonEl);
-    }, 200);
+    }, 450);
   };
   const socialOnPointerMove = e => {
     if (!socialPressTimerRef.current || !socialPressStartRef.current) return;
-    if (Math.hypot(e.clientX - socialPressStartRef.current.x, e.clientY - socialPressStartRef.current.y) > 10) {
+    const dx = e.clientX - socialPressStartRef.current.x;
+    const dy = e.clientY - socialPressStartRef.current.y;
+    if (Math.hypot(dx, dy) > 10) {
       e.preventDefault();
-      cancelSocialPressTimer();
-      openSocialReveal(socialPressButtonRef.current);
+      if (dy <= -16 && Date.now() - socialPressStartRef.current.at >= 180) {
+        cancelSocialPressTimer();
+        openSocialReveal(socialPressButtonRef.current);
+      } else {
+        cancelSocialPressTimer();
+        socialPressStartRef.current = null;
+        socialPressButtonRef.current = null;
+      }
     }
   };
   const socialOnPointerUp = () => {
@@ -743,7 +784,7 @@ function TabBar({ active, routeName, onChange, sidebar = false, showCoaching = f
     }
   };
   const socialOnClick = id => {
-    if (suppressClickRef.current) { suppressClickRef.current = false; return; }
+    if (consumeClickSuppression('social')) return;
     handleTabClick(id);
   };
   React.useEffect(() => () => {
@@ -2905,4 +2946,5 @@ Object.assign(window, {
   MUSCLES, WEEKDAYS, WEEKDAYS_FULL,
   // primitives
   Hairline, BracketFrame, Frame, SubDial, Bezel, ScreenHead, NumInput, Field, TextInput,
+  useFreshMountGuard,
 });

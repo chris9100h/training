@@ -2413,6 +2413,7 @@ const TOUR_VISUALS = {
 
 // ─── XHandlePrompt ───────────────────────────────────────────────────
 function XHandlePrompt({ onSave, onLater, onOptOut }) {
+  const inert = UI.useFreshMountGuard();
   const [draft, setDraft] = useStateOB('');
   const [error, setError] = useStateOB(null);
   const submit = () => {
@@ -2442,6 +2443,7 @@ function XHandlePrompt({ onSave, onLater, onOptOut }) {
         display: 'flex', flexDirection: 'column', gap: 14,
         boxShadow: '0 32px 80px rgba(0,0,0,0.6), 0 0 0 var(--hair-width) rgba(var(--accent-rgb),0.2)',
         animation: 'fadeUp 0.3s ease',
+        pointerEvents: inert ? 'none' : 'auto',
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
           <div style={{ width: 42, height: 42, borderRadius: 6, background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>

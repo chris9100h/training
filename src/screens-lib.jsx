@@ -6350,7 +6350,11 @@ function SpectatorScreen({ go, targetUserId, userName, sessionId, back }) {
     const row = chipRowRef.current;
     if (!row) return;
     const chip = row.children[exIdx];
-    if (chip) chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+    if (!chip) return;
+    const rowRect = row.getBoundingClientRect();
+    const chipRect = chip.getBoundingClientRect();
+    if (chipRect.left >= rowRect.left && chipRect.right <= rowRect.right) return;
+    chip.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
   }, [exIdx]);
 
   const elapsed = session?.started_at

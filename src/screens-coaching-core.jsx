@@ -139,6 +139,7 @@ const CHECKIN_DEFAULT_SCHEMA = [
 function CoachingPendingBanner({ store, setStore, userId }) {
   const pending = store.coaching?.asClient?.status === 'pending' ? store.coaching.asClient : null;
   const [loading, setLoading] = useStateC(false);
+  const inert = UI.useFreshMountGuard(350, !!pending);
 
   if (!pending) return null;
 
@@ -197,7 +198,7 @@ function CoachingPendingBanner({ store, setStore, userId }) {
           wants to coach you. They will be able to view your training data,
           sessions and plans, and make adjustments on your behalf.
         </div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10, pointerEvents: inert ? 'none' : 'auto' }}>
           <button
             disabled={loading}
             onClick={() => respond(true)}

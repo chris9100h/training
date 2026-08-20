@@ -907,7 +907,7 @@ function BodyStatsCard({ logs, tf, selectedDate, setTf, dragHandle, onExpand, we
         </button>
         {bmMenuOpen && (
           <>
-            <div onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
+            <div data-reorder-ignore="true" onClick={() => setBmMenuOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 4, background: 'transparent' }} />
             <div style={{ position: 'absolute', top: 'calc(100% + 4px)', left: 0, zIndex: 5, minWidth: 132, background: 'var(--bg)', border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, boxShadow: '0 8px 24px rgba(0,0,0,0.35)', padding: 4 }}>
               {bmOptions.map(id => (
                 <button key={id} onClick={() => { setBodyMetric(id); setBmMenuOpen(false); }}
@@ -6749,7 +6749,10 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       captureHost.style.zIndex = '1000';
       captureHost.style.overflow = 'auto';
       captureHost.style.background = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || '#1a1820';
-      captureHost.style.pointerEvents = 'none';
+      // The cloned poster is a temporary full-screen layer. It must block
+      // input while capture is running, otherwise a tap can reach the sheet
+      // underneath while the page is being resized for html2canvas.
+      captureHost.style.pointerEvents = 'auto';
       const element = source.cloneNode(true);
       element.style.margin = '0 auto';
       element.style.transform = 'none';
@@ -6758,10 +6761,13 @@ function WeeklyRecapSheet({ open, onClose, store, userId, targets, initialDate }
       await new Promise(resolve => requestAnimationFrame(resolve));
       const logo = element.querySelector('img[data-shot-avatar]');
       if (logo && !logo.complete) {
-        await new Promise(resolve => {
-          logo.addEventListener('load', resolve, { once: true });
-          logo.addEventListener('error', resolve, { once: true });
-        });
+        await Promise.race([
+          new Promise(resolve => {
+            logo.addEventListener('load', resolve, { once: true });
+            logo.addEventListener('error', resolve, { once: true });
+          }),
+          new Promise(resolve => window.setTimeout(resolve, 4000)),
+        ]);
         await new Promise(resolve => requestAnimationFrame(resolve));
       }
       const canvas = await html2canvas(element, {
