@@ -3266,17 +3266,6 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // down for why it can't be conditionally rendered on `capturing`).
   const [capturing, setCapturing] = useStateFd(false);
   const captureRef = useRefFd(null);
-  // Recipe-photo import is a draft-only helper: the image and optional note
-  // live here until the user asks the AI to parse them, then the resulting
-  // ingredient snapshots are placed into this editor. Nothing is saved until
-  // the normal recipe Save action is confirmed.
-  const [recipeImportOpen, setRecipeImportOpen] = useStateFd(false);
-  const [recipeImportPhoto, setRecipeImportPhoto] = useStateFd(null);
-  const [recipeImportDetails, setRecipeImportDetails] = useStateFd('');
-  const [recipeImportReading, setRecipeImportReading] = useStateFd(false);
-  const [recipeImportParsing, setRecipeImportParsing] = useStateFd(false);
-  const [recipeImportError, setRecipeImportError] = useStateFd(null);
-  const recipeImportInputRef = useRefFd(null);
   // Same background-watermark treatment as the Plan poster (screens-schedule.jsx):
   // VIPs get their own background image, everyone else gets the ZANE mark.
   // Bumped past the Plan poster's own opacity: that poster's day cards are
@@ -9609,6 +9598,16 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
   const initialSnap = useRefFd(null);
   const [capturing, setCapturing] = useStateFd(false);
   const captureRef = useRefFd(null);
+  // Recipe-photo import is draft-only editor state. Keep it in this component
+  // because the hidden file input and import sheet are rendered here. Nothing
+  // is saved until the normal recipe Save action is confirmed.
+  const [recipeImportOpen, setRecipeImportOpen] = useStateFd(false);
+  const [recipeImportPhoto, setRecipeImportPhoto] = useStateFd(null);
+  const [recipeImportDetails, setRecipeImportDetails] = useStateFd('');
+  const [recipeImportReading, setRecipeImportReading] = useStateFd(false);
+  const [recipeImportParsing, setRecipeImportParsing] = useStateFd(false);
+  const [recipeImportError, setRecipeImportError] = useStateFd(null);
+  const recipeImportInputRef = useRefFd(null);
   // Screenshot background: same treatment as SessionCompareScreen/HomeScreen,
   // VIPs get their custom home-screen image, everyone else the faint
   // centered ZANE mark. Opacity bumped noticeably above those screens' own
