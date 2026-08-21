@@ -258,7 +258,7 @@
       inset: 16px;
       border: 2px solid rgba(213, 138, 40, .64);
       border-radius: 20px;
-      box-shadow: 0 0 5px rgba(213, 138, 40, .28), inset 0 0 10px rgba(213, 138, 40, .08);
+      box-shadow: none;
     }
 
     .share-card::before {
@@ -580,6 +580,36 @@
       return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode the PNG.')), 'image/png'));
     }
 
+    function downloadBlob(blob, fileName) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = fileName;
+      a.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function shareBlob(blob, fileName, handle) {
+      if (typeof navigator.share !== 'function' || typeof File === 'undefined') return false;
+      const file = new File([blob], fileName, { type: 'image/png' });
+      try {
+        if (typeof navigator.canShare === 'function' && !navigator.canShare({ files: [file] })) return false;
+        await navigator.share({
+          files: [file],
+          title: 'Zane Lifetime Premium',
+          text: `${handle} unlocked Lifetime Premium in Zane.`,
+        });
+        setStatus('Share sheet opened.');
+        return true;
+      } catch (error) {
+        if (error && error.name === 'AbortError') {
+          setStatus('Share cancelled.');
+          return true;
+        }
+        return false;
+      }
+    }
+
     async function downloadImage() {
       if (!cleanHandle(handleInput.value)) return;
       downloadButton.disabled = true;
@@ -587,14 +617,14 @@
       setStatus('Rendering PNG…');
       try {
         const blob = await canvasBlob(await makeCanvas());
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
         const slug = cleanHandle(handleInput.value).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'user';
-        a.href = url;
-        a.download = `zane-lifetime-premium-${slug}.png`;
-        a.click();
-        setTimeout(() => URL.revokeObjectURL(url), 1000);
-        setStatus('PNG downloaded.');
+        const fileName = `zane-lifetime-premium-${slug}.png`;
+        const handle = displayHandle();
+        const shared = await shareBlob(blob, fileName, handle);
+        if (!shared) {
+          downloadBlob(blob, fileName);
+          setStatus('PNG downloaded.');
+        }
       } catch (error) {
         setStatus(error.message || 'Could not render the image.', true);
       } finally {
