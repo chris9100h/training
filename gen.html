@@ -118,6 +118,82 @@
       line-height: 1.5;
     }
 
+    .handle-toggle {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+      margin-top: 18px;
+      padding: 12px 0;
+      border-top: 1px solid rgba(230, 218, 250, .12);
+      border-bottom: 1px solid rgba(230, 218, 250, .12);
+      color: var(--ink);
+      font-size: 13px;
+      line-height: 1.35;
+      cursor: pointer;
+    }
+
+    .handle-toggle-copy {
+      display: grid;
+      gap: 3px;
+    }
+
+    .handle-toggle-copy small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
+    .toggle {
+      position: relative;
+      display: inline-flex;
+      flex: 0 0 auto;
+      width: 44px;
+      height: 25px;
+    }
+
+    .toggle input {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      opacity: 0;
+    }
+
+    .toggle-track {
+      position: absolute;
+      inset: 0;
+      border: 1px solid rgba(230, 218, 250, .28);
+      border-radius: 999px;
+      background: var(--panel-soft);
+      transition: background .16s ease, border-color .16s ease;
+    }
+
+    .toggle-track::after {
+      content: '';
+      position: absolute;
+      top: 3px;
+      left: 3px;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      background: var(--muted);
+      box-shadow: 0 2px 6px rgba(0, 0, 0, .35);
+      transition: transform .16s ease, background .16s ease;
+    }
+
+    .toggle input:checked + .toggle-track {
+      border-color: rgba(255, 198, 104, .72);
+      background: rgba(213, 138, 40, .28);
+    }
+
+    .toggle input:checked + .toggle-track::after {
+      background: var(--gold-bright);
+      transform: translateX(19px);
+    }
+
+    .toggle input:focus-visible + .toggle-track {
+      box-shadow: 0 0 0 3px rgba(240, 166, 58, .16);
+    }
+
     .actions {
       display: grid;
       gap: 10px;
@@ -471,9 +547,20 @@
     <div class="layout">
       <section class="controls" aria-labelledby="controls-title">
         <h2 id="controls-title" class="sr-only">Share image controls</h2>
-        <label class="section-label" for="handle">X username</label>
-        <input id="handle" class="handle-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="@username" maxlength="64" />
-        <p class="handle-help">Type the user's handle with or without <strong>@</strong>. It is added automatically and shown on the artwork.</p>
+        <label class="section-label" for="handle">Username or name</label>
+        <input id="handle" class="handle-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="username or name" maxlength="64" />
+        <p class="handle-help">Enter the user's handle or name. The optional <strong>@</strong> prefix is controlled below.</p>
+
+        <label class="handle-toggle">
+          <span class="handle-toggle-copy">
+            <span>Show @ prefix on image</span>
+            <small>Turn this off to show the name without @.</small>
+          </span>
+          <span class="toggle">
+            <input id="show-handle" type="checkbox" checked />
+            <span class="toggle-track" aria-hidden="true"></span>
+          </span>
+        </label>
 
         <div class="actions">
           <button id="download" class="action" type="button" disabled>Download PNG</button>
@@ -515,6 +602,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js?v=2.878" crossorigin="anonymous"></script>
   <script>
     const handleInput = document.getElementById('handle');
+    const showHandleInput = document.getElementById('show-handle');
     const recipient = document.getElementById('recipient');
     const downloadButton = document.getElementById('download');
     const copyButton = document.getElementById('copy');
@@ -525,17 +613,22 @@
       return String(value || '').trim().replace(/^@+/, '').replace(/\s+/g, '');
     }
 
+    function cleanName(value) {
+      return String(value || '').trim().replace(/^@+/, '').replace(/\s+/g, ' ');
+    }
+
     function displayHandle() {
-      const clean = cleanHandle(handleInput.value);
-      return clean ? `@${clean}` : '@your_username';
+      const clean = showHandleInput.checked ? cleanHandle(handleInput.value) : cleanName(handleInput.value);
+      if (!clean) return showHandleInput.checked ? '@your_username' : 'your_username';
+      return showHandleInput.checked ? `@${clean}` : clean;
     }
 
     function updatePreview() {
-      const hasHandle = !!cleanHandle(handleInput.value);
+      const hasName = !!(showHandleInput.checked ? cleanHandle(handleInput.value) : cleanName(handleInput.value));
       recipient.textContent = displayHandle();
-      downloadButton.disabled = !hasHandle;
-      copyButton.disabled = !hasHandle;
-      if (!hasHandle) status.textContent = '';
+      downloadButton.disabled = !hasName;
+      copyButton.disabled = !hasName;
+      if (!hasName) status.textContent = '';
     }
 
     function setStatus(message, error = false) {
@@ -602,7 +695,7 @@
         await navigator.share({
           files: [file],
           title: 'Zane Lifetime Premium',
-          text: `${handle} unlocked Lifetime Premium in Zane.`,
+          text: handle ? `${handle} unlocked Lifetime Premium in Zane.` : 'A Zane user unlocked Lifetime Premium.',
         });
         setStatus('Share sheet opened.');
         return true;
@@ -616,13 +709,13 @@
     }
 
     async function downloadImage() {
-      if (!cleanHandle(handleInput.value)) return;
+      if (!(showHandleInput.checked ? cleanHandle(handleInput.value) : cleanName(handleInput.value))) return;
       downloadButton.disabled = true;
       copyButton.disabled = true;
       setStatus('Rendering PNG…');
       try {
         const blob = await canvasBlob(await makeCanvas());
-        const slug = cleanHandle(handleInput.value).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'user';
+        const slug = cleanName(handleInput.value).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'user';
         const fileName = `zane-lifetime-premium-${slug}.png`;
         const handle = displayHandle();
         const shared = await shareBlob(blob, fileName, handle);
@@ -638,7 +731,7 @@
     }
 
     async function copyImage() {
-      if (!cleanHandle(handleInput.value)) return;
+      if (!(showHandleInput.checked ? cleanHandle(handleInput.value) : cleanName(handleInput.value))) return;
       downloadButton.disabled = true;
       copyButton.disabled = true;
       setStatus('Rendering image…');
@@ -657,6 +750,7 @@
     }
 
     handleInput.addEventListener('input', updatePreview);
+    showHandleInput.addEventListener('change', updatePreview);
     downloadButton.addEventListener('click', downloadImage);
     copyButton.addEventListener('click', copyImage);
     updatePreview();
