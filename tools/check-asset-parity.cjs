@@ -103,7 +103,13 @@ for (const rel of publicPages) {
   if (assetSet.has(rel)) {
     fail(`${rel} is in both PUBLIC_PAGES and ASSETS in sw.js.\n     A public page must not be precached, it updates via its own ?v= buster.`);
   }
-  if (!fs.existsSync(path.join(root, rel))) {
+  // Cloudflare's clean-URL mapping serves /gen from gen.html. Keep the
+  // alias in PUBLIC_PAGES so the service worker can classify the browser's
+  // actual pathname, while validating the corresponding source file here.
+  const sourceRel = fs.existsSync(path.join(root, rel))
+    ? rel
+    : (fs.existsSync(path.join(root, `${rel}.html`)) ? `${rel}.html` : rel);
+  if (!fs.existsSync(path.join(root, sourceRel))) {
     fail(`PUBLIC_PAGES lists ${rel}, but that file does not exist.`);
   }
 }

@@ -83,6 +83,8 @@ const PUBLIC_PAGES = [
   BASE_PATH + '/features.html',
   BASE_PATH + '/autoreg.html',
   BASE_PATH + '/privacy.html',
+  BASE_PATH + '/gen',
+  BASE_PATH + '/gen.html',
   BASE_PATH + '/cloud.js',
   BASE_PATH + '/privacy.js',
   BASE_PATH + '/src/autoreg-guide-page.js',

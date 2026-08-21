@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Zane · Lifetime Premium share generator</title>
+  <meta name="description" content="Create a Zane Lifetime Premium congratulations image for sharing." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@500;600;700&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #111016;
+      --panel: #1a1821;
+      --panel-strong: #24202f;
+      --panel-soft: #2b2639;
+      --gold: #d58a28;
+      --gold-bright: #f0a63a;
+      --ink: #f1ece5;
+      --muted: #a49daa;
+      --hair: rgba(232, 163, 66, .42);
+      --line: rgba(230, 218, 250, .18);
+      --grid: rgba(152, 134, 183, .08);
+      color-scheme: dark;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body { min-height: 100%; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 20% 0%, rgba(213, 138, 40, .08), transparent 28rem),
+        var(--bg);
+      font: 15px/1.55 Inter, system-ui, sans-serif;
+    }
+
+    button, input { font: inherit; }
+
+    button { cursor: pointer; }
+
+    .shell {
+      width: min(1180px, calc(100% - 36px));
+      margin: 0 auto;
+      padding: 42px 0 70px;
+    }
+
+    .page-header {
+      border-top: 2px solid var(--gold);
+      padding-top: 22px;
+      margin-bottom: 28px;
+    }
+
+    .brand {
+      margin: 0;
+      color: var(--gold-bright);
+      font: 700 clamp(42px, 8vw, 72px)/.9 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .page-header p {
+      margin: 12px 0 0;
+      color: var(--muted);
+      letter-spacing: .06em;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .controls {
+      position: sticky;
+      top: 18px;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--gold);
+      border-radius: 9px;
+      background: rgba(26, 24, 33, .92);
+      box-shadow: 0 18px 42px rgba(0, 0, 0, .22);
+    }
+
+    .section-label {
+      display: block;
+      margin-bottom: 8px;
+      color: var(--gold-bright);
+      font: 600 10px/1.2 'JetBrains Mono', monospace;
+      letter-spacing: .18em;
+      text-transform: uppercase;
+    }
+
+    .handle-input {
+      width: 100%;
+      min-height: 50px;
+      padding: 12px 14px;
+      border: 1px solid rgba(230, 218, 250, .26);
+      border-radius: 6px;
+      outline: none;
+      color: var(--ink);
+      background: var(--panel-soft);
+      font-size: 16px;
+    }
+
+    .handle-input:focus {
+      border-color: var(--gold-bright);
+      box-shadow: 0 0 0 3px rgba(240, 166, 58, .16);
+    }
+
+    .handle-help {
+      margin: 9px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.5;
+    }
+
+    .actions {
+      display: grid;
+      gap: 10px;
+      margin-top: 22px;
+    }
+
+    .action {
+      width: 100%;
+      min-height: 46px;
+      padding: 11px 14px;
+      border: 1px solid rgba(255, 198, 104, .68);
+      border-radius: 6px;
+      color: #23170e;
+      background: linear-gradient(155deg, #f3ad49 0%, #d8811d 58%, #b96612 100%);
+      box-shadow: 0 8px 22px rgba(213, 138, 40, .18), inset 0 1px 0 rgba(255, 238, 193, .45);
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .action.secondary {
+      color: var(--ink);
+      background: transparent;
+      border-color: var(--line);
+      box-shadow: none;
+    }
+
+    .action:disabled {
+      cursor: default;
+      opacity: .42;
+    }
+
+    .status {
+      min-height: 22px;
+      margin: 14px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .tip {
+      margin: 24px 0 0;
+      padding-top: 18px;
+      border-top: 1px solid rgba(230, 218, 250, .12);
+      color: var(--muted);
+      font-size: 12px;
+      line-height: 1.55;
+    }
+
+    .preview-panel {
+      min-width: 0;
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: rgba(26, 24, 33, .72);
+    }
+
+    .preview-heading {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .preview-heading h2 {
+      margin: 0;
+      color: var(--gold-bright);
+      font: 600 22px/1 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .preview-heading span {
+      color: var(--muted);
+      font: 10px/1 'JetBrains Mono', monospace;
+      letter-spacing: .13em;
+      text-transform: uppercase;
+    }
+
+    .preview-stage {
+      display: flex;
+      justify-content: center;
+      overflow: auto;
+      padding: 18px;
+      border: 1px solid rgba(230, 218, 250, .10);
+      border-radius: 7px;
+      background:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px),
+        #0d0c12;
+      background-size: 32px 32px;
+    }
+
+    /* The exported artwork is deliberately 4:5: readable on X and still easy
+       to save/share from a phone. The capture code below renders this exact
+       600 x 750 CSS-pixel surface at 2x (1200 x 1500 PNG). */
+    .share-card {
+      position: relative;
+      display: flex;
+      flex-direction: column;
+      flex: 0 0 auto;
+      width: 600px;
+      height: 750px;
+      overflow: hidden;
+      color: var(--ink);
+      background-color: #17151e;
+      background-image:
+        linear-gradient(var(--grid) 1px, transparent 1px),
+        linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+      background-size: 32px 32px;
+      border-radius: 24px;
+      box-shadow:
+        0 0 0 1px rgba(240, 166, 58, .42),
+        0 0 24px rgba(213, 138, 40, .22),
+        0 26px 70px rgba(4, 2, 10, .45);
+      font-family: Inter, system-ui, sans-serif;
+    }
+
+    /* The live preview has room to glow outside the card. The exported canvas
+       is exactly the card's 600 x 750 surface, so an outer shadow would bleed
+       into the image edges as an unintended gold frame. Keep the export glow
+       inside the artwork instead. */
+    .share-card.capture-card {
+      box-shadow: 0 0 0 1px rgba(240, 166, 58, .42), inset 0 0 18px rgba(213, 138, 40, .08);
+    }
+
+    .share-card.capture-card::after {
+      box-shadow:
+        0 0 8px rgba(213, 138, 40, .34),
+        inset 0 0 12px rgba(213, 138, 40, .08);
+    }
+
+    .share-card::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+      background: radial-gradient(circle at 50% 45%, rgba(209, 130, 37, .12), transparent 42%);
+    }
+
+    .share-card::after {
+      content: '';
+      position: absolute;
+      inset: 16px;
+      border: 2px solid rgba(213, 138, 40, .58);
+      border-radius: 20px;
+      box-shadow:
+        0 0 12px rgba(213, 138, 40, .42),
+        inset 0 0 12px rgba(213, 138, 40, .08);
+      pointer-events: none;
+    }
+
+    .share-top {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      padding: 46px 50px 24px;
+    }
+
+    .share-top::after {
+      content: '';
+      position: absolute;
+      right: 50px;
+      bottom: 13px;
+      left: 50px;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--hair), transparent);
+      box-shadow: 0 0 9px rgba(213, 138, 40, .46);
+    }
+
+    .share-brand {
+      color: var(--gold-bright);
+      font: 700 44px/1 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .1em;
+    }
+
+    .share-mark {
+      color: rgba(240, 166, 58, .78);
+      font: 600 12px/1 'JetBrains Mono', monospace;
+      letter-spacing: .2em;
+      text-transform: uppercase;
+    }
+
+    .share-body {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 38px 64px 26px;
+      text-align: center;
+    }
+
+    .celebrate {
+      margin-bottom: 19px;
+      font-size: 92px;
+      line-height: 1;
+      filter: drop-shadow(0 9px 16px rgba(236, 163, 59, .30));
+    }
+
+    .eyebrow {
+      margin-bottom: 10px;
+      color: var(--gold-bright);
+      font: 600 13px/1 'JetBrains Mono', monospace;
+      letter-spacing: .27em;
+    }
+
+    .share-title {
+      max-width: 480px;
+      margin: 0;
+      color: var(--ink);
+      font: 600 58px/.94 'Big Shoulders Display', Impact, sans-serif;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .recipient {
+      max-width: 470px;
+      margin: 27px 0 0;
+      overflow-wrap: anywhere;
+      color: var(--gold-bright);
+      font: 700 23px/1.15 Inter, sans-serif;
+      letter-spacing: .08em;
+    }
+
+    .earned {
+      margin: 21px 0 0;
+      color: var(--gold-bright);
+      font: 700 20px/1.1 Inter, sans-serif;
+      letter-spacing: .15em;
+    }
+
+    .share-copy {
+      max-width: 410px;
+      margin: 17px 0 0;
+      color: var(--muted);
+      font-size: 17px;
+      line-height: 1.55;
+    }
+
+    .share-divider {
+      width: 100%;
+      height: 1px;
+      margin: 31px 0 18px;
+      background: linear-gradient(90deg, transparent, var(--hair), transparent);
+    }
+
+    .share-proof {
+      color: var(--muted);
+      font: 600 12px/1.2 Inter, sans-serif;
+      letter-spacing: .21em;
+      text-transform: uppercase;
+    }
+
+    .share-bottom {
+      position: relative;
+      z-index: 1;
+      padding: 22px 50px 42px;
+      color: rgba(164, 157, 170, .76);
+      font: 500 11px/1.4 'JetBrains Mono', monospace;
+      letter-spacing: .14em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    .confetti {
+      position: absolute;
+      z-index: 2;
+      inset: 80px 74px auto;
+      height: 150px;
+      pointer-events: none;
+    }
+
+    .confetti i {
+      position: absolute;
+      display: block;
+      width: 7px;
+      height: 16px;
+      border-radius: 3px;
+      background: var(--gold-bright);
+      opacity: .82;
+      transform: rotate(25deg);
+    }
+
+    .confetti i:nth-child(1) { top: 31px; left: 5%; }
+    .confetti i:nth-child(2) { top: 4px; left: 23%; height: 10px; background: #79dca8; transform: rotate(-35deg); }
+    .confetti i:nth-child(3) { top: 29px; right: 23%; width: 9px; height: 9px; border-radius: 50%; background: #e48477; }
+    .confetti i:nth-child(4) { top: 51px; right: 5%; height: 12px; transform: rotate(-25deg); }
+    .confetti i:nth-child(5) { top: 104px; left: 14%; width: 9px; height: 9px; border-radius: 50%; background: #a4adff; }
+    .confetti i:nth-child(6) { top: 94px; right: 15%; height: 14px; background: #79dca8; transform: rotate(42deg); }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    @media (max-width: 860px) {
+      .layout { grid-template-columns: 1fr; }
+      .controls { position: static; }
+    }
+
+    @media (max-width: 650px) {
+      .shell { width: min(100% - 22px, 1180px); padding-top: 24px; }
+      .preview-panel { padding: 13px; }
+      .preview-stage { justify-content: flex-start; padding: 10px; }
+      .share-card { transform-origin: top left; transform: scale(.52); margin-right: -288px; margin-bottom: -360px; }
+    }
+
+    @media (prefers-reduced-motion: no-preference) {
+      .celebrate { animation: pop .7s cubic-bezier(.2, 1.4, .45, 1) both; }
+      .confetti i:nth-child(odd) { animation: float 2.8s ease-in-out infinite alternate; }
+      @keyframes pop { 0% { transform: scale(.55) rotate(-9deg); opacity: 0; } 70% { transform: scale(1.08) rotate(3deg); opacity: 1; } 100% { transform: scale(1) rotate(0); } }
+      @keyframes float { from { translate: 0 0; } to { translate: 0 8px; } }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="page-header">
+      <h1 class="brand">Lifetime Premium Share</h1>
+      <p>Turn a newly unlocked founding-member seat into a ready-to-post image.</p>
+    </header>
+
+    <div class="layout">
+      <section class="controls" aria-labelledby="controls-title">
+        <h2 id="controls-title" class="sr-only">Share image controls</h2>
+        <label class="section-label" for="handle">X username</label>
+        <input id="handle" class="handle-input" type="text" inputmode="text" autocomplete="off" spellcheck="false" placeholder="@username" maxlength="64" />
+        <p class="handle-help">Type the user's handle with or without <strong>@</strong>. It is added automatically and shown on the artwork.</p>
+
+        <div class="actions">
+          <button id="download" class="action" type="button" disabled>Download PNG</button>
+          <button id="copy" class="action secondary" type="button" disabled>Copy image</button>
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <p class="tip">The export is a 1200 × 1500 px PNG (4:5), sized for a clean X post. The controls and preview frame never appear in the image.</p>
+      </section>
+
+      <section class="preview-panel" aria-labelledby="preview-title">
+        <div class="preview-heading">
+          <h2 id="preview-title">Preview</h2>
+          <span>1200 × 1500 PNG</span>
+        </div>
+        <div class="preview-stage">
+          <article id="share-card" class="share-card" aria-label="Lifetime Premium share artwork">
+            <div class="share-top">
+              <div class="share-brand">ZANE</div>
+              <div class="share-mark">FOUNDING MEMBER</div>
+            </div>
+            <div class="confetti" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i><i></i></div>
+            <div class="share-body">
+              <div class="celebrate" aria-hidden="true">🎉</div>
+              <div class="eyebrow">CONGRATULATIONS</div>
+              <h2 class="share-title">LIFETIME PREMIUM</h2>
+              <p id="recipient" class="recipient">@your_username</p>
+              <p class="earned">YOU EARNED IT.</p>
+              <p class="share-copy">Every premium feature is now yours forever. No subscription. No expiry.</p>
+              <div class="share-divider"></div>
+              <div class="share-proof">ALL FEATURES · FOREVER</div>
+            </div>
+            <div class="share-bottom">A founding-member seat, earned by showing up.</div>
+          </article>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js?v=2.873" crossorigin="anonymous"></script>
+  <script>
+    const handleInput = document.getElementById('handle');
+    const recipient = document.getElementById('recipient');
+    const downloadButton = document.getElementById('download');
+    const copyButton = document.getElementById('copy');
+    const status = document.getElementById('status');
+    const card = document.getElementById('share-card');
+
+    function cleanHandle(value) {
+      return String(value || '').trim().replace(/^@+/, '').replace(/\s+/g, '');
+    }
+
+    function displayHandle() {
+      const clean = cleanHandle(handleInput.value);
+      return clean ? `@${clean}` : '@your_username';
+    }
+
+    function updatePreview() {
+      const hasHandle = !!cleanHandle(handleInput.value);
+      recipient.textContent = displayHandle();
+      downloadButton.disabled = !hasHandle;
+      copyButton.disabled = !hasHandle;
+      if (!hasHandle) status.textContent = '';
+    }
+
+    function setStatus(message, error = false) {
+      status.textContent = message;
+      status.style.color = error ? '#e48477' : '';
+    }
+
+    async function makeCanvas() {
+      if (typeof window.html2canvas !== 'function') {
+        throw new Error('The image renderer is not available. Check your connection and reload this page.');
+      }
+
+      // The live card is responsive on small screens. Capture a clean, fixed
+      // size copy so every export is always exactly 1200 x 1500 pixels.
+      const clone = card.cloneNode(true);
+      clone.id = 'capture-card';
+      clone.classList.add('capture-card');
+      clone.style.position = 'fixed';
+      clone.style.left = '-10000px';
+      clone.style.top = '0';
+      clone.style.width = '600px';
+      clone.style.height = '750px';
+      clone.style.transform = 'none';
+      clone.style.margin = '0';
+      document.body.appendChild(clone);
+
+      try {
+        if (document.fonts && document.fonts.ready) await document.fonts.ready;
+        return await window.html2canvas(clone, {
+          backgroundColor: '#17151e',
+          width: 600,
+          height: 750,
+          scale: 2,
+          useCORS: true,
+          logging: false,
+          scrollX: 0,
+          scrollY: 0,
+          windowWidth: 600,
+          windowHeight: 750,
+        });
+      } finally {
+        clone.remove();
+      }
+    }
+
+    function canvasBlob(canvas) {
+      return new Promise((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new Error('Could not encode the PNG.')), 'image/png'));
+    }
+
+    async function downloadImage() {
+      if (!cleanHandle(handleInput.value)) return;
+      downloadButton.disabled = true;
+      copyButton.disabled = true;
+      setStatus('Rendering PNG…');
+      try {
+        const blob = await canvasBlob(await makeCanvas());
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        const slug = cleanHandle(handleInput.value).replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'user';
+        a.href = url;
+        a.download = `zane-lifetime-premium-${slug}.png`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        setStatus('PNG downloaded.');
+      } catch (error) {
+        setStatus(error.message || 'Could not render the image.', true);
+      } finally {
+        updatePreview();
+      }
+    }
+
+    async function copyImage() {
+      if (!cleanHandle(handleInput.value)) return;
+      downloadButton.disabled = true;
+      copyButton.disabled = true;
+      setStatus('Rendering image…');
+      try {
+        const blob = await canvasBlob(await makeCanvas());
+        if (!navigator.clipboard || typeof ClipboardItem === 'undefined') {
+          throw new Error('Image copy is not supported here. Use Download PNG instead.');
+        }
+        await navigator.clipboard.write([new ClipboardItem({ 'image/png': blob })]);
+        setStatus('Image copied. Paste it straight into X.');
+      } catch (error) {
+        setStatus(error.message || 'Could not copy the image.', true);
+      } finally {
+        updatePreview();
+      }
+    }
+
+    handleInput.addEventListener('input', updatePreview);
+    downloadButton.addEventListener('click', downloadImage);
+    copyButton.addEventListener('click', copyImage);
+    updatePreview();
+  </script>
+</body>
+</html>
