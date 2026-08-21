@@ -2777,6 +2777,7 @@ const PLATE_SIZE_LBS = { 55: 70, 45: 64, 35: 56, 25: 48, 10: 42, 5: 36, 2.5: 30,
 function VolumeTrendChart({ trend }) {
   const points = Array.isArray(trend?.points) ? trend.points : [];
   if (!points.length) return null;
+  const periodLabel = trend?.periodLabel === 'plan' ? 'PLAN START' : 'BLOCK START';
   const width = 340;
   const height = 154;
   const left = 48;
@@ -2804,9 +2805,9 @@ function VolumeTrendChart({ trend }) {
     <div style={{ background: UI.bgInset, border: `1px solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 10px 8px', marginBottom: 16 }}>
       <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 8, marginBottom: 2 }}>
         <div className="micro" style={{ color: UI.inkFaint }}>AVG VOLUME PER {String(trend.unitLabel || 'unit').toUpperCase()}</div>
-        <div className="micro" style={{ color: UI.inkFaint }}>SINCE BLOCK START</div>
+        <div className="micro" style={{ color: UI.inkFaint }}>SINCE {periodLabel}</div>
       </div>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Average volume per ${trend.unitLabel || 'unit'} since block start`} style={{ display: 'block', width: '100%', height: 'auto', overflow: 'hidden' }}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`Average volume per ${trend.unitLabel || 'unit'} since ${periodLabel.toLowerCase()}`} style={{ display: 'block', width: '100%', height: 'auto', overflow: 'hidden' }}>
         {gridValues.map((value, i) => {
           const y = yAt(value);
           return <g key={i}>

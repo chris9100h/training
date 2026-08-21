@@ -5944,6 +5944,45 @@ async function testAsync(name, fn) {
       const out = LB.blockSessions(sessions, ms, []).map(s => s.id);
       assert.deepStrictEqual(out, ['in']);
     });
+
+    test('planStartDateForRecap: uses the oldest version as the durable plan start', () => {
+      const schedule = { id: 'p', days: [{ id: 'd' }], versions: [
+        { validFrom: '2026-08-01', days: [] },
+        { validFrom: '2026-06-01', days: [] },
+      ] };
+      assert.strictEqual(LB.planStartDateForRecap(schedule, [], {
+        activeScheduleId: 'p', cycleStartDate: '2026-07-15',
+      }), '2026-06-01');
+    });
+    test('planStartDateForRecap: uses the active plan setting, never another plan\'s setting', () => {
+      const cycle = { id: 'p', days: [{ id: 'd' }] };
+      assert.strictEqual(LB.planStartDateForRecap(cycle, [], {
+        activeScheduleId: 'p', cycleStartDate: '2026-07-10',
+      }), '2026-07-10');
+      assert.strictEqual(LB.planStartDateForRecap(cycle, [sess('old', '2026-06-01T10:00:00Z')], {
+        activeScheduleId: 'other', cycleStartDate: '2026-01-01',
+      }), '2026-06-01');
+    });
+    test('planStartDateForRecap: flex plans fall back to their first completed rotation', () => {
+      const flex = { id: 'flex', is_flex: true, days: [{ id: 'a' }, { id: 'b' }] };
+      const sessions = [
+        { ...sess('later', '2026-07-03T10:00:00Z', { scheduleId: 'flex' }) },
+        { ...sess('first', '2026-07-01T10:00:00Z', { scheduleId: 'flex' }) },
+      ];
+      assert.strictEqual(LB.planStartDateForRecap(flex, sessions, { activeScheduleId: 'flex' }), '2026-07-01');
+    });
+    test('planSessionsSinceStart: keeps all plan history after the start, not only the current block', () => {
+      const schedule = { id: 'p', days: [{ id: 'd' }] };
+      const sessions = [
+        sess('before', '2026-06-30T10:00:00Z'),
+        sess('first', '2026-07-01T10:00:00Z'),
+        sess('later', '2026-08-01T10:00:00Z'),
+        sess('deload', '2026-08-02T10:00:00Z', { isDeload: true }),
+        { id: 'open', scheduleId: 'p', ended: null, date: '2026-08-03' },
+        sess('other', '2026-08-04T10:00:00Z', { scheduleId: 'other' }),
+      ];
+      assert.deepStrictEqual(LB.planSessionsSinceStart(sessions, schedule, '2026-07-01').map(s => s.id), ['first', 'later']);
+    });
   }
 
   // ── Autoreg v2 P2: block recap aggregation ───────────────────────────────────
@@ -6025,6 +6064,15 @@ async function testAsync(name, fn) {
       assert.strictEqual(trend.unit, 'rotation');
       assert.deepStrictEqual(Array.from(trend.points, p => p.label), ['R1', 'R2']);
       assert.deepStrictEqual(Array.from(trend.points, p => p.averageVolume), [150, 300]);
+    });
+    test('buildBlockVolumeTrend: plan scope labels the chart from plan start', () => {
+      const schedule = { id: 'p', mode: 'weekday', days: [{ id: 'mon', weekday: 0 }] };
+      const trend = LB.buildBlockVolumeTrend([
+        volumeSession('a', '2026-07-01', 100),
+        volumeSession('b', '2026-07-08', 200),
+      ], schedule, null, [], [], [], '2026-07-01', { startDate: '2026-07-01', periodLabel: 'plan' });
+      assert.strictEqual(trend.periodLabel, 'plan');
+      assert.deepStrictEqual(Array.from(trend.points, p => p.label), ['W1', 'W2']);
     });
   }
 

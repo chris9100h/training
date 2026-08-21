@@ -44,7 +44,7 @@ function PlanActionsModal({ onClose, onDeload, onCleanup, onProgress, deloadLabe
   const options = [
     { icon: 'fa-battery-quarter', label: deloadLabel || 'Deload', sub: 'Run or end a lighter recovery week.', onClick: onDeload },
     { icon: 'fa-broom', label: cleanupLabel || 'Cleanup', sub: 'Reduce training loads while keeping the routine.', onClick: onCleanup },
-    { icon: 'fa-chart-line', label: 'Show progress', sub: 'See what this training block has built so far.', onClick: onProgress },
+    { icon: 'fa-chart-line', label: 'Show progress', sub: 'See what this plan has built so far.', onClick: onProgress },
   ];
   return (
     <div style={{
@@ -202,30 +202,30 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
 
   const showProgress = async (schedule) => {
     setPlanActionsOpen(false);
-    const mesoCapable = !!(schedule?.mesocycle_weeks || schedule?.mesocycle_autoregulate);
-    if (!mesoCapable) {
-      await confirm('Progress recap is available once this plan has an active autoregulated or mesocycle block.', { title: 'Show progress', ok: 'Got it', cancel: null });
+    if (!schedule) {
+      await confirm('Select a plan first to see its progress.', { title: 'Show progress', ok: 'Got it', cancel: null });
       return;
     }
-    const mesoState = LB.getMesoState(schedule?.id, store.mesoStates);
-    if (!mesoState) {
-      await confirm('Progress recap is available once this plan has an active autoregulated or mesocycle block.', { title: 'Show progress', ok: 'Got it', cancel: null });
-      return;
-    }
-    const blockSess = LB.blockSessions(store.sessions, mesoState, store.statusPeriods);
-    const recap = LB.buildBlockRecap(blockSess);
+    const planStartDate = LB.planStartDateForRecap(schedule, store.sessions, {
+      activeScheduleId: store.activeScheduleId,
+      cycleStartDate: store.cycleStartDate,
+      weekPlanStartDate: store.weekPlanStartDate,
+    });
+    const planSess = LB.planSessionsSinceStart(store.sessions, schedule, planStartDate);
+    const recap = LB.buildBlockRecap(planSess);
     if (!recap || recap.sessionCount === 0) {
-      await confirm('There is no completed training in the current block yet. Keep training and your progress will appear here.', { title: 'Show progress', ok: 'Got it', cancel: null });
+      await confirm('There is no completed training for this plan yet. Keep training and your progress will appear here.', { title: 'Show progress', ok: 'Got it', cancel: null });
       return;
     }
     const volumeTrend = LB.buildBlockVolumeTrend(
-      blockSess,
+      planSess,
       schedule,
-      mesoState,
-      store.statusPeriods,
+      null,
+      [],
       store.exercises,
       store.dailyLogs,
-      store.cycleStartDate,
+      planStartDate,
+      { startDate: planStartDate, periodLabel: 'plan' },
     );
     await confirm(<BlockRecap recap={recap} volumeTrend={volumeTrend} />, { title: 'Your progress so far', ok: 'Done', cancel: null, preventBackdropClose: true });
   };

@@ -13223,6 +13223,59 @@ function blockSessions(sessions, mesoState, statusPeriods) {
   });
 }
 
+// Resolve the calendar day on which a plan's progress history begins. Unlike
+// blockStartTs this deliberately does not reset at deloads or mesocycles: the
+// manual recap is a plan-level view and should show everything built since the
+// plan itself started. Versioned plans carry their own original anchor in the
+// oldest validFrom entry. Unversioned active cycle/weekday plans use the
+// corresponding user setting; flex plans have no calendar anchor, so their
+// first completed session is the safest durable start. Inactive or legacy plans
+// fall back to their earliest matching session rather than borrowing the active
+// plan's global date. Pure/testable; returns a YYYY-MM-DD string or null.
+function planStartDateForRecap(schedule, sessions = [], opts = {}) {
+  if (!schedule || schedule.id == null) return null;
+  const asDay = value => {
+    const day = String(value || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) ? day : null;
+  };
+  const versionStarts = (Array.isArray(schedule.versions) ? schedule.versions : [])
+    .map(v => asDay(v?.validFrom))
+    .filter(Boolean)
+    .sort();
+  if (versionStarts.length) return versionStarts[0];
+
+  const active = opts.activeScheduleId != null && String(opts.activeScheduleId) === String(schedule.id);
+  if (active && !isFlexPlan(schedule)) {
+    const configured = isWeekdayPlan(schedule) ? opts.weekPlanStartDate : opts.cycleStartDate;
+    const configuredDay = asDay(configured);
+    if (configuredDay) return configuredDay;
+  }
+
+  const firstSessionDay = (sessions || [])
+    .filter(s => s && s.ended && !s.isDeload && String(s.scheduleId) === String(schedule.id))
+    .map(s => asDay(s.date || s.ended))
+    .filter(Boolean)
+    .sort();
+  return firstSessionDay[0] || null;
+}
+
+// Scope completed sessions to one plan and a calendar start day. This is the
+// plan-level counterpart to blockSessions: it intentionally keeps sessions
+// across mesocycle/deload boundaries, while still excluding explicit deload
+// sessions and open drafts. If no start day is known, all matching history is
+// retained rather than silently dropping it. Pure/testable.
+function planSessionsSinceStart(sessions, schedule, startDate = null) {
+  if (!schedule || schedule.id == null) return [];
+  const start = String(startDate || '').slice(0, 10);
+  const hasStart = /^\d{4}-\d{2}-\d{2}$/.test(start);
+  return (sessions || []).filter(s => {
+    if (!s || !s.ended || s.isDeload || String(s.scheduleId) !== String(schedule.id)) return false;
+    if (!hasStart) return true;
+    const day = String(s.date || s.ended || '').slice(0, 10);
+    return /^\d{4}-\d{2}-\d{2}$/.test(day) && day >= start;
+  });
+}
+
 // Aggregate a block-level recap over the block's sessions (spec 5.1). Set gains
 // still come from each session's durable mesoRecap, but load progress is derived
 // from the actual logged working weights: first observation versus last
@@ -13318,7 +13371,7 @@ function buildBlockRecap(sessions) {
 // distorted by a week containing more or fewer training days. The first bucket
 // is intentionally allowed to be partial because a block can start mid-cycle.
 // Pure/testable; `sessions` is expected to already be scoped by blockSessions.
-function buildBlockVolumeTrend(sessions, schedule, mesoState, statusPeriods, exercises = [], dailyLogs = [], cycleStartDate = null) {
+function buildBlockVolumeTrend(sessions, schedule, mesoState, statusPeriods, exercises = [], dailyLogs = [], cycleStartDate = null, options = {}) {
   if (!schedule || !Array.isArray(sessions) || !sessions.length) return null;
   const list = sessions
     .filter(s => s && s.ended && !s.isDeload && (!schedule.id || s.scheduleId === schedule.id))
@@ -13331,7 +13384,10 @@ function buildBlockVolumeTrend(sessions, schedule, mesoState, statusPeriods, exe
   const dateOf = s => String(s.date || s.ended || '').slice(0, 10);
   const firstDate = dateOf(list[0]);
   const anchorTs = blockStartTs(mesoState, statusPeriods);
-  const anchorDate = anchorTs != null ? fmtISO(new Date(anchorTs)) : (mesoState?.startDate || firstDate);
+  const requestedStart = String(options?.startDate || '').slice(0, 10);
+  const anchorDate = /^\d{4}-\d{2}-\d{2}$/.test(requestedStart)
+    ? requestedStart
+    : (anchorTs != null ? fmtISO(new Date(anchorTs)) : (mesoState?.startDate || firstDate));
   const anchor = parseDate(anchorDate) || parseDate(firstDate);
   const dayDiff = (iso, base) => {
     const d = parseDate(iso);
@@ -13384,7 +13440,7 @@ function buildBlockVolumeTrend(sessions, schedule, mesoState, statusPeriods, exe
     averageVolume: bucket.sessions ? Math.round(bucket.volume / bucket.sessions) : 0,
     sessionCount: bucket.sessions,
   }));
-  return { unit: mode, unitLabel: labels[mode], points };
+  return { unit: mode, unitLabel: labels[mode], periodLabel: options?.periodLabel || 'block', points };
 }
 
 // Anti-nag deload governance (spec 5.3). PURE. Given the persisted autoreg_state,
@@ -14318,7 +14374,7 @@ window.LB = {
   pickGrowthRecipient, retractGrowthGrant, pickDeclineRecipient, reearnMesoWeightBoosts, clearMesoWeightBoostDeclines, revertMesoSessionBoosts, resolveMesoSeedSuggestion, mesoPausedDays, mesoRirForWeek, mesoMuscleTrainedBeforeStart, volumeAnswerAllowsBump,
   MESO_KEY, MESO_MUSCLE_PRIORITY, primaryMuscleForExercise, getMesoState, saveMesoStateToStorage, mesoCurrentWeek, applyMesoSetDeltaFromState, applyMesoSetDelta,
   microcycleSetsByMuscle, detectOverreach,
-  blockStartTs, blockSessions, buildBlockRecap, buildBlockVolumeTrend, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
+  blockStartTs, blockSessions, planStartDateForRecap, planSessionsSinceStart, buildBlockRecap, buildBlockVolumeTrend, deloadNudgeDecision, recordDeloadDecline, clearDeloadNudge,
   updateLandmarkMrv, snapshotBlockStart, backoffDeltas, muscleRosterKeys, updateMevFloors, redistributeMevFloors,
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
