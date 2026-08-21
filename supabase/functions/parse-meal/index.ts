@@ -148,7 +148,7 @@ const RECIPE_SYSTEM_PROMPT = `You reconstruct a cooking recipe from a recipe pho
 
 For every ingredient, the JSON field "name" MUST be a clear canonical ENGLISH ingredient name, regardless of the language used in the photographed or typed recipe. Translate German, Spanish, French, and other source-language ingredient names into English. Do not leave German words, untranslated headings, or source-language labels in ingredient names. Preserve a useful brand or variety in English when it is part of the ingredient (for example "low-fat Greek yogurt"). This English-only rule applies to ingredient names, not to the recipe title.
 
-Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Every quantityG and every macro value must describe the complete amount of that ingredient used in the batch, never a per-100g value and never a single-serving value. Take a short private arithmetic pass before returning JSON: multiply each ingredient's protein by 4, carbs by 4, and fat by 9 and compare that energy with the ingredient's quantity. If an ingredient is energy-dense, use a normal full-fat nutrition profile for the named ingredient rather than a low-calorie textbook estimate. As conservative reality checks, oil is about 8 kcal/g, sugar about 4 kcal/g, chocolate and hazelnut spread about 5 kcal/g, mascarpone about 4 kcal/g, heavy or whipping cream about 3 kcal/g, and nuts about 6 kcal/g. Those numbers are lower bounds, not target values: do not clamp every dense ingredient to the minimum. Do not silently choose a light, low-fat, or reduced-fat product unless the recipe explicitly says so. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
+Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Every quantityG and every macro value must describe the complete amount of that ingredient used in the batch, never a per-100g value and never a single-serving value. Take a short private arithmetic pass before returning JSON: multiply each ingredient's protein by 4, carbs by 4, and fat by 9 and compare that energy with the ingredient's quantity. If an ingredient is energy-dense, use a normal full-fat nutrition profile for the named ingredient rather than a low-calorie textbook estimate. Use these typical kcal-per-gram bands as plausibility anchors for generic ingredients, not as exact label values: flour 3.2-4.0, unsweetened cocoa powder 2.0-4.5, whole milk 0.45-0.8, eggs 1.2-1.8, heavy or whipping cream 2.8-3.5, mascarpone 3.5-5.4, chocolate 4.5-7.0, hazelnut spread 4.5-7.0, oil 7.5-9.2, and sugar 3.6-4.2. If a package label or clearly identified brand is visible, use that information instead of the generic band. Never accept an extreme outlier just because it makes the arithmetic balance. Do not silently choose a light, low-fat, or reduced-fat product unless the recipe explicitly says so. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
 
 Return exactly one JSON object, with no markdown fences and no text after it, in this shape:
 {
@@ -188,40 +188,56 @@ function normalizedIngredientName(name: string): string {
     .trim();
 }
 
-// These are deliberately conservative lower bounds, not a replacement for
-// a food database. They catch the dangerous failure mode where a vision model
-// returns values that look like a small serving or per-100g estimate for a
-// large amount of a dense ingredient. Low-fat wording opts out because a
-// genuinely light product can be far below the normal ingredient density.
-function recipeKcalFloor(name: string): number | null {
+// These are deliberately broad plausibility bands, not a replacement for a
+// food database. They catch both dangerous failure modes: a vision model
+// returning a small serving or per-100g estimate for a large amount, and a
+// model assigning an impossible energy density to an ordinary ingredient.
+// Low-fat wording opts out because a genuinely light product can be below the
+// normal ingredient density. The bands are intentionally wide so a named
+// product is not silently flattened into one generic profile.
+type RecipeKcalBand = { min: number; max: number };
+
+function recipeKcalBand(name: string): RecipeKcalBand | null {
   const normalized = normalizedIngredientName(name);
   if (/\b(light|low fat|low calorie|reduced fat|fat free|skim|semi skimmed|nonfat|fettarm|mager|entrahmt)\b/.test(normalized)) return null;
   if (/\b(chocolate milk|chocolate pudding|chocolate yogurt)\b/.test(normalized)) return null;
-  if (/\b(nutella|hazelnut spread|chocolate hazelnut spread|nuss nougat creme|nuss nougat cream)\b/.test(normalized)) return 4.5;
-  if (/\b(dark chocolate|milk chocolate|white chocolate|baking chocolate|chocolate chips|chocolate bar|chocolate|dunkle schokolade|schokolade|couverture|kuvertuere)\b/.test(normalized)) return 4.5;
-  if (/\b(mascarpone)\b/.test(normalized)) return 3.5;
-  if (/\b(heavy cream|heavy whipping cream|whipping cream|double cream|sahne|vollrahm|schlagsahne)\b/.test(normalized)) return 2.8;
-  if (/\b(oil|olive oil|rapeseed oil|canola oil|vegetable oil|coconut oil|butter|ghee|shortening|rapsol|sonnenblumenoel|speiseoel)\b/.test(normalized)) return 7;
-  if (/\b(sugar|brown sugar|powdered sugar|icing sugar|zucker)\b/.test(normalized)) return 3.6;
-  if (/\b(almond|almonds|walnut|walnuts|pecan|pecans|peanut|peanuts|hazelnut|hazelnuts|cashew|cashews|pistachio|pistachios)\b/.test(normalized)) return 4.5;
+  if (/\b(flour|mehl)\b/.test(normalized)) return { min: 3.2, max: 4.0 };
+  if (/\b(cocoa powder|cacao powder|kakaopulver|kakao)\b/.test(normalized)) return { min: 2.0, max: 4.5 };
+  if (/\b(nutella)\b/.test(normalized)) return { min: 5.0, max: 6.0 };
+  if (/\b(hazelnut spread|chocolate hazelnut spread|nuss nougat creme|nuss nougat cream)\b/.test(normalized)) return { min: 4.5, max: 7.0 };
+  if (/\b(dark chocolate|milk chocolate|white chocolate|baking chocolate|chocolate chips|chocolate bar|chocolate|dunkle schokolade|schokolade|couverture|kuvertuere)\b/.test(normalized)) return { min: 4.5, max: 7.0 };
+  if (/\b(mascarpone)\b/.test(normalized)) return { min: 3.5, max: 5.4 };
+  if (/\b(heavy cream|heavy whipping cream|whipping cream|double cream|sahne|vollrahm|schlagsahne)\b/.test(normalized)) return { min: 2.8, max: 3.5 };
+  if (/\b(oil|olive oil|rapeseed oil|canola oil|vegetable oil|coconut oil|butter|ghee|shortening|rapsol|sonnenblumenoel|speiseoel)\b/.test(normalized)) return { min: 7.5, max: 9.2 };
+  if (/\b(sugar|brown sugar|powdered sugar|icing sugar|zucker)\b/.test(normalized)) return { min: 3.6, max: 4.2 };
+  if (/\b(whole milk|full fat milk|milk|vollmilch|milch)\b/.test(normalized)) return { min: 0.45, max: 0.8 };
+  if (/\b(egg|eggs|ei|eier)\b/.test(normalized)) return { min: 1.2, max: 1.8 };
+  if (/\b(almond|almonds|walnut|walnuts|pecan|pecans|peanut|peanuts|hazelnut|hazelnuts|cashew|cashews|pistachio|pistachios)\b/.test(normalized)) return { min: 4.5, max: 7.0 };
   return null;
 }
 
 function guardRecipeNutrition(item: RecipeNutrition): RecipeNutrition {
-  const floor = recipeKcalFloor(item.name);
-  if (!floor || item.quantityG <= 0) return item;
+  const band = recipeKcalBand(item.name);
+  if (!band || item.quantityG <= 0) return item;
 
   const currentCalories = caloriesFromMacros(item.protein, item.carbs, item.fat);
-  const minimumCalories = Math.round(item.quantityG * floor);
-  if (currentCalories >= minimumCalories) return item;
+  const currentKcalPerGram = currentCalories / item.quantityG;
+  if (currentCalories > 0 && currentKcalPerGram >= band.min && currentKcalPerGram <= band.max) return item;
+
+  const targetKcalPerGram = currentCalories <= 0 || currentKcalPerGram < band.min
+    ? band.min
+    : band.max;
+  const targetCalories = Math.round(item.quantityG * targetKcalPerGram);
 
   // Scale the model's own macro proportions instead of inventing a new food
   // profile. The cap keeps a malformed response reviewable rather than letting
-  // one bad token create absurd nutrition values.
-  const factor = currentCalories > 0 ? Math.min(4, minimumCalories / currentCalories) : 1;
+  // one bad token create absurd nutrition values. Scaling down is also
+  // important: a 500 g mascarpone row must not turn into a 77% fat product
+  // merely because the model balanced its own arithmetic.
+  const factor = currentCalories > 0 ? Math.min(4, targetCalories / currentCalories) : 1;
   const scale = (value: number | null): number | null => value == null ? null : Math.round(value * factor * 10) / 10;
   if (currentCalories <= 0) {
-    return { ...item, fat: Math.round((minimumCalories / 9) * 10) / 10 };
+    return { ...item, fat: Math.round((targetCalories / 9) * 10) / 10 };
   }
   return {
     ...item,
