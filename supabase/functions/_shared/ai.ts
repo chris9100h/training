@@ -213,7 +213,7 @@ const PROVIDERS: Record<ProviderId, Provider> = {
       return {
         model,
         max_tokens: call.maxTokens,
-        ...(budget ? { thinking_budget: budget } : suppress ? { enable_thinking: false } : {}),
+        ...(budget ? { enable_thinking: true, thinking_budget: budget } : suppress ? { enable_thinking: false } : {}),
         messages: openAiMessages(call, suppress ? `${call.userText}\n/no_think` : call.userText),
       };
     },

@@ -148,7 +148,7 @@ const RECIPE_SYSTEM_PROMPT = `You reconstruct a cooking recipe from a recipe pho
 
 For every ingredient, the JSON field "name" MUST be a clear canonical ENGLISH ingredient name, regardless of the language used in the photographed or typed recipe. Translate German, Spanish, French, and other source-language ingredient names into English. Do not leave German words, untranslated headings, or source-language labels in ingredient names. Preserve a useful brand or variety in English when it is part of the ingredient (for example "low-fat Greek yogurt"). This English-only rule applies to ingredient names, not to the recipe title.
 
-Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Every quantityG and every macro value must describe the complete amount of that ingredient used in the batch, never a per-100g value and never a single-serving value. Before returning JSON, multiply each ingredient's protein by 4, carbs by 4, and fat by 9 and compare that energy with the ingredient's quantity. If an ingredient is energy-dense, use realistic full-batch values rather than a low-calorie textbook estimate. As conservative reality checks, oil is about 8 kcal/g, sugar about 4 kcal/g, chocolate and hazelnut spread about 5 kcal/g, mascarpone about 4 kcal/g, heavy or whipping cream about 3 kcal/g, and nuts about 6 kcal/g. Do not silently choose a light, low-fat, or reduced-fat product unless the recipe explicitly says so. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
+Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Every quantityG and every macro value must describe the complete amount of that ingredient used in the batch, never a per-100g value and never a single-serving value. Take a short private arithmetic pass before returning JSON: multiply each ingredient's protein by 4, carbs by 4, and fat by 9 and compare that energy with the ingredient's quantity. If an ingredient is energy-dense, use a normal full-fat nutrition profile for the named ingredient rather than a low-calorie textbook estimate. As conservative reality checks, oil is about 8 kcal/g, sugar about 4 kcal/g, chocolate and hazelnut spread about 5 kcal/g, mascarpone about 4 kcal/g, heavy or whipping cream about 3 kcal/g, and nuts about 6 kcal/g. Those numbers are lower bounds, not target values: do not clamp every dense ingredient to the minimum. Do not silently choose a light, low-fat, or reduced-fat product unless the recipe explicitly says so. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
 
 Return exactly one JSON object, with no markdown fences and no text after it, in this shape:
 {
@@ -311,11 +311,13 @@ Deno.serve(async (req) => {
     userText: isRecipe ? buildRecipeUserText(description, !!rawImage) : buildUserText(description, !!rawImage, previousItems),
     image,
     maxTokens: MAX_TOKENS,
-    // Recipe extraction is a structured transcription task. Deliberate
-    // portion arithmetic is useful for a meal estimate, but making Qwen think
-    // through a recipe photo only adds latency and can push the client timeout
-    // while the editor is waiting for a deterministic ingredient list.
-    reasoningBudget: isRecipe ? null : REASONING_BUDGET,
+    // Recipe photos need a bounded arithmetic pass: Qwen's no-thinking path
+    // is fast, but it was the source of the implausibly low dense-ingredient
+    // values that the deterministic guard can only partially repair. The
+    // shared Qwen adapter sends this as enable_thinking:true with the same
+    // measured ceiling used by meal estimates, so it cannot become an
+    // unbounded wait again.
+    reasoningBudget: REASONING_BUDGET,
   };
   const labels = isRecipe ? RECIPE_LABELS : LABELS;
   const result = explicitProvider
