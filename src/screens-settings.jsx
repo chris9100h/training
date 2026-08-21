@@ -112,13 +112,25 @@ const formatAppStat = (value, decimals = 0) => {
   return number.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
 };
 
-function AppStatsMetric({ label, value, suffix = '' }) {
+function AppStatsMetric({ label, value, suffix = '', description = '' }) {
+  const [showHelp, setShowHelp] = useStateSet(false);
   return (
     <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 11px', minWidth: 0 }}>
-      <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.25 }}>{label}</div>
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 }}>
+        <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.25, minWidth: 0 }}>{label}</div>
+        {description && <button
+          type="button"
+          aria-label={`Explain ${label}`}
+          aria-expanded={showHelp}
+          title={`Explain ${label}`}
+          onClick={() => setShowHelp(open => !open)}
+          style={{ width: 18, height: 18, flex: '0 0 18px', padding: 0, display: 'grid', placeItems: 'center', borderRadius: 4, border: `var(--hair-width) solid ${showHelp ? UI.gold : UI.hairStrong}`, background: showHelp ? 'rgba(var(--accent-rgb),0.14)' : 'transparent', color: showHelp ? UI.gold : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700, lineHeight: 1, cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }}
+        >?</button>}
+      </div>
       <div className="num" style={{ color: UI.gold, fontSize: 18, marginTop: 5, whiteSpace: 'nowrap' }}>
         {value == null ? '—' : value}{suffix && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}
       </div>
+      {showHelp && <div style={{ marginTop: 8, paddingTop: 8, borderTop: `var(--hair-width) solid ${UI.hair}`, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.4 }}>{description}</div>}
     </div>
   );
 }
@@ -2899,7 +2911,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ Active Users Sheet ══ */}
-      <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users">
+      <SettingsSheet open={activeUsersSheet} onClose={() => setActiveUsersSheet(false)} title="Active users" zIndex={200}>
         {(() => {
           // Guarded: this IIFE runs on every render of this screen regardless
           // of whether the sheet is actually open (SettingsSheet stays
@@ -2992,7 +3004,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       </SettingsSheet>
 
       {/* ══ App stats sheet ══ */}
-      <SettingsSheet open={appStatsSheet} onClose={() => setAppStatsSheet(false)} title="App stats">
+      <SettingsSheet open={appStatsSheet} onClose={() => setAppStatsSheet(false)} title="App stats" zIndex={200}>
         {(() => {
           const value = (key, decimals = 0) => appStats?.[key] == null ? null : formatAppStat(appStats[key], decimals);
           const peakHour = appStats?.peak_usage_hour_utc == null ? null : `${String(appStats.peak_usage_hour_utc).padStart(2, '0')}:00 UTC`;
@@ -3000,43 +3012,43 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             {
               title: 'USAGE',
               items: [
-                ['Workouts in last 24h', value('workouts_last_24h')],
-                ['Peak simultaneous workouts', value('max_simultaneous_workouts')],
-                ['Workouts started · 24h', value('workouts_started_24h')],
-                ['Workouts completed · 24h', value('workouts_completed_24h')],
-                ['Average workout · 30d', value('avg_workout_minutes_30d', 1), 'min'],
-                ['Average sets / workout · 30d', value('avg_sets_per_workout_30d', 1)],
-                ['Peak usage hour', peakHour],
+                ['Workouts in last 24h', value('workouts_last_24h'), '', 'Completed or still-open non-imported workouts seen in the rolling 24-hour window.'],
+                ['Peak simultaneous workouts', value('max_simultaneous_workouts'), '', 'The highest number of non-imported workouts active at the same time during the last 24 hours.'],
+                ['Workouts started · 24h', value('workouts_started_24h'), '', 'Non-imported workouts whose server start time falls in the last 24 hours.'],
+                ['Workouts completed · 24h', value('workouts_completed_24h'), '', 'Non-imported workouts whose server completion time falls in the last 24 hours.'],
+                ['Average workout · 30d', value('avg_workout_minutes_30d', 1), 'min', 'Average duration of completed non-imported workouts from the last 30 days.'],
+                ['Average sets / workout · 30d', value('avg_sets_per_workout_30d', 1), '', 'Average number of completed, non-skipped sets in each completed workout from the last 30 days.'],
+                ['Peak usage hour', peakHour, '', 'The UTC clock hour with the most tracked activity events during the last 30 days.'],
               ],
             },
             {
               title: 'REACH',
               items: [
-                ['Active users · 24h', value('active_users_24h')],
-                ['Active users · 7d', value('active_users_7d')],
-                ['Active users · 30d', value('active_users_30d')],
-                ['First workout · 30d', value('new_users_first_workout_30d')],
-                ['3+ active days · 30d', value('users_3_active_days_30d')],
-                ['Longest current streak', value('longest_current_streak_days'), 'days'],
+                ['Active users · 24h', value('active_users_24h'), '', 'Unique users with at least one tracked app activity in the rolling 24-hour window.'],
+                ['Active users · 7d', value('active_users_7d'), '', 'Unique users with at least one tracked app activity in the last 7 days.'],
+                ['Active users · 30d', value('active_users_30d'), '', 'Unique users with at least one tracked app activity in the last 30 days.'],
+                ['First workout · 30d', value('new_users_first_workout_30d'), '', 'Users who joined in the last 30 days and started a non-imported workout after joining.'],
+                ['3+ active days · 30d', value('users_3_active_days_30d'), '', 'Users who were active on at least three distinct UTC calendar days in the last 30 days.'],
+                ['Longest current streak', value('longest_current_streak_days'), 'days', 'The longest consecutive UTC-day activity streak that is still active today or yesterday.'],
               ],
             },
             {
               title: 'RETENTION',
               items: [
-                ['Active users · prior 7d', value('active_users_prior_7d')],
-                ['Active users · current 7d', value('active_users_current_7d')],
-                ['Returned from prior 7d', value('returning_users_7d')],
+                ['Active users · prior 7d', value('active_users_prior_7d'), '', 'Unique users with tracked activity in the 7-day window immediately before the current 7-day window.'],
+                ['Active users · current 7d', value('active_users_current_7d'), '', 'Unique users with tracked activity in the current rolling 7-day window.'],
+                ['Returned from prior 7d', value('returning_users_7d'), '', 'Users active in both the prior 7-day window and the current rolling 7-day window.'],
               ],
             },
             {
               title: 'FEATURE ADOPTION · 30D',
               items: [
-                ['Food', value('food_users_30d')],
-                ['Health', value('health_users_30d')],
-                ['Cardio', value('cardio_users_30d')],
-                ['Medication', value('medication_users_30d')],
-                ['Friends', value('friends_users_30d')],
-                ['Coaching', value('coaching_users_30d')],
+                ['Food', value('food_users_30d'), '', 'Unique users who logged or changed food data at least once in the last 30 days.'],
+                ['Health', value('health_users_30d'), '', 'Unique users who logged health data at least once in the last 30 days.'],
+                ['Cardio', value('cardio_users_30d'), '', 'Unique users who logged cardio at least once in the last 30 days.'],
+                ['Medication', value('medication_users_30d'), '', 'Unique users who logged medication at least once in the last 30 days.'],
+                ['Friends', value('friends_users_30d'), '', 'Unique users who used a tracked Friends action, such as messages, comments or relationships, in the last 30 days.'],
+                ['Coaching', value('coaching_users_30d'), '', 'Unique users who created or submitted a tracked coaching item in the last 30 days.'],
               ],
             },
           ];
@@ -3051,7 +3063,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 <div key={group.title}>
                   <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>{group.title}</div>
                   <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
-                    {group.items.map(([label, displayValue, suffix]) => <AppStatsMetric key={label} label={label} value={displayValue} suffix={suffix} />)}
+                    {group.items.map(([label, displayValue, suffix, description]) => <AppStatsMetric key={label} label={label} value={displayValue} suffix={suffix} description={description} />)}
                   </div>
                 </div>
               ))}
