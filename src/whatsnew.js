@@ -22,6 +22,18 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.878',
+    date: '2026-08-21',
+    title: 'More control, better imports, clearer progress ✨',
+    items: [
+      '📈 Progress recap now works for every plan. Open Plan Actions → Show Progress on any plan to see your progress since plan start, including real start/end load changes and average volume per cycle, week or rotation.',
+      '🍰 Create recipes from photos. Upload a recipe image directly in the recipe editor. Zane extracts the ingredients and lets you review everything before saving.',
+      '🧮 More reliable recipe nutrition. Rich recipes now receive more realistic calorie and macro estimates, while longer AI analyses are less likely to fail with a false network error.',
+      '🥫 Correct barcode results once. Fix a product’s calories or macros after scanning it, and your personal correction is reused the next time you scan that barcode.',
+      '📱 Smoother mobile input. The tab bar gets out of the way while typing, larger text keeps the layout intact, keyboard forms stay visible and the Health Today card now opens that day’s log directly.'
+    ],
+  },
+  {
     id: 'v2.853',
     date: '2026-08-19',
     title: 'Your Zane, your way 🚀',
