@@ -148,7 +148,7 @@ const RECIPE_SYSTEM_PROMPT = `You reconstruct a cooking recipe from a recipe pho
 
 For every ingredient, the JSON field "name" MUST be a clear canonical ENGLISH ingredient name, regardless of the language used in the photographed or typed recipe. Translate German, Spanish, French, and other source-language ingredient names into English. Do not leave German words, untranslated headings, or source-language labels in ingredient names. Preserve a useful brand or variety in English when it is part of the ingredient (for example "low-fat Greek yogurt"). This English-only rule applies to ingredient names, not to the recipe title.
 
-Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
+Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Every quantityG and every macro value must describe the complete amount of that ingredient used in the batch, never a per-100g value and never a single-serving value. Before returning JSON, multiply each ingredient's protein by 4, carbs by 4, and fat by 9 and compare that energy with the ingredient's quantity. If an ingredient is energy-dense, use realistic full-batch values rather than a low-calorie textbook estimate. As conservative reality checks, oil is about 8 kcal/g, sugar about 4 kcal/g, chocolate and hazelnut spread about 5 kcal/g, mascarpone about 4 kcal/g, heavy or whipping cream about 3 kcal/g, and nuts about 6 kcal/g. Do not silently choose a light, low-fat, or reduced-fat product unless the recipe explicitly says so. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
 
 Return exactly one JSON object, with no markdown fences and no text after it, in this shape:
 {
@@ -165,6 +165,74 @@ Use grams for quantityG, grams for protein/carbs/fat/fiber/sugar/satFat, and mil
 // trusted from the model.
 function caloriesFromMacros(p: number, c: number, f: number): number {
   return Math.round(p * 4 + c * 4 + f * 9);
+}
+
+type RecipeNutrition = {
+  name: string;
+  quantityG: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  fiber: number | null;
+  sugar: number | null;
+  satFat: number | null;
+  sodiumMg: number | null;
+};
+
+function normalizedIngredientName(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+// These are deliberately conservative lower bounds, not a replacement for
+// a food database. They catch the dangerous failure mode where a vision model
+// returns values that look like a small serving or per-100g estimate for a
+// large amount of a dense ingredient. Low-fat wording opts out because a
+// genuinely light product can be far below the normal ingredient density.
+function recipeKcalFloor(name: string): number | null {
+  const normalized = normalizedIngredientName(name);
+  if (/\b(light|low fat|low calorie|reduced fat|fat free|skim|semi skimmed|nonfat|fettarm|mager|entrahmt)\b/.test(normalized)) return null;
+  if (/\b(chocolate milk|chocolate pudding|chocolate yogurt)\b/.test(normalized)) return null;
+  if (/\b(nutella|hazelnut spread|chocolate hazelnut spread|nuss nougat creme|nuss nougat cream)\b/.test(normalized)) return 4.5;
+  if (/\b(dark chocolate|milk chocolate|white chocolate|baking chocolate|chocolate chips|chocolate bar|chocolate|dunkle schokolade|schokolade|couverture|kuvertuere)\b/.test(normalized)) return 4.5;
+  if (/\b(mascarpone)\b/.test(normalized)) return 3.5;
+  if (/\b(heavy cream|heavy whipping cream|whipping cream|double cream|sahne|vollrahm|schlagsahne)\b/.test(normalized)) return 2.8;
+  if (/\b(oil|olive oil|rapeseed oil|canola oil|vegetable oil|coconut oil|butter|ghee|shortening|rapsol|sonnenblumenoel|speiseoel)\b/.test(normalized)) return 7;
+  if (/\b(sugar|brown sugar|powdered sugar|icing sugar|zucker)\b/.test(normalized)) return 3.6;
+  if (/\b(almond|almonds|walnut|walnuts|pecan|pecans|peanut|peanuts|hazelnut|hazelnuts|cashew|cashews|pistachio|pistachios)\b/.test(normalized)) return 4.5;
+  return null;
+}
+
+function guardRecipeNutrition(item: RecipeNutrition): RecipeNutrition {
+  const floor = recipeKcalFloor(item.name);
+  if (!floor || item.quantityG <= 0) return item;
+
+  const currentCalories = caloriesFromMacros(item.protein, item.carbs, item.fat);
+  const minimumCalories = Math.round(item.quantityG * floor);
+  if (currentCalories >= minimumCalories) return item;
+
+  // Scale the model's own macro proportions instead of inventing a new food
+  // profile. The cap keeps a malformed response reviewable rather than letting
+  // one bad token create absurd nutrition values.
+  const factor = currentCalories > 0 ? Math.min(4, minimumCalories / currentCalories) : 1;
+  const scale = (value: number | null): number | null => value == null ? null : Math.round(value * factor * 10) / 10;
+  if (currentCalories <= 0) {
+    return { ...item, fat: Math.round((minimumCalories / 9) * 10) / 10 };
+  }
+  return {
+    ...item,
+    protein: scale(item.protein) ?? 0,
+    carbs: scale(item.carbs) ?? 0,
+    fat: scale(item.fat) ?? 0,
+    fiber: scale(item.fiber),
+    sugar: scale(item.sugar),
+    satFat: scale(item.satFat),
+    sodiumMg: item.sodiumMg == null ? null : Math.round(item.sodiumMg * factor),
+  };
 }
 
 // The user-message text accompanying the request, shaped for whichever of
@@ -267,15 +335,19 @@ Deno.serve(async (req) => {
       const protein = Math.max(0, num(it?.protein) ?? 0);
       const carbs = Math.max(0, num(it?.carbs) ?? 0);
       const fat = Math.max(0, num(it?.fat) ?? 0);
-      return {
+      const base: RecipeNutrition = {
         name: stripEmDash(name),
         quantityG: Math.max(0, num(it?.quantityG) ?? 100),
-        calories: caloriesFromMacros(protein, carbs, fat),
         protein, carbs, fat,
         fiber: num(it?.fiber),
         sugar: num(it?.sugar),
         satFat: num(it?.satFat),
         sodiumMg: num(it?.sodiumMg),
+      };
+      const nutrition = isRecipe ? guardRecipeNutrition(base) : base;
+      return {
+        ...nutrition,
+        calories: caloriesFromMacros(nutrition.protein, nutrition.carbs, nutrition.fat),
       };
     })
     .filter((it: unknown): it is NonNullable<typeof it> => it !== null);
