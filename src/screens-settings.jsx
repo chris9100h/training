@@ -989,6 +989,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
   const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
+  const [activeUsersMetrics, setActiveUsersMetrics] = useStateSet(null);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
@@ -1344,15 +1345,24 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!hasActiveUsersAccess) return;
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview').then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
+    const loadMetrics = () => LB.supabase.rpc('get_active_users_metrics').then(({ data, error }) => {
+      if (!mounted || error) return;
+      const row = Array.isArray(data) ? data[0] : data;
+      if (row) setActiveUsersMetrics({
+        workoutsLast24h: row.workouts_last_24h,
+        maxSimultaneousWorkouts: row.max_simultaneous_workouts,
+      });
+    }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
-    loadSessions(); if (isAdmin) { loadGrants(); }
+    loadSessions(); loadMetrics(); if (isAdmin) { loadGrants(); }
     // 2s only while the sheet is actually open (that view has live timers); a
     // slow heartbeat otherwise, just to keep the badge count honest. This used
     // to hammer the RPC every 2 seconds for as long as the Settings screen was
     // mounted, sheet open or not.
     const period = activeUsersSheet ? 2000 : 60000;
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, period);
-    return () => { mounted = false; clearInterval(iv); };
+    const metricsIv = setInterval(loadMetrics, activeUsersSheet ? 30000 : 60000);
+    return () => { mounted = false; clearInterval(iv); clearInterval(metricsIv); };
   }, [hasActiveUsersAccess, isAdmin, activeUsersSheet]);
 
   useEffectSet(() => {
@@ -2875,6 +2885,17 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           );
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '2px 12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 34 }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>WORKOUTS IN LAST 24H</span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 16 }}>{activeUsersMetrics?.workoutsLast24h == null ? '—' : Number(activeUsersMetrics.workoutsLast24h).toLocaleString('en-US')}</span>
+                </div>
+                <div style={{ height: 'var(--hair-width)', background: UI.hair }} />
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 34 }}>
+                  <span className="micro" style={{ color: UI.inkFaint }}>PEAK SIMULTANEOUS WORKOUTS</span>
+                  <span className="num" style={{ color: UI.gold, fontSize: 16 }}>{activeUsersMetrics?.maxSimultaneousWorkouts == null ? '—' : Number(activeUsersMetrics.maxSimultaneousWorkouts).toLocaleString('en-US')}</span>
+                </div>
+              </div>
               {hiddenCount > 0 && (
                 <button onClick={() => { localStorage.removeItem('logbook-dismissed-sessions'); setActiveSessions(s => [...s]); }} style={{
                   alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer',
