@@ -78,7 +78,11 @@ const DB_REQUEST_TIMEOUT_MS = 8000;
 // response into the misleading "Network error" shown by the food sheet.
 // Keep this separate from the DB timeout so normal PostgREST requests retain
 // their eight-second failure-fast behaviour.
-const AI_FUNCTION_TIMEOUT_MS = 45_000;
+// Keep this below Supabase's 150-second request-idle ceiling while leaving
+// vision calls enough room to finish. The old 45-second limit turned a slow
+// but healthy Qwen response into the misleading "Network error" from the
+// food/recipe sheets.
+const AI_FUNCTION_TIMEOUT_MS = 120_000;
 const AI_FUNCTION_URLS = new Set([
   SCAN_LABEL_URL,
   PARSE_MEAL_URL,
@@ -597,7 +601,18 @@ async function fnFetch(url, body) {
       priority: isAiFunction ? 'foreground' : 'background',
       timeoutMs: isAiFunction ? AI_FUNCTION_TIMEOUT_MS : DB_REQUEST_TIMEOUT_MS,
     });
-  } catch (_) { return null; }
+  } catch (error) {
+    // Keep genuine transport failures on the existing null path, but make a
+    // client-side AI timeout visible to the caller instead of collapsing it
+    // into the generic "Network error" message.
+    if (error?.__zaneRequestTimeout) {
+      return new Response(JSON.stringify({ error: 'The AI request took too long. Please try again.' }), {
+        status: 504,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    return null;
+  }
 }
 
 function uid() { return Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4); }

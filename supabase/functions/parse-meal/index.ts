@@ -243,7 +243,11 @@ Deno.serve(async (req) => {
     userText: isRecipe ? buildRecipeUserText(description, !!rawImage) : buildUserText(description, !!rawImage, previousItems),
     image,
     maxTokens: MAX_TOKENS,
-    reasoningBudget: REASONING_BUDGET,
+    // Recipe extraction is a structured transcription task. Deliberate
+    // portion arithmetic is useful for a meal estimate, but making Qwen think
+    // through a recipe photo only adds latency and can push the client timeout
+    // while the editor is waiting for a deterministic ingredient list.
+    reasoningBudget: isRecipe ? null : REASONING_BUDGET,
   };
   const labels = isRecipe ? RECIPE_LABELS : LABELS;
   const result = explicitProvider
