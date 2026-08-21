@@ -37,12 +37,13 @@
 // more number that can silently disagree with the macros sitting right next
 // to it, deriving it removes that failure mode entirely.
 //
-// One action: POST { description?: string, image?: <base64, no data:
-// prefix>, mimeType?: 'image/jpeg', provider?: 'claude' | 'grok' | 'qwen',
-// previousItems?: [{ name, quantityG, protein, carbs, fat, fiber, sugar,
-// satFat, sodiumMg }] } (description/image both optional, at least one
-// required, previousItems does not relax that rule) -> { items: [{ name,
-// quantityG, calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg }] }
+// One action: POST { mode?: 'meal' | 'recipe', description?: string,
+// image?: <base64, no data: prefix>, mimeType?: 'image/jpeg', provider?:
+// 'claude' | 'grok' | 'qwen', previousItems?: [...] }. Recipe mode returns
+// { recipeName, portions, items }, while meal mode keeps the original
+// { items } contract. The two prompts intentionally stay separate: a recipe
+// ingredient list is a batch input for the editor, not a list of foods eaten
+// right now.
 //
 // previousItems is refine mode: the caller's own prior estimate from an
 // earlier call to this same endpoint, sent back alongside new or corrected
@@ -112,6 +113,8 @@ const FALLBACK_PROVIDER = 'claude';
 
 const LABELS = { tag: 'parse-meal', feature: 'Meal parsing', subject: 'meal estimator' };
 
+const RECIPE_LABELS = { tag: 'parse-recipe', feature: 'Recipe photo import', subject: 'recipe parser' };
+
 const SYSTEM_PROMPT = `You estimate nutrition for a home-logged meal from a photo of the food, a short often informal free-text description (may be a home-cooked dish, several components at once, and vague portions like "a thin slice" or "one roll"), or both together, the way an experienced dietitian doing a quick visual or verbal estimate would, not a database lookup. When the mandatory self-check below applies, show that arithmetic in plain text first; otherwise skip straight to the answer. Either way, end your response with exactly one JSON object, no markdown code fences around it, and no text of any kind after it.
 
 Identify every separate food item, whether it's in a photo, in text, or both. For each, estimate a realistic quantity in grams and its macros, using everyday judgment for vague or visual portions the same way a dietitian eyeballing a plate would (a thin slice of a dense sliced meat is roughly 30-40 g, a bread roll is roughly 50-60 g, one egg is roughly 50-60 g, and so on; in a photo, use whatever's in frame for scale, a fork, a hand, a dinner plate is roughly 26-28 cm across). Never drop an item just because an exact amount wasn't given or isn't fully visible, make a reasonable assumption instead.
@@ -133,6 +136,29 @@ Return exactly this JSON shape:
   ]
 }
 protein/carbs/fat/fiber/sugar/satFat are grams, sodiumMg is milligrams. Use null for anything you genuinely cannot estimate, never invent a precise-looking number you don't believe. Never include a calories/kcal field, it is computed separately from the macros, not from you. Never use an em dash in a name; use a comma or a period instead. If neither the photo nor any text names an identifiable food or drink at all, return {"items": []}.`;
+
+// Recipe mode is deliberately a separate prompt instead of bolting more
+// conditional instructions onto SYSTEM_PROMPT. The meal parser's job is to
+// estimate what was eaten; this one reconstructs a whole batch for a recipe
+// editor. In particular, quantities and macros are for the full recipe, not
+// one serving, and ingredient names are normalized to English so the editor
+// can be searched/reviewed consistently even when the source recipe is in
+// German or another language.
+const RECIPE_SYSTEM_PROMPT = `You reconstruct a cooking recipe from a recipe photo, an optional text note, or both. Read the complete ingredient list and identify every separate ingredient that belongs in the finished recipe. Estimate the amount for the FULL BATCH, not per serving. Keep ingredients separate even when they are repeated or used in different steps. If an amount is vague ("to taste", "a splash", "as needed"), make a sensible gram estimate and let the user adjust it later rather than dropping the ingredient.
+
+For every ingredient, the JSON field "name" MUST be a clear canonical ENGLISH ingredient name, regardless of the language used in the photographed or typed recipe. Translate German, Spanish, French, and other source-language ingredient names into English. Do not leave German words, untranslated headings, or source-language labels in ingredient names. Preserve a useful brand or variety in English when it is part of the ingredient (for example "low-fat Greek yogurt"). This English-only rule applies to ingredient names, not to the recipe title.
+
+Infer a concise recipe title and the number of servings when they are visible or stated. If either is unclear, return an empty title or 1 serving; never invent a detailed title from unrelated text. Nutrition is an estimate for the raw ingredient amount in the full batch. Calories are derived by the server from protein, carbs, and fat, so never output a calories field.
+
+Return exactly one JSON object, with no markdown fences and no text after it, in this shape:
+{
+  "recipeName": string,
+  "portions": number,
+  "items": [
+    { "name": string, "quantityG": number, "protein": number, "carbs": number, "fat": number, "fiber": number or null, "sugar": number or null, "satFat": number or null, "sodiumMg": number or null }
+  ]
+}
+Use grams for quantityG, grams for protein/carbs/fat/fiber/sugar/satFat, and milligrams for sodiumMg. Use null where a micronutrient cannot be estimated. Keep quantities and macros non-negative. Never use an em dash in a name; use a comma or period instead. If no readable recipe ingredients are present, return {"recipeName":"","portions":1,"items":[]}.`;
 
 // Same rule as search-foods' caloriesFromMacros: calories are always derived
 // from protein/carbs/fat (standard 4/4/9 kcal/g), never a separate number
@@ -158,6 +184,12 @@ function buildUserText(description: string, hasImage: boolean, previousItems: un
   return `Meal description:\n${description}`;
 }
 
+function buildRecipeUserText(description: string, hasImage: boolean): string {
+  if (hasImage && description) return `Recipe photo attached. Additional details from the user (for example servings or a correction):\n${description}`;
+  if (hasImage) return 'Recipe photo attached. Read the ingredients and recipe title from the photo.';
+  return `Recipe text:\n${description}`;
+}
+
 Deno.serve(async (req) => {
   const pre = preflight(req);
   if (pre) return pre;
@@ -167,6 +199,8 @@ Deno.serve(async (req) => {
   const isAdmin = caller.email === ADMIN_EMAIL;
 
   const body = await req.json().catch(() => ({}));
+  const mode = body?.mode === 'recipe' ? 'recipe' : 'meal';
+  const isRecipe = mode === 'recipe';
   const description = typeof body?.description === 'string' ? body.description.trim() : '';
   const rawImage = typeof body?.image === 'string' ? body.image.trim() : '';
   const mimeType = ALLOWED_MIME.has(body?.mimeType) ? body.mimeType : 'image/jpeg';
@@ -205,15 +239,16 @@ Deno.serve(async (req) => {
 
   const image: ModelImage | null = rawImage ? { base64: rawImage, mimeType } : null;
   const modelCall = {
-    system: SYSTEM_PROMPT,
-    userText: buildUserText(description, !!rawImage, previousItems),
+    system: isRecipe ? RECIPE_SYSTEM_PROMPT : SYSTEM_PROMPT,
+    userText: isRecipe ? buildRecipeUserText(description, !!rawImage) : buildUserText(description, !!rawImage, previousItems),
     image,
     maxTokens: MAX_TOKENS,
     reasoningBudget: REASONING_BUDGET,
   };
+  const labels = isRecipe ? RECIPE_LABELS : LABELS;
   const result = explicitProvider
-    ? await callModel(explicitProvider, modelCall, LABELS)
-    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, LABELS);
+    ? await callModel(explicitProvider, modelCall, labels)
+    : await callModelWithFallback(PRIMARY_PROVIDER, FALLBACK_PROVIDER, modelCall, labels);
   if (!result.ok) return jsonResponse({ error: result.error }, result.status);
 
   // The prompt's visible self-check arithmetic is deliberately brace-free, so
@@ -242,7 +277,16 @@ Deno.serve(async (req) => {
     .filter((it: unknown): it is NonNullable<typeof it> => it !== null);
 
   if (!items.length) {
-    return jsonResponse({ error: 'Could not find any food there. Try a clearer photo, more detail, or add it manually.' }, 422);
+    return jsonResponse({ error: isRecipe
+      ? 'Could not find any recipe ingredients. Try a clearer photo, more detail, or add them manually.'
+      : 'Could not find any food there. Try a clearer photo, more detail, or add it manually.' }, 422);
+  }
+
+  if (isRecipe) {
+    const recipeName = stripEmDash(str(parsed?.recipeName)).slice(0, 160);
+    const portionsRaw = num(parsed?.portions);
+    const portions = Math.min(100, Math.max(1, Math.round(portionsRaw ?? 1)));
+    return jsonResponse({ recipeName, portions, items }, 200);
   }
 
   return jsonResponse({ items }, 200);

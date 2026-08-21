@@ -2103,6 +2103,7 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // per-row secondary actions (edit, ingredients, delete) live in this one
   // menu instead of a cluster of inline buttons, to save width on mobile.
   const [entryMenu, setEntryMenu] = useStateFd(null);
+  const duplicateGuardRef = useRefFd(null);
   // "Edit ingredients": the entry whose per-ingredient editor sheet is open
   // (null = closed). Edits the entry's own frozen recipeItems snapshot in
   // place and recomputes the entry's totals; never touches the source
@@ -3073,6 +3074,45 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     });
   }
 
+  // Copies one timeline row on the same date and time. This is intentionally
+  // a direct clone, not a round-trip through the quantity/recipe picker: a
+  // duplicate must preserve the exact amount, macros, recipe snapshot,
+  // planned-vs-logged state, and cooked-weight mode the user is looking at.
+  // Template provenance and split/merge bookkeeping are cleared so the copy
+  // becomes an independent row and cannot be auto-materialized or treated as
+  // part of an old split batch after the next sync.
+  function duplicateEntry(entry) {
+    if (!entry) return;
+    // A quick double tap on the menu action should not create two meals. The
+    // short guard still allows a deliberate second duplicate after the first
+    // action has settled.
+    if (duplicateGuardRef.current === entry.id) return;
+    duplicateGuardRef.current = entry.id;
+    setTimeout(() => { if (duplicateGuardRef.current === entry.id) duplicateGuardRef.current = null; }, 500);
+    const now = new Date().toISOString();
+    setStore(s => {
+      // Resolve the source again from the live store: a cross-device refresh
+      // may have removed or changed the row while its overflow Sheet was open.
+      // In that case do nothing instead of resurrecting stale data.
+      const source = (s.foodLogs || []).find(l => l.id === entry.id);
+      if (!source) return s;
+      const copy = {
+        ...source,
+        id: LB.uid(),
+        createdAt: now,
+        templateSlotId: null,
+        splitBatch: null,
+      };
+      const nextLogs = [copy, ...(s.foodLogs || [])];
+      let dailyLogs = s.dailyLogs || [];
+      if (!copy.planned) {
+        dailyLogs = patchDaily({ ...s, dailyLogs }, copy.date, nextLogs.filter(l => l.date === copy.date));
+      }
+      dailyLogs = reopenFoodDay(s, copy.date, dailyLogs);
+      return { ...s, foodLogs: nextLogs, dailyLogs };
+    });
+  }
+
   // Flip an entry between planned and logged (Plan Mode). Checking a planned
   // entry off (planned -> logged) is the primary action on the timeline's
   // planned cards; patchDaily then folds its macros into the day, since a
@@ -3226,6 +3266,17 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // down for why it can't be conditionally rendered on `capturing`).
   const [capturing, setCapturing] = useStateFd(false);
   const captureRef = useRefFd(null);
+  // Recipe-photo import is a draft-only helper: the image and optional note
+  // live here until the user asks the AI to parse them, then the resulting
+  // ingredient snapshots are placed into this editor. Nothing is saved until
+  // the normal recipe Save action is confirmed.
+  const [recipeImportOpen, setRecipeImportOpen] = useStateFd(false);
+  const [recipeImportPhoto, setRecipeImportPhoto] = useStateFd(null);
+  const [recipeImportDetails, setRecipeImportDetails] = useStateFd('');
+  const [recipeImportReading, setRecipeImportReading] = useStateFd(false);
+  const [recipeImportParsing, setRecipeImportParsing] = useStateFd(false);
+  const [recipeImportError, setRecipeImportError] = useStateFd(null);
+  const recipeImportInputRef = useRefFd(null);
   // Same background-watermark treatment as the Plan poster (screens-schedule.jsx):
   // VIPs get their own background image, everyone else gets the ZANE mark.
   // Bumped past the Plan poster's own opacity: that poster's day cards are
@@ -6948,6 +6999,9 @@ function FoodScreen({ store, setStore, go, userId, date }) {
                   <i className="fa-solid fa-pen" style={{ marginRight: 8 }} /> Edit
                 </Btn>
               ) : null}
+              <Btn kind="ghost" onClick={() => act(() => duplicateEntry(me))} style={{ width: '100%' }}>
+                <i className="fa-solid fa-copy" style={{ marginRight: 8 }} /> Duplicate
+              </Btn>
               <Btn kind="ghost" onClick={() => act(() => deleteEntry(me))} style={{ width: '100%', color: UI.danger }}>
                 <i className="fa-solid fa-trash" style={{ marginRight: 8 }} /> Delete
               </Btn>
@@ -9652,6 +9706,76 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
       return next;
     });
   }
+
+  async function handleRecipeImportFile(e) {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ''; // allow the same photo to be selected again
+    if (!file) return;
+    setRecipeImportError(null);
+    setRecipeImportReading(true);
+    try {
+      const { base64, mimeType } = await fdDownscaleImage(file);
+      setRecipeImportReading(false);
+      if (!base64) { setRecipeImportError('Could not read that image. Try again.'); return; }
+      setRecipeImportPhoto({ base64, mimeType });
+    } catch (_) {
+      setRecipeImportReading(false);
+      setRecipeImportError('Could not read that image. Try again.');
+    }
+  }
+  function closeRecipeImport() {
+    if (recipeImportParsing || recipeImportReading) return;
+    setRecipeImportOpen(false);
+  }
+  function clearRecipeImportPhoto() {
+    setRecipeImportPhoto(null);
+  }
+  function importedRecipeItems(rawItems) {
+    return (Array.isArray(rawItems) ? rawItems : []).map(it => {
+      const name = typeof it?.name === 'string' ? it.name.trim() : '';
+      if (!name) return null;
+      const num = (v, fallback = 0) => Number.isFinite(Number(v)) ? Math.max(0, Number(v)) : fallback;
+      return {
+        foodId: null,
+        brand: null,
+        source: 'ai',
+        foodName: name,
+        originalFoodName: name,
+        quantityG: num(it.quantityG, 100),
+        protein: num(it.protein),
+        carbs: num(it.carbs),
+        fat: num(it.fat),
+        fiber: it.fiber == null ? null : num(it.fiber),
+        sugar: it.sugar == null ? null : num(it.sugar),
+        satFat: it.satFat == null ? null : num(it.satFat),
+        sodiumMg: it.sodiumMg == null ? null : num(it.sodiumMg),
+      };
+    }).filter(Boolean);
+  }
+  async function importRecipePhoto() {
+    const details = recipeImportDetails.trim();
+    if (!recipeImportPhoto && !details) return;
+    setRecipeImportParsing(true);
+    setRecipeImportError(null);
+    const res = await LB.parseRecipePhoto(recipeImportPhoto, details);
+    setRecipeImportParsing(false);
+    if (!res.ok) { setRecipeImportError(res.error || 'Recipe import failed. Try again.'); return; }
+    const incoming = importedRecipeItems(res.items);
+    if (!incoming.length) {
+      setRecipeImportError('No readable ingredients found. Try a clearer photo or add the ingredients manually.');
+      return;
+    }
+    addItems(incoming);
+    if (!name.trim() && res.recipeName) setName(res.recipeName.trim());
+    // A fresh recipe may use the detected serving count as a useful starting
+    // value. When importing into an existing recipe, never silently change
+    // its established portion metadata just because the photo mentioned a
+    // different number.
+    if (!recipe && portions === 1 && res.portions > 1) setPortions(res.portions);
+    setRecipeImportOpen(false);
+    setRecipeImportPhoto(null);
+    setRecipeImportDetails('');
+  }
   function removeItem(id) {
     // Label rescue first: if the removed row is a labeled run head, the
     // step's instruction moves to the run's next member before the row
@@ -9922,6 +10046,9 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
 
         <div>
           <Bezel style={{ marginBottom: 10 }}>Ingredients · prep order</Bezel>
+          <Btn kind="ghost" onClick={() => { setRecipeImportError(null); setRecipeImportOpen(true); }} style={{ width: '100%', marginBottom: 8 }}>
+            <i className="fa-solid fa-camera" style={{ marginRight: 8 }} /> Import recipe from photo
+          </Btn>
           {items.length === 0 ? (
             <Btn onClick={() => setPickerOpen(true)} style={{ width: '100%' }}>
               <i className="fa-solid fa-plus" style={{ marginRight: 8 }} /> Add ingredients
@@ -10031,6 +10158,38 @@ function RecipeEditorScreenOpen({ open, onClose, onSave, onShare, recipe, store 
           )}
         </div>
       </div>
+
+      <input ref={recipeImportInputRef} type="file" accept="image/*" onChange={handleRecipeImportFile} style={{ display: 'none' }} />
+
+      <Sheet open={recipeImportOpen} onClose={closeRecipeImport} title="Import recipe from photo" titleColor="var(--accent)">
+        <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 12 }}>
+          Upload a recipe photo and Zane will place the full-batch ingredients into this draft. Ingredient names are normalized to English. Nothing is saved until you review the editor and tap Save.
+        </div>
+        {recipeImportPhoto ? (
+          <div style={{ position: 'relative', display: 'inline-block', marginBottom: 12 }}>
+            <img src={`data:${recipeImportPhoto.mimeType};base64,${recipeImportPhoto.base64}`} alt="Recipe preview" style={{ width: 120, height: 120, objectFit: 'cover', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, display: 'block' }} />
+            <button onClick={clearRecipeImportPhoto} aria-label="Remove recipe photo" style={{ position: 'absolute', top: -6, right: -6, width: 22, height: 22, borderRadius: '50%', background: UI.inkSoft, border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', textShadow: 'none' }}>
+              <i className="fa-solid fa-xmark" style={{ fontSize: 11 }} />
+            </button>
+          </div>
+        ) : (
+          <button onClick={() => recipeImportInputRef.current && recipeImportInputRef.current.click()} disabled={recipeImportReading || recipeImportParsing} style={{ ...fdActionCard, width: '100%', marginBottom: 12 }}>
+            <i className="fa-solid fa-camera" style={{ fontSize: 13, color: 'var(--accent)' }} />
+            {recipeImportReading ? 'Reading photo…' : 'Choose recipe photo'}
+          </button>
+        )}
+        <Field label="Additional details (optional)" style={{ marginBottom: 12 }}>
+          <textarea value={recipeImportDetails} onChange={e => setRecipeImportDetails(e.target.value)} rows={3}
+            placeholder="e.g. makes 8 servings, use the chocolate version" style={{ ...fdInputStyle, resize: 'vertical', lineHeight: 1.4 }} />
+        </Field>
+        {recipeImportError && <div style={{ fontSize: 11, color: UI.danger, fontFamily: UI.fontUi, lineHeight: '16px', marginBottom: 12 }}>{recipeImportError}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <Btn kind="ghost" onClick={closeRecipeImport} disabled={recipeImportReading || recipeImportParsing} style={{ flex: 1 }}>Cancel</Btn>
+          <Btn onClick={importRecipePhoto} disabled={recipeImportReading || recipeImportParsing || !recipeImportPhoto} style={{ flex: 2 }}>
+            {recipeImportParsing ? 'Reading recipe…' : 'Add ingredients'}
+          </Btn>
+        </div>
+      </Sheet>
 
       {/* ── Edit an already-added ingredient: rename it for display (this
           recipe's own foodName snapshot only, never zane_foods or foodId,

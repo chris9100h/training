@@ -4705,6 +4705,26 @@ async function parseMealText(description, photo, previousItems) {
   return { ok: true, items: Array.isArray(data.items) ? data.items : [] };
 }
 
+// Parses a recipe photo (and an optional note such as "8 servings") through
+// the same authenticated AI endpoint as Describe a meal, but in its explicit
+// recipe mode. The edge function returns full-batch ingredient snapshots; no
+// recipe or food-log row is written here. RecipeEditorScreen owns the review
+// step and only saves after the user confirms the finished draft.
+async function parseRecipePhoto(photo, description = '') {
+  const body = { mode: 'recipe', description: String(description || '').trim() };
+  if (photo && photo.base64) { body.image = photo.base64; body.mimeType = photo.mimeType; }
+  const res = await fnFetch(PARSE_MEAL_URL, body);
+  if (!res) return { ok: false, error: 'Network error' };
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
+  return {
+    ok: true,
+    recipeName: typeof data.recipeName === 'string' ? data.recipeName : '',
+    portions: Number.isFinite(Number(data.portions)) ? Math.max(1, Math.min(100, Math.round(Number(data.portions)))) : 1,
+    items: Array.isArray(data.items) ? data.items : [],
+  };
+}
+
 // ── Recipe sharing ──────────────────────────────────────────────────────────
 // A share is a server-side jsonb snapshot of the recipe (zane_recipe_shares),
 // keyed by an unguessable token that doubles as the deep link (?share=<token>).
@@ -14249,7 +14269,7 @@ window.LB = {
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
-  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, createRecipeShare, fetchRecipeShare,
+  cancelPushover, adminSendEmail, searchFoods, cacheFood, scanLabel, parseMealText, parseRecipePhoto, createRecipeShare, fetchRecipeShare,
   previewWorkoutImport, commitWorkoutImport, previewWorkoutPlanImport, commitWorkoutPlanImport, wiParseCsv, wiImportTable, wiFindImportHeaderRow, wiFindHistoryHeaderRow, wiImportPlanName, wiSessionFingerprint, wiNormalizeName, wiDate, wiNumber, wiRepValues, wiBuildSessions, wiBuildPlan,
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
