@@ -241,17 +241,24 @@
        into the image edges as an unintended gold frame. Keep the export glow
        inside the artwork instead. */
     .share-card.capture-card {
-      border: 2px solid rgba(213, 138, 40, .64);
+      border: 0;
       background-color: #17151e !important;
       background-image:
         linear-gradient(rgba(152, 134, 183, .08) 1px, transparent 1px),
         linear-gradient(90deg, rgba(152, 134, 183, .08) 1px, transparent 1px) !important;
-      box-shadow: inset 0 0 18px rgba(213, 138, 40, .08);
+      box-shadow: none;
     }
 
-    .share-card.capture-card::before,
-    .share-card.capture-card::after {
+    .share-card.capture-card::before {
       display: none;
+    }
+
+    .share-card.capture-card::after {
+      display: block;
+      inset: 16px;
+      border: 2px solid rgba(213, 138, 40, .64);
+      border-radius: 20px;
+      box-shadow: 0 0 5px rgba(213, 138, 40, .28), inset 0 0 10px rgba(213, 138, 40, .08);
     }
 
     .share-card::before {
