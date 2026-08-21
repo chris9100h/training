@@ -105,6 +105,24 @@ function SettingsSheet(props) {
   return <Sheet titleColor="var(--accent)" {...props} />;
 }
 
+const formatAppStat = (value, decimals = 0) => {
+  if (value == null || value === '') return '—';
+  const number = Number(value);
+  if (!Number.isFinite(number)) return String(value);
+  return number.toLocaleString('en-US', { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+};
+
+function AppStatsMetric({ label, value, suffix = '' }) {
+  return (
+    <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '10px 11px', minWidth: 0 }}>
+      <div className="micro" style={{ color: UI.inkFaint, lineHeight: 1.25 }}>{label}</div>
+      <div className="num" style={{ color: UI.gold, fontSize: 18, marginTop: 5, whiteSpace: 'nowrap' }}>
+        {value == null ? '—' : value}{suffix && <span style={{ fontFamily: UI.fontUi, fontSize: 11, color: UI.inkFaint, marginLeft: 4 }}>{suffix}</span>}
+      </div>
+    </div>
+  );
+}
+
 // The admin inbox is a chat, not a full-screen settings page.  Keep the
 // dialog itself on the same Sheet implementation as the working coaching
 // chat, then give the thread one bounded flex column: header/status controls
@@ -974,6 +992,7 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
     return () => { live = false; };
   }, [whatsNewLoaded]);
   const [activeUsersSheet, setActiveUsersSheet] = useStateSet(false);
+  const [appStatsSheet, setAppStatsSheet] = useStateSet(false);
   const [howToSheet, setHowToSheet] = useStateSet(false);
 
   // Training sub-sheets
@@ -989,7 +1008,9 @@ function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus
   const [plateInvTab, setPlateInvTab] = useStateSet(() => UI.unit() === 'lbs' ? 1 : 0);
   const [progDisclaimer, setProgDisclaimer] = useStateSet(false);
   const [activeSessions, setActiveSessions] = useStateSet([]);
-  const [activeUsersMetrics, setActiveUsersMetrics] = useStateSet(null);
+  const [appStats, setAppStats] = useStateSet(null);
+  const [appStatsLoading, setAppStatsLoading] = useStateSet(false);
+  const [appStatsError, setAppStatsError] = useStateSet(null);
   const [activeGrants, setActiveGrants] = useStateSet([]);
   const [newGrantEmail, setNewGrantEmail] = useStateSet('');
   const [hasActiveUsersAccess, setHasActiveUsersAccess] = useStateSet(
@@ -1345,25 +1366,36 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!hasActiveUsersAccess) return;
     let mounted = true;
     const loadSessions = () => LB.supabase.rpc('get_active_sessions_overview').then(({ data }) => { if (mounted) setActiveSessions(data || []); }).catch(() => {});
-    const loadMetrics = () => LB.supabase.rpc('get_active_users_metrics').then(({ data, error }) => {
-      if (!mounted || error) return;
-      const row = Array.isArray(data) ? data[0] : data;
-      if (row) setActiveUsersMetrics({
-        workoutsLast24h: row.workouts_last_24h,
-        maxSimultaneousWorkouts: row.max_simultaneous_workouts,
-      });
-    }).catch(() => {});
     const loadGrants = () => LB.supabase.rpc('get_active_users_grants').then(({ data }) => { if (mounted) setActiveGrants((data || []).map(r => r.email)); }).catch(() => {});
-    loadSessions(); loadMetrics(); if (isAdmin) { loadGrants(); }
+    loadSessions(); if (isAdmin) { loadGrants(); }
     // 2s only while the sheet is actually open (that view has live timers); a
     // slow heartbeat otherwise, just to keep the badge count honest. This used
     // to hammer the RPC every 2 seconds for as long as the Settings screen was
     // mounted, sheet open or not.
     const period = activeUsersSheet ? 2000 : 60000;
     const iv = setInterval(() => { loadSessions(); setNowS(Date.now()); }, period);
-    const metricsIv = setInterval(loadMetrics, activeUsersSheet ? 30000 : 60000);
-    return () => { mounted = false; clearInterval(iv); clearInterval(metricsIv); };
+    return () => { mounted = false; clearInterval(iv); };
   }, [hasActiveUsersAccess, isAdmin, activeUsersSheet]);
+
+  useEffectSet(() => {
+    if (!isAdmin || !appStatsSheet) return;
+    let mounted = true;
+    const loadStats = async () => {
+      if (mounted) { setAppStatsLoading(true); setAppStatsError(null); }
+      try {
+        const { data, error } = await LB.supabase.rpc('get_app_stats');
+        if (error) throw error;
+        if (mounted) setAppStats(data || null);
+      } catch (error) {
+        if (mounted) setAppStatsError(error?.message || 'Could not load app stats.');
+      } finally {
+        if (mounted) setAppStatsLoading(false);
+      }
+    };
+    loadStats();
+    const iv = setInterval(loadStats, 60000);
+    return () => { mounted = false; clearInterval(iv); };
+  }, [isAdmin, appStatsSheet]);
 
   useEffectSet(() => {
     if (!pushSheet) return;
@@ -2797,7 +2829,7 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
         {/* ─── Category navigation ─── */}
         <Frame style={{ padding: '0 14px' }}>
           <NavRow label="Changelog" hint={(window.WHATS_NEW || [])[0]?.id} onTap={() => setChangelogSheet(true)} accent first />
-          {hasActiveUsersAccess && (
+          {hasActiveUsersAccess && !isAdmin && (
             <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
           )}
           <NavRow label="Coaching" onTap={() => setCoachingSheet(true)} />
@@ -2885,17 +2917,6 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           );
           return (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <div style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '2px 12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 34 }}>
-                  <span className="micro" style={{ color: UI.inkFaint }}>WORKOUTS IN LAST 24H</span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 16 }}>{activeUsersMetrics?.workoutsLast24h == null ? '—' : Number(activeUsersMetrics.workoutsLast24h).toLocaleString('en-US')}</span>
-                </div>
-                <div style={{ height: 'var(--hair-width)', background: UI.hair }} />
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, minHeight: 34 }}>
-                  <span className="micro" style={{ color: UI.inkFaint }}>PEAK SIMULTANEOUS WORKOUTS</span>
-                  <span className="num" style={{ color: UI.gold, fontSize: 16 }}>{activeUsersMetrics?.maxSimultaneousWorkouts == null ? '—' : Number(activeUsersMetrics.maxSimultaneousWorkouts).toLocaleString('en-US')}</span>
-                </div>
-              </div>
               {hiddenCount > 0 && (
                 <button onClick={() => { localStorage.removeItem('logbook-dismissed-sessions'); setActiveSessions(s => [...s]); }} style={{
                   alignSelf: 'flex-end', background: 'none', border: 'none', cursor: 'pointer',
@@ -2965,6 +2986,76 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                   </div>
                 </div>
               )}
+            </div>
+          );
+        })()}
+      </SettingsSheet>
+
+      {/* ══ App stats sheet ══ */}
+      <SettingsSheet open={appStatsSheet} onClose={() => setAppStatsSheet(false)} title="App stats">
+        {(() => {
+          const value = (key, decimals = 0) => appStats?.[key] == null ? null : formatAppStat(appStats[key], decimals);
+          const peakHour = appStats?.peak_usage_hour_utc == null ? null : `${String(appStats.peak_usage_hour_utc).padStart(2, '0')}:00 UTC`;
+          const groups = [
+            {
+              title: 'USAGE',
+              items: [
+                ['Workouts in last 24h', value('workouts_last_24h')],
+                ['Peak simultaneous workouts', value('max_simultaneous_workouts')],
+                ['Workouts started · 24h', value('workouts_started_24h')],
+                ['Workouts completed · 24h', value('workouts_completed_24h')],
+                ['Average workout · 30d', value('avg_workout_minutes_30d', 1), 'min'],
+                ['Average sets / workout · 30d', value('avg_sets_per_workout_30d', 1)],
+                ['Peak usage hour', peakHour],
+              ],
+            },
+            {
+              title: 'REACH',
+              items: [
+                ['Active users · 24h', value('active_users_24h')],
+                ['Active users · 7d', value('active_users_7d')],
+                ['Active users · 30d', value('active_users_30d')],
+                ['First workout · 30d', value('new_users_first_workout_30d')],
+                ['3+ active days · 30d', value('users_3_active_days_30d')],
+                ['Longest current streak', value('longest_current_streak_days'), 'days'],
+              ],
+            },
+            {
+              title: 'RETENTION',
+              items: [
+                ['Active users · prior 7d', value('active_users_prior_7d')],
+                ['Active users · current 7d', value('active_users_current_7d')],
+                ['Returned from prior 7d', value('returning_users_7d')],
+              ],
+            },
+            {
+              title: 'FEATURE ADOPTION · 30D',
+              items: [
+                ['Food', value('food_users_30d')],
+                ['Health', value('health_users_30d')],
+                ['Cardio', value('cardio_users_30d')],
+                ['Medication', value('medication_users_30d')],
+                ['Friends', value('friends_users_30d')],
+                ['Coaching', value('coaching_users_30d')],
+              ],
+            },
+          ];
+          return (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+              <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.55 }}>
+                Rolling usage snapshots from server timestamps. Workout metrics exclude imported history; feature counts are unique users active in the last 30 days.
+              </div>
+              {appStatsLoading && !appStats && <div className="micro" style={{ color: UI.inkFaint }}>Loading app stats…</div>}
+              {appStatsError && <div style={{ fontSize: 12, color: UI.danger, fontFamily: UI.fontUi, padding: '9px 11px', background: 'rgba(var(--danger-rgb),0.08)', borderRadius: 6 }}>{appStatsError}</div>}
+              {groups.map(group => (
+                <div key={group.title}>
+                  <div className="micro" style={{ color: UI.gold, marginBottom: 8 }}>{group.title}</div>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 8 }}>
+                    {group.items.map(([label, displayValue, suffix]) => <AppStatsMetric key={label} label={label} value={displayValue} suffix={suffix} />)}
+                  </div>
+                </div>
+              ))}
+              <div className="micro" style={{ color: UI.inkGhost, lineHeight: 1.45 }}>Streaks use UTC activity days and only count a streak still active today or yesterday.</div>
             </div>
           );
         })()}
@@ -4688,6 +4779,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <Frame style={{ padding: '0 14px' }}>
                 <NavRow label="All users" first hint={unseenCount > 0 ? `${unseenCount} new` : (allUsers.length ? `${allUsers.length}` : undefined)} onTap={() => setAllUsersSheet(true)} />
+                <NavRow label="Active users" hint={activeCount > 0 ? `${activeCount} active` : null} onTap={() => setActiveUsersSheet(true)} />
+                <NavRow label="App stats" onTap={() => setAppStatsSheet(true)} />
                 <NavRow label="VIP backgrounds" hint={vipBgList.length > 0 ? `${vipBgList.length} assigned` : 'None'} onTap={() => { setVipBgMsg(null); setVipBgSheet(true); }} />
                 <NavRow label="Message all users" onTap={() => { setBroadcastMsg(null); setBroadcastSheet(true); }} />
                 <NavRow label="Database stability" hint={runtimeConfig?.socialMode === 'maintenance' ? 'Friends paused' : (runtimeConfig?.socialTransport === 'broadcast' && runtimeConfig?.coachingTransport === 'broadcast' ? 'Broadcast' : 'Mixed')} onTap={() => { setDbStabilityMsg(null); setDbStabilitySheet(true); }} />
