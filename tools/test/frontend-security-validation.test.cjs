@@ -425,7 +425,7 @@ test('coach training plan import crosses the database boundary in one atomic RPC
 });
 
 test('final database and Edge hardening keeps retries atomic and durable', () => {
-  const migration = readSource('supabase/migrations/20260822123000_atomic_shared_and_coach_plan_imports.sql');
+  const migration = readSource('supabase/migrations/20260822111556_atomic_shared_and_coach_plan_imports.sql');
   const schema = readSource('supabase/schema.sql');
   for (const source of [migration, schema]) {
     assert.match(source, /CREATE OR REPLACE FUNCTION public\.push_training_plan_to_client\(/);
@@ -443,7 +443,7 @@ test('final database and Edge hardening keeps retries atomic and durable', () =>
   assert.match(migration, /ALTER COLUMN schedule_id SET NOT NULL;/);
   assert.match(schema, /CREATE TABLE public\.zane_social_plan_share_imports \([\s\S]*?schedule_id text NOT NULL,/);
 
-  const skipMigration = readSource('supabase/migrations/20260822072110_unique_archived_missed_days.sql');
+  const skipMigration = readSource('supabase/migrations/20260822111520_unique_archived_missed_days.sql');
   const lock = skipMigration.indexOf('LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;');
   const dedupe = skipMigration.indexOf('WITH ranked AS');
   const uniqueIndex = skipMigration.indexOf('CREATE UNIQUE INDEX');

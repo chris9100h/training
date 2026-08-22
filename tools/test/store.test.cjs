@@ -1758,7 +1758,7 @@ async function testAsync(name, fn) {
   });
 
   test('coaching history migration and schema keep all advisor-recommended leading indexes', () => {
-    const migration = fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20260822083213_coaching_history_keyset_indexes.sql'), 'utf8');
+    const migration = fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20260822111538_coaching_history_keyset_indexes.sql'), 'utf8');
     const schema = fs.readFileSync(path.join(__dirname, '../../supabase/schema.sql'), 'utf8');
     const expectedIndexes = [
       /CREATE INDEX IF NOT EXISTS zane_coaching_macros_history_keyset_idx\s+ON public\.zane_coaching_macros \(coaching_id, set_at DESC, id DESC\);/i,

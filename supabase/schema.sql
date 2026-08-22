@@ -8292,7 +8292,7 @@ GRANT EXECUTE ON FUNCTION public.claim_drive_progress_deletions(integer, text) T
 REVOKE ALL ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) TO service_role;
 
--- ── 20260822071641_atomic_session_sweeps.sql ────────────────────────────────────────────────
+-- ── 20260822111440_atomic_session_sweeps.sql ────────────────────────────────────────────────
 -- Serialize stale-session reconciliation at the database boundary. The Edge
 -- sweeper gets a complete action result from one transaction, while boot can
 -- only delete a caller-owned orphan after the database proves it is empty.
@@ -8495,7 +8495,7 @@ REVOKE EXECUTE ON FUNCTION public.delete_empty_orphan_session(text)
 GRANT EXECUTE ON FUNCTION public.delete_empty_orphan_session(text)
   TO authenticated;
 
--- ── 20260822071650_drive_progress_claim_hardening.sql ────────────────────────────────────────────────
+-- ── 20260822111445_drive_progress_claim_hardening.sql ────────────────────────────────────────────────
 -- Keep upload and delete intent on one row so neither worker can invalidate
 -- the other's lease. A delete requested during an upload is completed only
 -- after that upload worker records the final Drive file id.
@@ -8835,7 +8835,7 @@ REVOKE EXECUTE ON FUNCTION public.delete_coaching_drive_connection(uuid)
 GRANT EXECUTE ON FUNCTION public.delete_coaching_drive_connection(uuid)
   TO service_role;
 
--- ── 20260822071658_private_chat_attachments_baseline.sql ────────────────────────────────────────────────
+-- ── 20260822111450_private_chat_attachments_baseline.sql ────────────────────────────────────────────────
 -- The coaching/support chat upload path existed in the client but the active
 -- migration baseline never created its bucket. Keep legacy public URL strings
 -- parseable as object locators, while making object delivery private.
@@ -9076,7 +9076,7 @@ REVOKE EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
 GRANT EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
   TO service_role;
 
--- ── 20260822071706_atomic_reminder_deliveries.sql ────────────────────────────────────────────────
+-- ── 20260822111507_atomic_reminder_deliveries.sql ────────────────────────────────────────────────
 -- One short-lived claim per logical reminder event prevents overlapping cron
 -- invocations from sending the same notification concurrently. Provider
 -- failure releases the claim; provider success and the user-setting throttle
@@ -9303,7 +9303,7 @@ GRANT EXECUTE ON FUNCTION public.finish_reminder_delivery(
   text, uuid, text, uuid, boolean
 ) TO service_role;
 
--- ── 20260822071717_feature_map_bake_cas.sql ────────────────────────────────────────────────
+-- ── 20260822111514_feature_map_bake_cas.sql ────────────────────────────────────────────────
 -- Clear the two live feature-map layers only when both still match the exact
 -- semantic snapshots that the bake tool wrote into the generated catalog.
 -- Timestamps and JSON object key order do not participate in the comparison.
@@ -9451,7 +9451,7 @@ REVOKE EXECUTE ON FUNCTION public.clear_feature_map_layers_if_unchanged(jsonb, j
 GRANT EXECUTE ON FUNCTION public.clear_feature_map_layers_if_unchanged(jsonb, jsonb)
   TO service_role;
 
--- ── 20260822072110_unique_archived_missed_days.sql ────────────────────────────────────────────────
+-- ── 20260822111520_unique_archived_missed_days.sql ────────────────────────────────────────────────
 -- A missed plan day is one logical row even when two devices boot together.
 -- Keep the earliest recorded archive and let the unique key arbitrate future
 -- upserts independently of each device's random row id.
@@ -9495,7 +9495,7 @@ BEGIN
 END
 $migration$;
 
--- ── 20260822120000_db_edge_safety_followup.sql ──────────────────────────────
+-- ── 20260822111544_db_edge_safety_followup.sql ──────────────────────────────
 -- Follow-up hardening for the DB/Edge audit. This migration is deliberately
 -- additive because the preceding audit migrations have already been applied
 -- to the preview project.
@@ -10288,7 +10288,7 @@ REVOKE EXECUTE ON FUNCTION public.prune_reminder_delivery_claims(integer)
 GRANT EXECUTE ON FUNCTION public.prune_reminder_delivery_claims(integer)
   TO service_role;
 
--- Migration 20260822123000: atomic shared-plan import and coach plan pushes.
+-- Migration 20260822111556: atomic shared-plan import and coach plan pushes.
 CREATE OR REPLACE FUNCTION public.social_import_plan_share(
   p_share_id uuid,
   p_schedule jsonb,
