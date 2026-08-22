@@ -1696,8 +1696,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     flushPendingKbCommit();
     // Lengthened partials only ever completes via finishLengthenedPartial,
     // which supplies extraPatch with the chosen partials count, every other
-    // entry point (checkbox is hidden for this row, "Check set", keyboard
-    // confirm, bulk check-all) is guarded to redirect or skip this set
+    // entry point (checkbox is hidden for this row, "Check set", or keyboard
+    // confirm) is guarded to redirect or skip this set
     // instead of reaching here bare, but this is the backstop.
     if (lpTarget?.exIdx === exIdx && lpTarget?.setIdx === setIdx && !extraPatch) return;
     // Weighted stretch is the same deal: only finishWeightedStretch supplies
@@ -2412,8 +2412,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
     updateSession(sess => ({ ...sess, currentExIdx: newIdx }));
   };
 
-  // Shared by cardio (log/skip) and "Check all sets", both complete an
-  // entire entry in one shot rather than set-by-set like completeSet/
+  // Shared by cardio (log/skip), which completes an entire entry in one shot
+  // rather than set-by-set like completeSet/
   // finishSetNavigation, so there's no per-round index to match against a
   // superset/giant-set partner. Jump to whichever partner still has open
   // work instead of blindly advancing past the whole group (schedule-defined
@@ -6499,8 +6499,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   const progressionTarget = progressionTargetForSet(Math.max(0, bgSetIdx - warmupCount));
 
   const workingSetsArr = entry.sets.filter(s => !s.warmup);
-  const allWorkingDone = workingSetsArr.length > 0 && workingSetsArr.every(s => s.done || s.skipped);
-  const anyMissingData = !isNoWeightReps && workingSetsArr.some(st => !st.done && !st.skipped && ((!isBodyweight && st.kg == null) || (isUnilateral ? (st.repsL == null || st.repsR == null) : st.reps == null)));
 
   // (The Lengthened-Partials auto-arm effect lives above the `if (!entry)`
   // early return to keep the hook order stable; see the note there.)
@@ -6541,30 +6539,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
       if (groupMembers.length >= 3) return false;
       return groupMembers.every(m => (m.sets || []).filter(s => !s.warmup).every(s => !s.done && !s.skipped));
     });
-
-  const checkAllSets = async () => {
-    if (allWorkingDone || anyMissingData) return;
-    if (!await confirm(`Check off all ${workingSetsArr.length} sets and continue?`, { ok: 'Check all' })) return;
-    // Every intensity technique (drop-set, myo-rep, lengthened partials) only
-    // ever completes via its own dedicated FINISH button, which commits data
-    // bulk-check has no way to supply (drop weights, myo minis, partials
-    // count), leave that one set for the user to finish individually rather
-    // than silently marking it done with none of that data recorded.
-    const skipIdx = lpTarget?.exIdx === exIdx ? lpTarget.setIdx : wsTarget?.exIdx === exIdx ? wsTarget.setIdx : (dropSetIdx ?? myoSetIdx ?? avSetIdx ?? -1);
-    updateSession(sess => ({
-      ...sess,
-      entries: sess.entries.map((e, i) => i === exIdx
-        ? { ...e, sets: e.sets.map((st, si) => (st.warmup || si === skipIdx) ? st : { ...st, done: true }) }
-        : e),
-    }));
-    if (skipIdx >= 0) { persistRestStart(Date.now(), restDef, { openModal: true }); return; }
-    // Superset/giant-set aware: jump to whichever partner still has open
-    // sets instead of blindly advancing past the whole group.
-    if (!advanceIntoGroupOrPartner(300)) {
-      persistRestStart(Date.now(), restDef, { openModal: true });
-      setTimeout(() => navigate(1), 600);
-    }
-  };
 
   const skipWarmup = () => {
     const sessionId = session.id;
@@ -8065,18 +8039,6 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                   letterSpacing: '0.1em', cursor: 'pointer', WebkitTapHighlightColor: 'transparent',
                 }}>− REMOVE SET</button>
               )}
-              <button
-                onClick={checkAllSets}
-                disabled={allWorkingDone || (anyMissingData && !allWorkingDone)}
-                style={{
-                  flex: 1, padding: '9px 0', background: allWorkingDone ? UI.goldFaint : 'transparent',
-                  border: `1px solid ${allWorkingDone ? UI.goldSoft : anyMissingData ? UI.hair : UI.hairStrong}`, borderRadius: 6,
-                  color: allWorkingDone ? UI.gold : anyMissingData ? UI.inkGhost : UI.inkFaint,
-                  fontFamily: UI.fontUi, fontSize: 11, fontWeight: 700,
-                  letterSpacing: '0.1em', cursor: allWorkingDone || anyMissingData ? 'default' : 'pointer',
-                  opacity: anyMissingData && !allWorkingDone ? 0.35 : 1,
-                  WebkitTapHighlightColor: 'transparent',
-                }}>✓ ALL</button>
             </div>
           )}
 
