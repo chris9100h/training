@@ -653,7 +653,10 @@ ALTER TABLE zane_coaching REPLICA IDENTITY DEFAULT;
 CREATE INDEX zane_coaching_notes_coaching_id_created_at_idx ON public.zane_coaching_notes USING btree (coaching_id, created_at DESC);
 CREATE INDEX zane_coaching_notes_coaching_id_read_at_idx ON public.zane_coaching_notes USING btree (coaching_id, read_at) WHERE (read_at IS NULL);
 CREATE INDEX zane_coaching_notes_thread_id_idx ON public.zane_coaching_notes USING btree (thread_id) WHERE (thread_id IS NOT NULL);
+CREATE INDEX zane_coaching_notes_thread_keyset_idx ON public.zane_coaching_notes USING btree (coaching_id, thread_id, created_at DESC, id DESC);
 CREATE INDEX zane_coaching_threads_coaching_id_created_at_idx ON public.zane_coaching_threads USING btree (coaching_id, created_at);
+CREATE INDEX zane_coaching_threads_history_keyset_idx ON public.zane_coaching_threads USING btree (coaching_id, created_at DESC, id DESC);
+CREATE INDEX zane_coaching_macros_history_keyset_idx ON public.zane_coaching_macros USING btree (coaching_id, set_at DESC, id DESC);
 CREATE INDEX zane_session_entries_session_id_idx ON public.zane_session_entries USING btree (session_id);
 CREATE INDEX zane_sets_entry_id_idx ON public.zane_sets USING btree (entry_id);
 CREATE INDEX zane_sets_session_id_idx ON public.zane_sets USING btree (session_id);
@@ -4099,9 +4102,13 @@ CREATE TABLE public.zane_social_plan_shares (
 CREATE TABLE public.zane_social_plan_share_imports (
   share_id uuid NOT NULL REFERENCES public.zane_social_plan_shares(id) ON DELETE CASCADE,
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  schedule_id text NOT NULL,
   imported_at timestamptz NOT NULL DEFAULT now(),
   PRIMARY KEY (share_id, user_id)
 );
+
+COMMENT ON COLUMN public.zane_social_plan_share_imports.schedule_id IS
+  'The owned schedule created by the atomic import.';
 
 CREATE TABLE public.zane_social_reports (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -8237,6 +8244,7 @@ CREATE TABLE IF NOT EXISTS public.zane_drive_progress_photos (
   next_attempt_at timestamptz NOT NULL DEFAULT now(),
   locked_at timestamptz,
   locked_by text,
+  delete_requested_at timestamptz,
   last_error text,
   created_at timestamptz NOT NULL DEFAULT now(),
   updated_at timestamptz NOT NULL DEFAULT now(),
@@ -8283,3 +8291,2767 @@ REVOKE ALL ON FUNCTION public.claim_drive_progress_deletions(integer, text) FROM
 GRANT EXECUTE ON FUNCTION public.claim_drive_progress_deletions(integer, text) TO service_role;
 REVOKE ALL ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) TO service_role;
+
+-- ── 20260822071641_atomic_session_sweeps.sql ────────────────────────────────────────────────
+-- Serialize stale-session reconciliation at the database boundary. The Edge
+-- sweeper gets a complete action result from one transaction, while boot can
+-- only delete a caller-owned orphan after the database proves it is empty.
+
+CREATE OR REPLACE FUNCTION public.sweep_stale_session(
+  p_session_id text,
+  p_now timestamptz DEFAULT now()
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_session public.zane_sessions%ROWTYPE;
+  v_settings public.zane_user_settings%ROWTYPE;
+  v_has_settings boolean := false;
+  v_last_set_at timestamptz;
+  v_has_sets boolean := false;
+  v_last_activity timestamptz;
+  v_timeout_minutes integer := 90;
+  v_is_tracked boolean := false;
+  v_duration_minutes integer;
+  v_is_cleanup boolean := false;
+BEGIN
+  IF p_session_id IS NULL OR p_now IS NULL THEN
+    RETURN jsonb_build_object('action', 'none');
+  END IF;
+
+  SELECT s.*
+  INTO v_session
+  FROM public.zane_sessions AS s
+  WHERE s.id = p_session_id
+    AND s.ended IS NULL
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('action', 'none');
+  END IF;
+
+  SELECT settings.*
+  INTO v_settings
+  FROM public.zane_user_settings AS settings
+  WHERE settings.user_id = v_session.user_id
+  FOR UPDATE;
+  v_has_settings := FOUND;
+
+  IF v_has_settings THEN
+    v_timeout_minutes := greatest(1, coalesce(v_settings.session_timeout_minutes, 90));
+    v_is_tracked := v_settings.in_progress_session_id = v_session.id;
+  END IF;
+
+  SELECT max(sets.updated_at), count(*) > 0
+  INTO v_last_set_at, v_has_sets
+  FROM public.zane_sets AS sets
+  WHERE sets.session_id = v_session.id;
+
+  v_last_activity := coalesce(v_last_set_at, v_session.started_at);
+  IF v_last_activity IS NULL
+     OR v_last_activity > p_now
+     OR v_last_activity > p_now - make_interval(mins => v_timeout_minutes)
+  THEN
+    RETURN jsonb_build_object('action', 'none');
+  END IF;
+
+  IF NOT v_has_sets THEN
+    DELETE FROM public.zane_sessions
+    WHERE id = v_session.id
+      AND ended IS NULL;
+
+    IF v_has_settings AND v_is_tracked THEN
+      UPDATE public.zane_user_settings
+      SET in_progress_session_id = NULL
+      WHERE user_id = v_session.user_id
+        AND in_progress_session_id = v_session.id;
+    END IF;
+
+    RETURN jsonb_build_object(
+      'action', 'deleted',
+      'session_id', v_session.id,
+      'user_id', v_session.user_id,
+      'is_tracked', v_is_tracked
+    );
+  END IF;
+
+  IF v_session.started_at IS NOT NULL THEN
+    v_duration_minutes := greatest(
+      0,
+      round(extract(epoch FROM (v_last_activity - v_session.started_at)) / 60.0)::integer
+    );
+  END IF;
+  v_is_cleanup := v_has_settings
+    AND v_settings.status_mode = 'cleanup'
+    AND v_settings.status_mode_since IS NOT NULL
+    AND v_settings.status_mode_since <= p_now
+    AND v_session.started_at IS NOT NULL
+    AND v_session.started_at >= v_settings.status_mode_since;
+
+  UPDATE public.zane_sessions
+  SET ended = v_last_activity,
+      duration_minutes = coalesce(v_duration_minutes, duration_minutes),
+      is_cleanup = CASE WHEN v_is_cleanup THEN true ELSE is_cleanup END
+  WHERE id = v_session.id
+    AND ended IS NULL;
+
+  IF NOT FOUND THEN
+    RETURN jsonb_build_object('action', 'none');
+  END IF;
+
+  IF v_has_settings AND v_is_tracked THEN
+    UPDATE public.zane_user_settings
+    SET in_progress_session_id = NULL,
+        auto_close_notify = jsonb_build_object(
+          'dayName', coalesce(nullif(v_session.day_name, ''), 'Session'),
+          'date', left(coalesce(v_session.date::text, ''), 10),
+          'durationMinutes', to_jsonb(v_duration_minutes)
+        )
+    WHERE user_id = v_session.user_id
+      AND in_progress_session_id = v_session.id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'action', 'closed',
+    'session_id', v_session.id,
+    'user_id', v_session.user_id,
+    'is_tracked', v_is_tracked,
+    'duration_minutes', v_duration_minutes,
+    'timeout_minutes', v_timeout_minutes,
+    'push_enabled', coalesce(v_settings.push_enabled, false),
+    'use_pushover', coalesce(v_settings.use_pushover, false),
+    'pushover_user_key', v_settings.pushover_user_key
+  );
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.delete_empty_orphan_session(p_session_id text)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_session_id text;
+BEGIN
+  IF v_uid IS NULL OR p_session_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  SELECT session.id
+  INTO v_session_id
+  FROM public.zane_sessions AS session
+  WHERE session.id = p_session_id
+    AND session.user_id = v_uid
+    AND session.ended IS NULL
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+
+  PERFORM 1
+  FROM public.zane_user_settings AS settings
+  WHERE settings.user_id = v_uid
+  FOR UPDATE;
+
+  DELETE FROM public.zane_sessions AS session
+  WHERE session.id = v_session_id
+    AND session.user_id = v_uid
+    AND session.ended IS NULL
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = v_uid
+        AND settings.in_progress_session_id = session.id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_session_entries AS entry
+      WHERE entry.session_id = session.id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_sets AS sets
+      WHERE sets.session_id = session.id
+    );
+  RETURN FOUND;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.sweep_stale_session(text, timestamptz)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.sweep_stale_session(text, timestamptz)
+  TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.delete_empty_orphan_session(text)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_empty_orphan_session(text)
+  TO authenticated;
+
+-- ── 20260822071650_drive_progress_claim_hardening.sql ────────────────────────────────────────────────
+-- Keep upload and delete intent on one row so neither worker can invalidate
+-- the other's lease. A delete requested during an upload is completed only
+-- after that upload worker records the final Drive file id.
+
+ALTER TABLE public.zane_drive_progress_photos
+  ADD COLUMN IF NOT EXISTS delete_requested_at timestamptz;
+
+DROP POLICY IF EXISTS drive_progress_stage_insert ON storage.objects;
+CREATE POLICY drive_progress_stage_insert ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'drive-progress-staging'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_drive_progress_photos AS photo
+      WHERE photo.user_id = (select auth.uid())
+        AND photo.staging_path = name
+        AND photo.status = 'staged'
+    )
+  );
+
+DROP POLICY IF EXISTS drive_progress_stage_update ON storage.objects;
+CREATE POLICY drive_progress_stage_update ON storage.objects
+  FOR UPDATE TO authenticated
+  USING (
+    bucket_id = 'drive-progress-staging'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_drive_progress_photos AS photo
+      WHERE photo.user_id = (select auth.uid())
+        AND photo.staging_path = name
+        AND photo.status = 'staged'
+    )
+  )
+  WITH CHECK (
+    bucket_id = 'drive-progress-staging'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_drive_progress_photos AS photo
+      WHERE photo.user_id = (select auth.uid())
+        AND photo.staging_path = name
+        AND photo.status = 'staged'
+    )
+  );
+
+DROP POLICY IF EXISTS drive_progress_stage_read ON storage.objects;
+CREATE POLICY drive_progress_stage_read ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'drive-progress-staging'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_drive_progress_photos AS photo
+      WHERE photo.user_id = (select auth.uid())
+        AND photo.staging_path = name
+    )
+  );
+
+DROP POLICY IF EXISTS drive_progress_stage_delete ON storage.objects;
+CREATE POLICY drive_progress_stage_delete ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'drive-progress-staging'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_drive_progress_photos AS photo
+      WHERE photo.user_id = (select auth.uid())
+        AND photo.staging_path = name
+    )
+  );
+
+CREATE OR REPLACE FUNCTION public.release_drive_progress_photo(p_photo_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  UPDATE public.zane_drive_progress_photos
+  SET delete_requested_at = now(),
+      status = CASE WHEN status = 'uploading' THEN status ELSE 'deleting' END,
+      next_attempt_at = now(),
+      locked_at = CASE WHEN status = 'uploading' THEN locked_at ELSE NULL END,
+      locked_by = CASE WHEN status = 'uploading' THEN locked_by ELSE NULL END,
+      last_error = CASE
+        WHEN drive_file_id IS NULL THEN 'Progress picture staging failed'
+        ELSE 'Progress picture replacement staging failed'
+      END,
+      updated_at = now()
+  WHERE id = p_photo_id
+    AND user_id = auth.uid()
+    AND status <> 'deleting';
+  RETURN FOUND;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.request_drive_progress_deletion(
+  p_photo_id uuid,
+  p_user_id uuid
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_status text;
+BEGIN
+  IF p_photo_id IS NULL OR p_user_id IS NULL THEN
+    RETURN 'not_found';
+  END IF;
+
+  SELECT photo.status
+  INTO v_status
+  FROM public.zane_drive_progress_photos AS photo
+  WHERE photo.id = p_photo_id
+    AND photo.user_id = p_user_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN 'not_found';
+  END IF;
+
+  IF v_status = 'deleting' THEN
+    RETURN 'deleting';
+  END IF;
+
+  UPDATE public.zane_drive_progress_photos
+  SET delete_requested_at = now(),
+      status = CASE WHEN v_status = 'uploading' THEN 'uploading' ELSE 'deleting' END,
+      next_attempt_at = now(),
+      locked_at = CASE WHEN v_status = 'uploading' THEN locked_at ELSE NULL END,
+      locked_by = CASE WHEN v_status = 'uploading' THEN locked_by ELSE NULL END,
+      last_error = NULL,
+      updated_at = now()
+  WHERE id = p_photo_id;
+  RETURN 'queued';
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_drive_progress_uploads(
+  p_limit integer DEFAULT 5,
+  p_worker text DEFAULT ''
+)
+RETURNS SETOF public.zane_drive_progress_photos
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_limit integer := greatest(1, least(coalesce(p_limit, 5), 10));
+BEGIN
+  IF coalesce(trim(p_worker), '') = '' THEN
+    RAISE EXCEPTION 'worker id required';
+  END IF;
+  RETURN QUERY
+  WITH picked AS (
+    SELECT photo.id
+    FROM public.zane_drive_progress_photos AS photo
+    WHERE photo.next_attempt_at <= now()
+      AND (
+        (
+          photo.status IN ('staged', 'failed')
+          AND photo.delete_requested_at IS NULL
+        )
+        OR (
+          photo.status = 'uploading'
+          AND photo.locked_at < now() - interval '10 minutes'
+        )
+      )
+    ORDER BY photo.next_attempt_at, photo.created_at, photo.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT v_limit
+  )
+  UPDATE public.zane_drive_progress_photos AS photo
+  SET status = 'uploading',
+      locked_at = now(),
+      locked_by = p_worker,
+      attempts = photo.attempts + 1,
+      updated_at = now()
+  FROM picked
+  WHERE photo.id = picked.id
+  RETURNING photo.*;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.finish_drive_progress_upload(
+  p_photo_id uuid,
+  p_worker text,
+  p_status text,
+  p_drive_file_id text DEFAULT NULL,
+  p_error text DEFAULT NULL,
+  p_next_attempt_at timestamptz DEFAULT NULL
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF p_status NOT IN ('uploaded', 'failed') THEN
+    RAISE EXCEPTION 'invalid progress photo status';
+  END IF;
+
+  UPDATE public.zane_drive_progress_photos
+  SET status = CASE WHEN delete_requested_at IS NULL THEN p_status ELSE 'deleting' END,
+      drive_file_id = coalesce(p_drive_file_id, drive_file_id),
+      last_error = CASE
+        WHEN delete_requested_at IS NULL THEN nullif(p_error, '')
+        ELSE NULL
+      END,
+      next_attempt_at = CASE
+        WHEN delete_requested_at IS NULL THEN coalesce(p_next_attempt_at, now())
+        ELSE now()
+      END,
+      locked_at = NULL,
+      locked_by = NULL,
+      uploaded_at = CASE WHEN p_status = 'uploaded' THEN now() ELSE uploaded_at END,
+      updated_at = now()
+  WHERE id = p_photo_id
+    AND status = 'uploading'
+    AND locked_by = p_worker;
+  RETURN FOUND;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.claim_drive_progress_deletions(
+  p_limit integer DEFAULT 5,
+  p_worker text DEFAULT ''
+)
+RETURNS SETOF public.zane_drive_progress_photos
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_limit integer := greatest(1, least(coalesce(p_limit, 5), 10));
+BEGIN
+  IF coalesce(trim(p_worker), '') = '' THEN
+    RAISE EXCEPTION 'worker id required';
+  END IF;
+  RETURN QUERY
+  WITH picked AS (
+    SELECT photo.id
+    FROM public.zane_drive_progress_photos AS photo
+    WHERE photo.status = 'deleting'
+      AND photo.next_attempt_at <= now()
+      AND (photo.locked_at IS NULL OR photo.locked_at < now() - interval '10 minutes')
+    ORDER BY photo.next_attempt_at, photo.updated_at, photo.id
+    FOR UPDATE SKIP LOCKED
+    LIMIT v_limit
+  )
+  UPDATE public.zane_drive_progress_photos AS photo
+  SET locked_at = now(),
+      locked_by = p_worker,
+      updated_at = now()
+  FROM picked
+  WHERE photo.id = picked.id
+  RETURNING photo.*;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.delete_coaching_drive_connection(p_coach_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  IF p_coach_id IS NULL THEN
+    RETURN false;
+  END IF;
+
+  -- Lock all mutable worker state in worker order before deleting the outbox
+  -- and credentials.
+  -- An already-running worker can finish its current provider request, but it
+  -- cannot recreate these rows or acknowledge a deleted export afterwards.
+  PERFORM 1
+  FROM public.zane_coaching_drive_worker_leases
+  WHERE coach_id = p_coach_id
+  FOR UPDATE;
+  PERFORM 1
+  FROM public.zane_coaching_drive_exports
+  WHERE coach_id = p_coach_id
+  ORDER BY id
+  FOR UPDATE;
+  PERFORM 1
+  FROM public.zane_coaching_drive_connections
+  WHERE coach_id = p_coach_id
+  FOR UPDATE;
+
+  DELETE FROM public.zane_coaching_drive_exports
+  WHERE coach_id = p_coach_id;
+  DELETE FROM public.zane_coaching_drive_oauth_states
+  WHERE coach_id = p_coach_id;
+  DELETE FROM public.zane_coaching_drive_worker_leases
+  WHERE coach_id = p_coach_id;
+  DELETE FROM public.zane_coaching_drive_connections
+  WHERE coach_id = p_coach_id;
+  RETURN true;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.release_drive_progress_photo(uuid)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.release_drive_progress_photo(uuid)
+  TO authenticated;
+
+REVOKE EXECUTE ON FUNCTION public.request_drive_progress_deletion(uuid, uuid)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.request_drive_progress_deletion(uuid, uuid)
+  TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.claim_drive_progress_uploads(integer, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_drive_progress_uploads(integer, text)
+  TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.finish_drive_progress_upload(uuid, text, text, text, text, timestamptz)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finish_drive_progress_upload(uuid, text, text, text, text, timestamptz)
+  TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.claim_drive_progress_deletions(integer, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_drive_progress_deletions(integer, text)
+  TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.delete_coaching_drive_connection(uuid)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_coaching_drive_connection(uuid)
+  TO service_role;
+
+-- ── 20260822071658_private_chat_attachments_baseline.sql ────────────────────────────────────────────────
+-- The coaching/support chat upload path existed in the client but the active
+-- migration baseline never created its bucket. Keep legacy public URL strings
+-- parseable as object locators, while making object delivery private.
+
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'chat-attachments',
+  'chat-attachments',
+  false,
+  10485760,
+  ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif']
+)
+ON CONFLICT (id) DO UPDATE
+SET public = false,
+    file_size_limit = 10485760,
+    allowed_mime_types = ARRAY['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+
+DROP POLICY IF EXISTS chat_attachment_insert_own ON storage.objects;
+CREATE POLICY chat_attachment_insert_own ON storage.objects
+  FOR INSERT TO authenticated
+  WITH CHECK (
+    bucket_id = 'chat-attachments'
+    AND array_length(storage.foldername(name), 1) = 1
+    AND (storage.foldername(name))[1] = (select auth.uid())::text
+    AND storage.filename(name) ~ '^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$'
+    AND position('..' in name) = 0
+  );
+
+DROP POLICY IF EXISTS chat_attachment_read_participant ON storage.objects;
+CREATE POLICY chat_attachment_read_participant ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'chat-attachments'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_coaching_notes AS note
+      JOIN public.zane_coaching AS coaching
+        ON coaching.id = note.coaching_id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(note.attachments) = 'array' THEN note.attachments
+          ELSE '[]'::jsonb
+        END
+      ) AS attachment(value)
+      WHERE (
+          coaching.coach_id = (select auth.uid())
+          OR coaching.client_id = (select auth.uid())
+        )
+        AND (
+          attachment.value->>'path' = name
+          OR right(
+            split_part(coalesce(attachment.value->>'url', ''), '?', 1),
+            length(name) + 1
+          ) = '/' || name
+        )
+    )
+  );
+
+DROP POLICY IF EXISTS chat_attachment_delete_owner_or_admin ON storage.objects;
+CREATE POLICY chat_attachment_delete_owner_or_admin ON storage.objects
+  FOR DELETE TO authenticated
+  USING (
+    bucket_id = 'chat-attachments'
+    AND (
+      (storage.foldername(name))[1] = (select auth.uid())::text
+      OR (select auth.email()) = 'office@btc-prime.biz'
+    )
+  );
+
+-- Deleting a whole coaching thread or support ticket can remove notes written
+-- by both participants. Preserve their object paths transactionally before
+-- the note rows disappear, then let the authenticated Edge cleanup endpoint
+-- delete the private objects with the service role. Failed Storage deletes
+-- remain as idempotent tombstones for a later endpoint invocation.
+CREATE TABLE IF NOT EXISTS public.zane_chat_attachment_cleanup (
+  path text PRIMARY KEY,
+  owner_id uuid NOT NULL,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (path ~ '^[0-9A-Fa-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$')
+);
+
+ALTER TABLE public.zane_chat_attachment_cleanup ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.zane_chat_attachment_cleanup
+  FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, DELETE ON TABLE public.zane_chat_attachment_cleanup
+  TO service_role;
+
+CREATE OR REPLACE FUNCTION public.delete_coaching_chat_scope(
+  p_caller_id uuid,
+  p_scope text,
+  p_scope_id text
+)
+RETURNS text[]
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_paths text[] := ARRAY[]::text[];
+  v_allowed boolean := false;
+  v_exists boolean := false;
+  v_is_admin boolean := false;
+BEGIN
+  IF p_caller_id IS NULL OR p_scope_id IS NULL THEN
+    RAISE EXCEPTION 'invalid chat cleanup request';
+  END IF;
+
+  IF p_scope = 'thread' THEN
+    SELECT true,
+           p_caller_id IN (coaching.coach_id, coaching.client_id)
+    INTO v_exists, v_allowed
+    FROM public.zane_coaching_threads AS thread
+    JOIN public.zane_coaching AS coaching
+      ON coaching.id = thread.coaching_id
+    WHERE thread.id = p_scope_id
+    FOR UPDATE OF thread, coaching;
+
+    IF NOT coalesce(v_exists, false) THEN
+      RETURN v_paths;
+    END IF;
+    IF NOT coalesce(v_allowed, false) THEN
+      RAISE EXCEPTION 'not allowed to delete this thread';
+    END IF;
+
+    PERFORM 1
+    FROM public.zane_coaching_notes AS note
+    WHERE note.thread_id = p_scope_id
+    ORDER BY note.id
+    FOR UPDATE;
+
+    WITH attachment_paths AS (
+      SELECT DISTINCT candidate.path
+      FROM public.zane_coaching_notes AS note
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(note.attachments) = 'array'
+          THEN note.attachments ELSE '[]'::jsonb END
+      ) AS attachment(value)
+      CROSS JOIN LATERAL (
+        SELECT coalesce(
+          nullif(trim(attachment.value->>'path'), ''),
+          nullif(
+            regexp_replace(
+              split_part(trim(coalesce(attachment.value->>'url', '')), '?', 1),
+              '^.*/chat-attachments/',
+              ''
+            ),
+            ''
+          )
+        ) AS path
+      ) AS candidate
+      WHERE note.thread_id = p_scope_id
+        AND candidate.path ~ '^[0-9A-Fa-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$'
+    ), inserted AS (
+      INSERT INTO public.zane_chat_attachment_cleanup(path)
+      SELECT path FROM attachment_paths
+      ON CONFLICT (path) DO NOTHING
+      RETURNING path
+    )
+    SELECT coalesce(array_agg(path ORDER BY path), ARRAY[]::text[])
+    INTO v_paths
+    FROM attachment_paths;
+
+    DELETE FROM public.zane_coaching_notes WHERE thread_id = p_scope_id;
+    DELETE FROM public.zane_coaching_threads WHERE id = p_scope_id;
+    RETURN v_paths;
+  ELSIF p_scope = 'support-ticket' THEN
+    SELECT EXISTS (
+      SELECT 1 FROM auth.users
+      WHERE id = p_caller_id
+        AND email = 'office@btc-prime.biz'
+    ) INTO v_is_admin;
+    IF NOT v_is_admin THEN
+      RAISE EXCEPTION 'admin access required';
+    END IF;
+    IF p_scope_id NOT LIKE 'support\_%' ESCAPE '\' THEN
+      RAISE EXCEPTION 'not a support ticket';
+    END IF;
+
+    SELECT true INTO v_exists
+    FROM public.zane_coaching AS coaching
+    WHERE coaching.id = p_scope_id
+    FOR UPDATE;
+    IF NOT coalesce(v_exists, false) THEN
+      RETURN v_paths;
+    END IF;
+
+    PERFORM 1
+    FROM public.zane_coaching_notes AS note
+    WHERE note.coaching_id = p_scope_id
+    ORDER BY note.id
+    FOR UPDATE;
+
+    WITH attachment_paths AS (
+      SELECT DISTINCT candidate.path
+      FROM public.zane_coaching_notes AS note
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(note.attachments) = 'array'
+          THEN note.attachments ELSE '[]'::jsonb END
+      ) AS attachment(value)
+      CROSS JOIN LATERAL (
+        SELECT coalesce(
+          nullif(trim(attachment.value->>'path'), ''),
+          nullif(
+            regexp_replace(
+              split_part(trim(coalesce(attachment.value->>'url', '')), '?', 1),
+              '^.*/chat-attachments/',
+              ''
+            ),
+            ''
+          )
+        ) AS path
+      ) AS candidate
+      WHERE note.coaching_id = p_scope_id
+        AND candidate.path ~ '^[0-9A-Fa-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$'
+    ), inserted AS (
+      INSERT INTO public.zane_chat_attachment_cleanup(path)
+      SELECT path FROM attachment_paths
+      ON CONFLICT (path) DO NOTHING
+      RETURNING path
+    )
+    SELECT coalesce(array_agg(path ORDER BY path), ARRAY[]::text[])
+    INTO v_paths
+    FROM attachment_paths;
+
+    DELETE FROM public.zane_coaching_notes WHERE coaching_id = p_scope_id;
+    DELETE FROM public.zane_coaching_threads WHERE coaching_id = p_scope_id;
+    DELETE FROM public.zane_coaching WHERE id = p_scope_id;
+    RETURN v_paths;
+  END IF;
+
+  RAISE EXCEPTION 'invalid chat cleanup scope';
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
+  TO service_role;
+
+-- ── 20260822071706_atomic_reminder_deliveries.sql ────────────────────────────────────────────────
+-- One short-lived claim per logical reminder event prevents overlapping cron
+-- invocations from sending the same notification concurrently. Provider
+-- failure releases the claim; provider success and the user-setting throttle
+-- are finalized together.
+
+CREATE TABLE IF NOT EXISTS public.zane_reminder_delivery_claims (
+  kind text NOT NULL CHECK (kind IN ('generic', 'water', 'daily-log')),
+  user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+  event_key text NOT NULL CHECK (length(event_key) BETWEEN 1 AND 200),
+  expected_at timestamptz,
+  expected_text text,
+  target_text text,
+  claim_token uuid NOT NULL,
+  claimed_at timestamptz NOT NULL,
+  delivered_at timestamptz,
+  PRIMARY KEY (kind, user_id, event_key)
+);
+
+CREATE INDEX IF NOT EXISTS zane_reminder_delivery_claims_retention_idx
+  ON public.zane_reminder_delivery_claims (coalesce(delivered_at, claimed_at));
+
+CREATE INDEX IF NOT EXISTS zane_reminder_delivery_claims_user_idx
+  ON public.zane_reminder_delivery_claims (user_id);
+
+ALTER TABLE public.zane_reminder_delivery_claims ENABLE ROW LEVEL SECURITY;
+REVOKE ALL ON TABLE public.zane_reminder_delivery_claims
+  FROM PUBLIC, anon, authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.zane_reminder_delivery_claims
+  TO service_role;
+
+CREATE OR REPLACE FUNCTION public.claim_reminder_delivery(
+  p_kind text,
+  p_user_id uuid,
+  p_expected_at timestamptz,
+  p_expected_text text,
+  p_target_text text,
+  p_claim_token uuid,
+  p_claimed_at timestamptz DEFAULT now()
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_event_key text;
+  v_claimed_key text;
+BEGIN
+  IF p_user_id IS NULL OR p_claim_token IS NULL OR p_claimed_at IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_kind = 'generic' THEN
+    IF p_expected_at IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = p_user_id
+        AND settings.push_enabled = true
+        AND settings.reminder_enabled = true
+        AND settings.next_reminder_at = p_expected_at
+        AND settings.next_reminder_at <= p_claimed_at
+        AND settings.next_reminder_at >= p_claimed_at - interval '1 hour'
+    ) THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := to_char(
+      p_expected_at AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+    );
+  ELSIF p_kind = 'water' THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = p_user_id
+        AND settings.push_enabled = true
+        AND settings.water_reminder_enabled = true
+        AND settings.water_last_push_at IS NOT DISTINCT FROM p_expected_at
+        AND (
+          settings.water_last_push_at IS NULL
+          OR settings.water_last_push_at <= p_claimed_at - interval '1 hour'
+        )
+    ) THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := coalesce(
+      to_char(p_expected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      'never'
+    );
+  ELSIF p_kind = 'daily-log' THEN
+    IF p_target_text IS NULL
+       OR p_target_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       OR NOT EXISTS (
+         SELECT 1
+         FROM public.zane_user_settings AS settings
+         WHERE settings.user_id = p_user_id
+           AND settings.push_enabled = true
+           AND settings.daily_log_reminder_enabled = true
+           AND settings.daily_log_reminder_last_date IS NOT DISTINCT FROM p_expected_text
+           AND settings.daily_log_reminder_last_date IS DISTINCT FROM p_target_text
+       )
+    THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := p_target_text;
+  ELSE
+    RETURN NULL;
+  END IF;
+
+  INSERT INTO public.zane_reminder_delivery_claims AS claim (
+    kind, user_id, event_key, expected_at, expected_text, target_text,
+    claim_token, claimed_at, delivered_at
+  )
+  VALUES (
+    p_kind, p_user_id, v_event_key, p_expected_at, p_expected_text, p_target_text,
+    p_claim_token, p_claimed_at, NULL
+  )
+  ON CONFLICT (kind, user_id, event_key) DO UPDATE
+  SET expected_at = EXCLUDED.expected_at,
+      expected_text = EXCLUDED.expected_text,
+      target_text = EXCLUDED.target_text,
+      claim_token = EXCLUDED.claim_token,
+      claimed_at = EXCLUDED.claimed_at
+  WHERE claim.delivered_at IS NULL
+    AND claim.claimed_at < now() - interval '15 minutes'
+  RETURNING event_key INTO v_claimed_key;
+
+  IF v_claimed_key IS NOT NULL AND pg_try_advisory_xact_lock(1941726301) THEN
+    DELETE FROM public.zane_reminder_delivery_claims
+    WHERE ctid IN (
+      SELECT ctid
+      FROM public.zane_reminder_delivery_claims
+      WHERE delivered_at < now() - interval '30 days'
+      ORDER BY delivered_at
+      LIMIT 500
+    );
+  END IF;
+
+  RETURN v_claimed_key;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.finish_reminder_delivery(
+  p_kind text,
+  p_user_id uuid,
+  p_event_key text,
+  p_claim_token uuid,
+  p_delivered boolean
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_claim public.zane_reminder_delivery_claims%ROWTYPE;
+BEGIN
+  SELECT claim.*
+  INTO v_claim
+  FROM public.zane_reminder_delivery_claims AS claim
+  WHERE claim.kind = p_kind
+    AND claim.user_id = p_user_id
+    AND claim.event_key = p_event_key
+    AND claim.claim_token = p_claim_token
+    AND claim.delivered_at IS NULL
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+
+  IF NOT coalesce(p_delivered, false) THEN
+    DELETE FROM public.zane_reminder_delivery_claims
+    WHERE kind = p_kind
+      AND user_id = p_user_id
+      AND event_key = p_event_key
+      AND claim_token = p_claim_token
+      AND delivered_at IS NULL;
+    RETURN FOUND;
+  END IF;
+
+  IF p_kind = 'generic' THEN
+    UPDATE public.zane_user_settings
+    SET next_reminder_at = NULL
+    WHERE user_id = p_user_id
+      AND next_reminder_at = v_claim.expected_at;
+  ELSIF p_kind = 'water' THEN
+    UPDATE public.zane_user_settings
+    SET water_last_push_at = v_claim.claimed_at
+    WHERE user_id = p_user_id
+      AND water_last_push_at IS NOT DISTINCT FROM v_claim.expected_at;
+  ELSIF p_kind = 'daily-log' THEN
+    UPDATE public.zane_user_settings
+    SET daily_log_reminder_last_date = v_claim.target_text
+    WHERE user_id = p_user_id
+      AND daily_log_reminder_last_date IS NOT DISTINCT FROM v_claim.expected_text;
+  ELSE
+    RETURN false;
+  END IF;
+
+  UPDATE public.zane_reminder_delivery_claims
+  SET delivered_at = now()
+  WHERE kind = p_kind
+    AND user_id = p_user_id
+    AND event_key = p_event_key
+    AND claim_token = p_claim_token
+    AND delivered_at IS NULL;
+  RETURN FOUND;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_reminder_delivery(
+  text, uuid, timestamptz, text, text, uuid, timestamptz
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_reminder_delivery(
+  text, uuid, timestamptz, text, text, uuid, timestamptz
+) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.finish_reminder_delivery(
+  text, uuid, text, uuid, boolean
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finish_reminder_delivery(
+  text, uuid, text, uuid, boolean
+) TO service_role;
+
+-- ── 20260822071717_feature_map_bake_cas.sql ────────────────────────────────────────────────
+-- Clear the two live feature-map layers only when both still match the exact
+-- semantic snapshots that the bake tool wrote into the generated catalog.
+-- Timestamps and JSON object key order do not participate in the comparison.
+
+CREATE OR REPLACE FUNCTION public.clear_feature_map_layers_if_unchanged(
+  p_expected_draft jsonb,
+  p_expected_published jsonb
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_expected_draft jsonb;
+  v_expected_published jsonb;
+  v_actual_draft jsonb;
+  v_actual_published jsonb;
+BEGIN
+  IF jsonb_typeof(p_expected_draft) <> 'array'
+     OR jsonb_typeof(p_expected_published) <> 'array'
+  THEN
+    RAISE EXCEPTION 'feature map snapshots must be JSON arrays';
+  END IF;
+
+  LOCK TABLE public.zane_feature_map,
+             public.zane_feature_map_published
+    IN SHARE ROW EXCLUSIVE MODE;
+
+  SELECT coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'card_id', expected.card_id,
+        'hidden', expected.hidden,
+        'is_custom', expected.is_custom,
+        'cat', expected.cat,
+        'name', expected.name,
+        'role', expected.role,
+        'summary', expected.summary,
+        'actions', expected.actions,
+        'sort', expected.sort
+      )
+      ORDER BY expected.card_id
+    ),
+    '[]'::jsonb
+  )
+  INTO v_expected_draft
+  FROM jsonb_to_recordset(p_expected_draft) AS expected(
+    card_id text,
+    hidden boolean,
+    is_custom boolean,
+    cat text,
+    name text,
+    role text,
+    summary text,
+    actions jsonb,
+    sort integer
+  );
+
+  SELECT coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'card_id', expected.card_id,
+        'hidden', expected.hidden,
+        'is_custom', expected.is_custom,
+        'cat', expected.cat,
+        'name', expected.name,
+        'role', expected.role,
+        'summary', expected.summary,
+        'actions', expected.actions,
+        'sort', expected.sort
+      )
+      ORDER BY expected.card_id
+    ),
+    '[]'::jsonb
+  )
+  INTO v_expected_published
+  FROM jsonb_to_recordset(p_expected_published) AS expected(
+    card_id text,
+    hidden boolean,
+    is_custom boolean,
+    cat text,
+    name text,
+    role text,
+    summary text,
+    actions jsonb,
+    sort integer
+  );
+
+  SELECT coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'card_id', current.card_id,
+        'hidden', current.hidden,
+        'is_custom', current.is_custom,
+        'cat', current.cat,
+        'name', current.name,
+        'role', current.role,
+        'summary', current.summary,
+        'actions', current.actions,
+        'sort', current.sort
+      )
+      ORDER BY current.card_id
+    ),
+    '[]'::jsonb
+  )
+  INTO v_actual_draft
+  FROM public.zane_feature_map AS current;
+
+  SELECT coalesce(
+    jsonb_agg(
+      jsonb_build_object(
+        'card_id', current.card_id,
+        'hidden', current.hidden,
+        'is_custom', current.is_custom,
+        'cat', current.cat,
+        'name', current.name,
+        'role', current.role,
+        'summary', current.summary,
+        'actions', current.actions,
+        'sort', current.sort
+      )
+      ORDER BY current.card_id
+    ),
+    '[]'::jsonb
+  )
+  INTO v_actual_published
+  FROM public.zane_feature_map_published AS current;
+
+  IF v_actual_draft IS DISTINCT FROM v_expected_draft
+     OR v_actual_published IS DISTINCT FROM v_expected_published
+  THEN
+    RETURN false;
+  END IF;
+
+  DELETE FROM public.zane_feature_map;
+  DELETE FROM public.zane_feature_map_published;
+  RETURN true;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.clear_feature_map_layers_if_unchanged(jsonb, jsonb)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.clear_feature_map_layers_if_unchanged(jsonb, jsonb)
+  TO service_role;
+
+-- ── 20260822072110_unique_archived_missed_days.sql ────────────────────────────────────────────────
+-- A missed plan day is one logical row even when two devices boot together.
+-- Keep the earliest recorded archive and let the unique key arbitrate future
+-- upserts independently of each device's random row id.
+
+-- Hold concurrent client inserts out between the one-time dedupe and unique
+-- index creation. SHARE ROW EXCLUSIVE still permits reads and is retained for
+-- the remainder of this migration transaction.
+LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;
+
+WITH ranked AS (
+  SELECT skip.id,
+         row_number() OVER (
+           PARTITION BY skip.user_id, skip.date, skip.day_id
+           ORDER BY skip.skipped_at ASC NULLS LAST, skip.id
+         ) AS ordinal
+  FROM public.zane_skips AS skip
+  WHERE skip.user_id IS NOT NULL
+    AND skip.day_id IS NOT NULL
+)
+DELETE FROM public.zane_skips AS skip
+USING ranked
+WHERE skip.id = ranked.id
+  AND ranked.ordinal > 1;
+
+DO $migration$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_constraint
+    WHERE conrelid = 'public.zane_skips'::regclass
+      AND conname = 'zane_skips_user_date_day_key'
+      AND contype = 'u'
+  ) THEN
+    CREATE UNIQUE INDEX IF NOT EXISTS zane_skips_user_date_day_unique
+      ON public.zane_skips (user_id, date, day_id);
+
+    ALTER TABLE public.zane_skips
+      ADD CONSTRAINT zane_skips_user_date_day_key
+      UNIQUE USING INDEX zane_skips_user_date_day_unique;
+  END IF;
+END
+$migration$;
+
+-- ── 20260822120000_db_edge_safety_followup.sql ──────────────────────────────
+-- Follow-up hardening for the DB/Edge audit. This migration is deliberately
+-- additive because the preceding audit migrations have already been applied
+-- to the preview project.
+
+-- A failed replacement upload must only discard its new staging object. The
+-- already-uploaded Drive file remains the valid photo until a replacement is
+-- actually finished.
+UPDATE public.zane_drive_progress_photos
+SET status = 'uploaded',
+    delete_requested_at = NULL,
+    next_attempt_at = now(),
+    locked_at = NULL,
+    locked_by = NULL,
+    last_error = 'Progress picture replacement staging failed; existing Drive file preserved',
+    updated_at = now()
+WHERE status = 'deleting'
+  AND drive_file_id IS NOT NULL
+  AND locked_at IS NULL
+  AND last_error = 'Progress picture replacement staging failed';
+
+CREATE OR REPLACE FUNCTION public.release_drive_progress_photo(p_photo_id uuid)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+BEGIN
+  UPDATE public.zane_drive_progress_photos
+  SET delete_requested_at = CASE
+        WHEN drive_file_id IS NOT NULL THEN NULL
+        WHEN status = 'uploading' THEN delete_requested_at
+        ELSE now()
+      END,
+      status = CASE
+        WHEN status = 'uploading' THEN status
+        WHEN drive_file_id IS NOT NULL THEN 'uploaded'
+        ELSE 'deleting'
+      END,
+      next_attempt_at = CASE
+        WHEN status = 'uploading' THEN next_attempt_at
+        ELSE now()
+      END,
+      locked_at = CASE WHEN status = 'uploading' THEN locked_at ELSE NULL END,
+      locked_by = CASE WHEN status = 'uploading' THEN locked_by ELSE NULL END,
+      last_error = CASE
+        WHEN drive_file_id IS NULL THEN 'Progress picture staging failed'
+        ELSE 'Progress picture replacement staging failed; existing Drive file preserved'
+      END,
+      updated_at = now()
+  WHERE id = p_photo_id
+    AND user_id = auth.uid()
+    AND status <> 'deleting';
+  RETURN FOUND;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.release_drive_progress_photo(uuid)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.release_drive_progress_photo(uuid)
+  TO authenticated;
+
+-- Parse both stable attachment paths and the public/signed URL forms stored by
+-- old clients. Keep this helper out of the exposed API schema.
+CREATE OR REPLACE FUNCTION app_private.coaching_chat_attachment_path(p_attachment jsonb)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+  SELECT CASE
+    WHEN jsonb_typeof(p_attachment) IS DISTINCT FROM 'object' THEN NULL
+    ELSE coalesce(
+      nullif(btrim(p_attachment->>'path'), ''),
+      nullif(
+        regexp_replace(
+          split_part(
+            split_part(btrim(coalesce(p_attachment->>'url', '')), '?', 1),
+            '#',
+            1
+          ),
+          '^.*/chat-attachments/',
+          ''
+        ),
+        ''
+      )
+    )
+  END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION app_private.coaching_chat_attachment_path(jsonb)
+  FROM PUBLIC, anon, authenticated, service_role;
+
+-- Rows created by the earlier bulk cleanup function have no trustworthy
+-- author provenance. Production has not received that migration yet; on the
+-- preview project discard any such pending rows instead of risking deletion
+-- of an object that was only named by untrusted attachment JSON.
+ALTER TABLE public.zane_chat_attachment_cleanup
+  ADD COLUMN IF NOT EXISTS owner_id uuid;
+DELETE FROM public.zane_chat_attachment_cleanup
+WHERE owner_id IS NULL;
+ALTER TABLE public.zane_chat_attachment_cleanup
+  ALTER COLUMN owner_id SET NOT NULL;
+ALTER TABLE public.zane_chat_attachment_cleanup
+  DROP CONSTRAINT IF EXISTS zane_chat_attachment_cleanup_owner_path_check;
+ALTER TABLE public.zane_chat_attachment_cleanup
+  ADD CONSTRAINT zane_chat_attachment_cleanup_owner_path_check
+  CHECK (owner_id::text = split_part(path, '/', 1));
+
+-- Every newly referenced object must live in the author's folder, carry the
+-- author's Storage owner metadata and not already be pending deletion. The
+-- advisory lock is shared with the delete trigger so a last-reference delete
+-- cannot race a new reference to the same object path.
+CREATE OR REPLACE FUNCTION public.zane_coaching_notes_guard_insert()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_attachment jsonb;
+  v_path text;
+BEGIN
+  NEW.created_at := now();
+
+  IF NEW.attachments IS NULL THEN
+    RETURN NEW;
+  END IF;
+  IF jsonb_typeof(NEW.attachments) <> 'array' THEN
+    RAISE EXCEPTION 'attachments must be an array';
+  END IF;
+
+  FOR v_attachment IN
+    SELECT value FROM jsonb_array_elements(NEW.attachments)
+  LOOP
+    v_path := app_private.coaching_chat_attachment_path(v_attachment);
+    IF v_path IS NULL
+       OR v_path !~ '^[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$'
+       OR split_part(v_path, '/', 1) <> NEW.author_id::text
+    THEN
+      RAISE EXCEPTION 'invalid coaching attachment path';
+    END IF;
+
+    PERFORM pg_advisory_xact_lock(hashtextextended(v_path, 19088743));
+
+    IF EXISTS (
+      SELECT 1
+      FROM public.zane_chat_attachment_cleanup AS cleanup
+      WHERE cleanup.path = v_path
+    ) THEN
+      RAISE EXCEPTION 'coaching attachment is pending deletion';
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1
+      FROM storage.objects AS object
+      WHERE object.bucket_id = 'chat-attachments'
+        AND object.name = v_path
+        AND object.owner_id::text = NEW.author_id::text
+    ) THEN
+      RAISE EXCEPTION 'coaching attachment object is not owned by the author';
+    END IF;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.zane_coaching_notes_guard_insert()
+  FROM PUBLIC, anon, authenticated;
+
+DROP POLICY IF EXISTS chat_attachment_read_participant ON storage.objects;
+CREATE POLICY chat_attachment_read_participant ON storage.objects
+  FOR SELECT TO authenticated
+  USING (
+    bucket_id = 'chat-attachments'
+    AND EXISTS (
+      SELECT 1
+      FROM public.zane_coaching_notes AS note
+      JOIN public.zane_coaching AS coaching
+        ON coaching.id = note.coaching_id
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(note.attachments) = 'array' THEN note.attachments
+          ELSE '[]'::jsonb
+        END
+      ) AS attachment(value)
+      CROSS JOIN LATERAL (
+        SELECT coalesce(
+          nullif(btrim(attachment.value->>'path'), ''),
+          nullif(
+            regexp_replace(
+              split_part(
+                split_part(btrim(coalesce(attachment.value->>'url', '')), '?', 1),
+                '#',
+                1
+              ),
+              '^.*/chat-attachments/',
+              ''
+            ),
+            ''
+          )
+        ) AS path
+      ) AS candidate
+      WHERE (
+          coaching.coach_id = (select auth.uid())
+          OR coaching.client_id = (select auth.uid())
+        )
+        AND candidate.path = name
+        AND note.author_id::text = split_part(name, '/', 1)
+        AND owner_id::text = note.author_id::text
+    )
+  );
+
+-- Capture object cleanup for every note deletion, including the existing
+-- direct single-note REST path. Only the final legitimate reference queues an
+-- author-owned object.
+CREATE OR REPLACE FUNCTION app_private.capture_coaching_note_attachment_cleanup()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_attachment jsonb;
+  v_path text;
+BEGIN
+  FOR v_attachment IN
+    SELECT value
+    FROM jsonb_array_elements(
+      CASE
+        WHEN jsonb_typeof(OLD.attachments) = 'array' THEN OLD.attachments
+        ELSE '[]'::jsonb
+      END
+    )
+  LOOP
+    v_path := app_private.coaching_chat_attachment_path(v_attachment);
+    IF v_path IS NULL
+       OR v_path !~ '^[0-9a-f-]{36}/[A-Za-z0-9][A-Za-z0-9._-]{0,159}$'
+       OR split_part(v_path, '/', 1) <> OLD.author_id::text
+    THEN
+      CONTINUE;
+    END IF;
+
+    PERFORM pg_catalog.pg_advisory_xact_lock(
+      pg_catalog.hashtextextended(v_path, 19088743)
+    );
+
+    IF EXISTS (
+      SELECT 1
+      FROM storage.objects AS object
+      WHERE object.bucket_id = 'chat-attachments'
+        AND object.name = v_path
+        AND object.owner_id::text = OLD.author_id::text
+    ) AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_coaching_notes AS survivor
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(survivor.attachments) = 'array' THEN survivor.attachments
+          ELSE '[]'::jsonb
+        END
+      ) AS survivor_attachment(value)
+      WHERE survivor.id <> OLD.id
+        AND app_private.coaching_chat_attachment_path(survivor_attachment.value) = v_path
+    ) THEN
+      INSERT INTO public.zane_chat_attachment_cleanup(path, owner_id)
+      VALUES (v_path, OLD.author_id)
+      ON CONFLICT (path) DO UPDATE
+      SET owner_id = EXCLUDED.owner_id
+      WHERE zane_chat_attachment_cleanup.owner_id = EXCLUDED.owner_id;
+    END IF;
+  END LOOP;
+
+  RETURN OLD;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION app_private.capture_coaching_note_attachment_cleanup()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS zane_coaching_notes_capture_attachment_cleanup
+  ON public.zane_coaching_notes;
+CREATE TRIGGER zane_coaching_notes_capture_attachment_cleanup
+BEFORE DELETE ON public.zane_coaching_notes
+FOR EACH ROW
+EXECUTE FUNCTION app_private.capture_coaching_note_attachment_cleanup();
+
+-- The Edge worker never consumes the cleanup table directly. This service-only
+-- RPC drops stale unsafe/shared tombstones and returns only absent objects or
+-- objects whose Storage owner still matches the UUID path prefix.
+CREATE OR REPLACE FUNCTION public.claim_chat_attachment_cleanup(p_limit integer DEFAULT 100)
+RETURNS TABLE(path text)
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_limit integer := greatest(1, least(coalesce(p_limit, 100), 500));
+BEGIN
+  DELETE FROM public.zane_chat_attachment_cleanup AS cleanup
+  WHERE cleanup.path IN (
+    SELECT candidate.path
+    FROM public.zane_chat_attachment_cleanup AS candidate
+    WHERE EXISTS (
+        SELECT 1
+        FROM storage.objects AS object
+        WHERE object.bucket_id = 'chat-attachments'
+          AND object.name = candidate.path
+          AND (
+            object.owner_id::text IS DISTINCT FROM candidate.owner_id::text
+            OR candidate.owner_id::text IS DISTINCT FROM split_part(candidate.path, '/', 1)
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM public.zane_coaching_notes AS survivor
+        CROSS JOIN LATERAL jsonb_array_elements(
+          CASE
+            WHEN jsonb_typeof(survivor.attachments) = 'array' THEN survivor.attachments
+            ELSE '[]'::jsonb
+          END
+        ) AS attachment(value)
+        WHERE app_private.coaching_chat_attachment_path(attachment.value) = candidate.path
+      )
+    ORDER BY candidate.created_at, candidate.path
+    LIMIT v_limit
+  );
+
+  RETURN QUERY
+  SELECT cleanup.path
+  FROM public.zane_chat_attachment_cleanup AS cleanup
+  WHERE (
+      NOT EXISTS (
+        SELECT 1
+        FROM storage.objects AS object
+        WHERE object.bucket_id = 'chat-attachments'
+          AND object.name = cleanup.path
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM storage.objects AS object
+        WHERE object.bucket_id = 'chat-attachments'
+          AND object.name = cleanup.path
+          AND object.owner_id::text = cleanup.owner_id::text
+          AND cleanup.owner_id::text = split_part(cleanup.path, '/', 1)
+      )
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_coaching_notes AS survivor
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE
+          WHEN jsonb_typeof(survivor.attachments) = 'array' THEN survivor.attachments
+          ELSE '[]'::jsonb
+        END
+      ) AS attachment(value)
+      WHERE app_private.coaching_chat_attachment_path(attachment.value) = cleanup.path
+    )
+  ORDER BY cleanup.created_at, cleanup.path
+  LIMIT v_limit;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_chat_attachment_cleanup(integer)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_chat_attachment_cleanup(integer)
+  TO service_role;
+
+-- Whole-scope deletion now relies on the same per-note trigger as direct note
+-- deletion. This removes the old, untrusted JSON-to-tombstone bulk insert.
+CREATE OR REPLACE FUNCTION public.delete_coaching_chat_scope(
+  p_caller_id uuid,
+  p_scope text,
+  p_scope_id text
+)
+RETURNS text[]
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_paths text[] := ARRAY[]::text[];
+  v_allowed boolean := false;
+  v_exists boolean := false;
+  v_is_admin boolean := false;
+BEGIN
+  IF p_caller_id IS NULL OR p_scope_id IS NULL THEN
+    RAISE EXCEPTION 'invalid chat cleanup request';
+  END IF;
+
+  IF p_scope = 'thread' THEN
+    SELECT true,
+           p_caller_id IN (coaching.coach_id, coaching.client_id)
+    INTO v_exists, v_allowed
+    FROM public.zane_coaching_threads AS thread
+    JOIN public.zane_coaching AS coaching
+      ON coaching.id = thread.coaching_id
+    WHERE thread.id = p_scope_id
+    FOR UPDATE OF thread, coaching;
+
+    IF NOT coalesce(v_exists, false) THEN
+      RETURN v_paths;
+    END IF;
+    IF NOT coalesce(v_allowed, false) THEN
+      RAISE EXCEPTION 'not allowed to delete this thread';
+    END IF;
+
+    PERFORM 1
+    FROM public.zane_coaching_notes AS note
+    WHERE note.thread_id = p_scope_id
+    ORDER BY note.id
+    FOR UPDATE;
+
+    SELECT coalesce(array_agg(candidate.path ORDER BY candidate.path), ARRAY[]::text[])
+    INTO v_paths
+    FROM (
+      SELECT DISTINCT app_private.coaching_chat_attachment_path(attachment.value) AS path
+      FROM public.zane_coaching_notes AS note
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(note.attachments) = 'array'
+          THEN note.attachments ELSE '[]'::jsonb END
+      ) AS attachment(value)
+      WHERE note.thread_id = p_scope_id
+    ) AS candidate
+    WHERE candidate.path IS NOT NULL;
+
+    DELETE FROM public.zane_coaching_notes WHERE thread_id = p_scope_id;
+    DELETE FROM public.zane_coaching_threads WHERE id = p_scope_id;
+    RETURN v_paths;
+  ELSIF p_scope = 'note' THEN
+    SELECT true,
+           note.author_id = p_caller_id
+             AND note.created_at >= now() - interval '60 minutes'
+    INTO v_exists, v_allowed
+    FROM public.zane_coaching_notes AS note
+    WHERE note.id = p_scope_id
+    FOR UPDATE;
+
+    IF NOT coalesce(v_exists, false) THEN
+      RETURN v_paths;
+    END IF;
+    IF NOT coalesce(v_allowed, false) THEN
+      RAISE EXCEPTION 'not allowed to delete this note';
+    END IF;
+
+    SELECT coalesce(array_agg(candidate.path ORDER BY candidate.path), ARRAY[]::text[])
+    INTO v_paths
+    FROM (
+      SELECT DISTINCT app_private.coaching_chat_attachment_path(attachment.value) AS path
+      FROM public.zane_coaching_notes AS note
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(note.attachments) = 'array'
+          THEN note.attachments ELSE '[]'::jsonb END
+      ) AS attachment(value)
+      WHERE note.id = p_scope_id
+    ) AS candidate
+    WHERE candidate.path IS NOT NULL;
+
+    DELETE FROM public.zane_coaching_notes WHERE id = p_scope_id;
+    RETURN v_paths;
+  ELSIF p_scope = 'support-ticket' THEN
+    SELECT EXISTS (
+      SELECT 1 FROM auth.users
+      WHERE id = p_caller_id
+        AND email = 'office@btc-prime.biz'
+    ) INTO v_is_admin;
+    IF NOT v_is_admin THEN
+      RAISE EXCEPTION 'admin access required';
+    END IF;
+    IF p_scope_id NOT LIKE 'support\_%' ESCAPE '\' THEN
+      RAISE EXCEPTION 'not a support ticket';
+    END IF;
+
+    SELECT true INTO v_exists
+    FROM public.zane_coaching AS coaching
+    WHERE coaching.id = p_scope_id
+    FOR UPDATE;
+    IF NOT coalesce(v_exists, false) THEN
+      RETURN v_paths;
+    END IF;
+
+    PERFORM 1
+    FROM public.zane_coaching_notes AS note
+    WHERE note.coaching_id = p_scope_id
+    ORDER BY note.id
+    FOR UPDATE;
+
+    SELECT coalesce(array_agg(candidate.path ORDER BY candidate.path), ARRAY[]::text[])
+    INTO v_paths
+    FROM (
+      SELECT DISTINCT app_private.coaching_chat_attachment_path(attachment.value) AS path
+      FROM public.zane_coaching_notes AS note
+      CROSS JOIN LATERAL jsonb_array_elements(
+        CASE WHEN jsonb_typeof(note.attachments) = 'array'
+          THEN note.attachments ELSE '[]'::jsonb END
+      ) AS attachment(value)
+      WHERE note.coaching_id = p_scope_id
+    ) AS candidate
+    WHERE candidate.path IS NOT NULL;
+
+    DELETE FROM public.zane_coaching_notes WHERE coaching_id = p_scope_id;
+    DELETE FROM public.zane_coaching_threads WHERE coaching_id = p_scope_id;
+    DELETE FROM public.zane_coaching WHERE id = p_scope_id;
+    RETURN v_paths;
+  END IF;
+
+  RAISE EXCEPTION 'invalid chat cleanup scope';
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.delete_coaching_chat_scope(uuid, text, text)
+  TO service_role;
+
+-- Set mutations take a key-share lock on their parent session. The sweeper's
+-- existing FOR UPDATE lock on that row is therefore the serialization point:
+-- a mutation commits before the sweep and is observed, or waits until after
+-- the session has been closed/deleted.
+CREATE OR REPLACE FUNCTION app_private.zane_sets_lock_session_activity()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+BEGIN
+  IF TG_OP = 'DELETE' THEN
+    PERFORM 1
+    FROM public.zane_sessions AS session
+    WHERE session.id = OLD.session_id
+    FOR KEY SHARE;
+    RETURN OLD;
+  END IF;
+
+  IF TG_OP = 'UPDATE' AND NEW.session_id IS DISTINCT FROM OLD.session_id THEN
+    PERFORM 1
+    FROM public.zane_sessions AS session
+    WHERE session.id IN (OLD.session_id, NEW.session_id)
+    ORDER BY session.id
+    FOR KEY SHARE;
+  ELSE
+    PERFORM 1
+    FROM public.zane_sessions AS session
+    WHERE session.id = NEW.session_id
+    FOR KEY SHARE;
+  END IF;
+  RETURN NEW;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION app_private.zane_sets_lock_session_activity()
+  FROM PUBLIC, anon, authenticated, service_role;
+
+DROP TRIGGER IF EXISTS zane_sets_lock_session_activity ON public.zane_sets;
+CREATE TRIGGER zane_sets_lock_session_activity
+BEFORE INSERT OR UPDATE OR DELETE ON public.zane_sets
+FOR EACH ROW EXECUTE FUNCTION app_private.zane_sets_lock_session_activity();
+
+-- Boot cleanup may only delete a sufficiently old caller-owned session after
+-- locking the session and settings pointer and rechecking every emptiness
+-- predicate in the DELETE itself.
+REVOKE EXECUTE ON FUNCTION public.delete_empty_orphan_session(text)
+  FROM PUBLIC, anon, authenticated;
+DROP FUNCTION public.delete_empty_orphan_session(text);
+
+CREATE OR REPLACE FUNCTION public.delete_empty_orphan_session(
+  p_session_id text,
+  p_started_before timestamptz
+)
+RETURNS boolean
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_session_id text;
+BEGIN
+  IF v_uid IS NULL OR p_session_id IS NULL OR p_started_before IS NULL THEN
+    RETURN false;
+  END IF;
+
+  SELECT session.id
+  INTO v_session_id
+  FROM public.zane_sessions AS session
+  WHERE session.id = p_session_id
+    AND session.user_id = v_uid
+    AND session.ended IS NULL
+    AND session.started_at IS NOT NULL
+    AND session.started_at < p_started_before
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RETURN false;
+  END IF;
+
+  PERFORM 1
+  FROM public.zane_user_settings AS settings
+  WHERE settings.user_id = v_uid
+  FOR UPDATE;
+
+  DELETE FROM public.zane_sessions AS session
+  WHERE session.id = v_session_id
+    AND session.user_id = v_uid
+    AND session.ended IS NULL
+    AND session.started_at IS NOT NULL
+    AND session.started_at < p_started_before
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = v_uid
+        AND settings.in_progress_session_id = session.id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_session_entries AS entry
+      WHERE entry.session_id = session.id
+    )
+    AND NOT EXISTS (
+      SELECT 1
+      FROM public.zane_sets AS sets
+      WHERE sets.session_id = session.id
+    );
+  RETURN FOUND;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.delete_empty_orphan_session(text, timestamptz)
+  FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_empty_orphan_session(text, timestamptz)
+  TO authenticated;
+
+-- Claiming a reminder is latency-sensitive and may run once per due user. Move
+-- retention to one bounded RPC call per cron invocation and give it a directly
+-- usable partial index.
+DROP INDEX IF EXISTS public.zane_reminder_delivery_claims_retention_idx;
+CREATE INDEX zane_reminder_delivery_claims_retention_idx
+  ON public.zane_reminder_delivery_claims (delivered_at)
+  WHERE delivered_at IS NOT NULL;
+
+CREATE OR REPLACE FUNCTION public.claim_reminder_delivery(
+  p_kind text,
+  p_user_id uuid,
+  p_expected_at timestamptz,
+  p_expected_text text,
+  p_target_text text,
+  p_claim_token uuid,
+  p_claimed_at timestamptz DEFAULT now()
+)
+RETURNS text
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_event_key text;
+  v_claimed_key text;
+BEGIN
+  IF p_user_id IS NULL OR p_claim_token IS NULL OR p_claimed_at IS NULL THEN
+    RETURN NULL;
+  END IF;
+
+  IF p_kind = 'generic' THEN
+    IF p_expected_at IS NULL OR NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = p_user_id
+        AND settings.push_enabled = true
+        AND settings.reminder_enabled = true
+        AND settings.next_reminder_at = p_expected_at
+        AND settings.next_reminder_at <= p_claimed_at
+        AND settings.next_reminder_at >= p_claimed_at - interval '1 hour'
+    ) THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := to_char(
+      p_expected_at AT TIME ZONE 'UTC',
+      'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+    );
+  ELSIF p_kind = 'water' THEN
+    IF NOT EXISTS (
+      SELECT 1
+      FROM public.zane_user_settings AS settings
+      WHERE settings.user_id = p_user_id
+        AND settings.push_enabled = true
+        AND settings.water_reminder_enabled = true
+        AND settings.water_last_push_at IS NOT DISTINCT FROM p_expected_at
+        AND (
+          settings.water_last_push_at IS NULL
+          OR settings.water_last_push_at <= p_claimed_at - interval '1 hour'
+        )
+    ) THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := coalesce(
+      to_char(p_expected_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'),
+      'never'
+    );
+  ELSIF p_kind = 'daily-log' THEN
+    IF p_target_text IS NULL
+       OR p_target_text !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$'
+       OR NOT EXISTS (
+         SELECT 1
+         FROM public.zane_user_settings AS settings
+         WHERE settings.user_id = p_user_id
+           AND settings.push_enabled = true
+           AND settings.daily_log_reminder_enabled = true
+           AND settings.daily_log_reminder_last_date IS NOT DISTINCT FROM p_expected_text
+           AND settings.daily_log_reminder_last_date IS DISTINCT FROM p_target_text
+       )
+    THEN
+      RETURN NULL;
+    END IF;
+    v_event_key := p_target_text;
+  ELSE
+    RETURN NULL;
+  END IF;
+
+  INSERT INTO public.zane_reminder_delivery_claims AS claim (
+    kind, user_id, event_key, expected_at, expected_text, target_text,
+    claim_token, claimed_at, delivered_at
+  )
+  VALUES (
+    p_kind, p_user_id, v_event_key, p_expected_at, p_expected_text, p_target_text,
+    p_claim_token, p_claimed_at, NULL
+  )
+  ON CONFLICT (kind, user_id, event_key) DO UPDATE
+  SET expected_at = EXCLUDED.expected_at,
+      expected_text = EXCLUDED.expected_text,
+      target_text = EXCLUDED.target_text,
+      claim_token = EXCLUDED.claim_token,
+      claimed_at = EXCLUDED.claimed_at
+  WHERE claim.delivered_at IS NULL
+    AND claim.claimed_at < now() - interval '15 minutes'
+  RETURNING event_key INTO v_claimed_key;
+
+  RETURN v_claimed_key;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.prune_reminder_delivery_claims(p_limit integer DEFAULT 500)
+RETURNS integer
+LANGUAGE plpgsql
+VOLATILE
+SECURITY DEFINER
+SET search_path TO 'public', 'pg_temp'
+AS $function$
+DECLARE
+  v_limit integer := greatest(1, least(coalesce(p_limit, 500), 5000));
+  v_deleted integer := 0;
+BEGIN
+  IF NOT pg_try_advisory_xact_lock(1941726301) THEN
+    RETURN 0;
+  END IF;
+
+  WITH doomed AS (
+    SELECT claim.kind, claim.user_id, claim.event_key
+    FROM public.zane_reminder_delivery_claims AS claim
+    WHERE claim.delivered_at < now() - interval '30 days'
+    ORDER BY claim.delivered_at, claim.kind, claim.user_id, claim.event_key
+    FOR UPDATE SKIP LOCKED
+    LIMIT v_limit
+  )
+  DELETE FROM public.zane_reminder_delivery_claims AS claim
+  USING doomed
+  WHERE claim.kind = doomed.kind
+    AND claim.user_id = doomed.user_id
+    AND claim.event_key = doomed.event_key;
+
+  GET DIAGNOSTICS v_deleted = ROW_COUNT;
+  RETURN v_deleted;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.claim_reminder_delivery(
+  text, uuid, timestamptz, text, text, uuid, timestamptz
+) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_reminder_delivery(
+  text, uuid, timestamptz, text, text, uuid, timestamptz
+) TO service_role;
+
+REVOKE EXECUTE ON FUNCTION public.prune_reminder_delivery_claims(integer)
+  FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.prune_reminder_delivery_claims(integer)
+  TO service_role;
+
+-- Migration 20260822123000: atomic shared-plan import and coach plan pushes.
+CREATE OR REPLACE FUNCTION public.social_import_plan_share(
+  p_share_id uuid,
+  p_schedule jsonb,
+  p_exercises jsonb
+)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_uid uuid := auth.uid();
+  v_share public.zane_social_plan_shares%ROWTYPE;
+  v_row jsonb;
+  v_schedule_id text;
+  v_existing_schedule_id text;
+  v_claimed boolean := false;
+  v_exercise_ids text[] := ARRAY[]::text[];
+  v_ex_id text;
+  v_day jsonb;
+  v_item jsonb;
+  v_tags text[];
+BEGIN
+  PERFORM app_private.require_social_available();
+  IF v_uid IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  IF p_schedule IS NULL OR jsonb_typeof(p_schedule) <> 'object'
+     OR p_exercises IS NULL OR jsonb_typeof(p_exercises) <> 'array'
+     OR octet_length(p_schedule::text) > 250000
+     OR octet_length(p_exercises::text) > 250000
+     OR jsonb_array_length(p_exercises) > 500 THEN
+    RAISE EXCEPTION 'Invalid plan payload';
+  END IF;
+
+  SELECT s.* INTO v_share
+  FROM public.zane_social_plan_shares s
+  WHERE s.id = p_share_id
+  FOR SHARE;
+
+  IF v_share.id IS NULL
+     OR NOT (
+       v_share.recipient_id = v_uid
+       OR (v_share.group_id IS NOT NULL AND public.social_is_group_member(v_share.group_id, v_uid))
+     )
+     OR EXISTS (
+       SELECT 1
+       FROM public.zane_social_blocks b
+       WHERE (v_share.recipient_id IS NOT NULL AND (
+         (b.blocker_id = v_uid AND b.blocked_id = v_share.sender_id)
+         OR (b.blocker_id = v_share.sender_id AND b.blocked_id = v_uid)
+       ))
+       OR (v_share.group_id IS NOT NULL AND EXISTS (
+         SELECT 1
+         FROM public.zane_social_group_members gm
+         WHERE gm.group_id = v_share.group_id
+           AND gm.user_id <> v_uid
+           AND (
+             (b.blocker_id = v_uid AND b.blocked_id = gm.user_id)
+             OR (b.blocker_id = gm.user_id AND b.blocked_id = v_uid)
+           )
+       ))
+     ) THEN
+    RAISE EXCEPTION 'Plan share not found';
+  END IF;
+
+  v_schedule_id := p_schedule->>'id';
+  IF v_schedule_id IS NULL OR v_schedule_id !~ '^[A-Za-z0-9_.:-]{1,200}$'
+     OR char_length(trim(coalesce(p_schedule->>'name', ''))) NOT BETWEEN 1 AND 140
+     OR jsonb_typeof(coalesce(p_schedule->'days', '[]'::jsonb)) <> 'array'
+     OR jsonb_array_length(coalesce(p_schedule->'days', '[]'::jsonb)) > 14
+     OR (p_schedule->'program_data' IS NOT NULL AND jsonb_typeof(p_schedule->'program_data') NOT IN ('object', 'null')) THEN
+    RAISE EXCEPTION 'Invalid schedule';
+  END IF;
+
+  INSERT INTO public.zane_social_plan_share_imports (share_id, user_id, schedule_id)
+  VALUES (p_share_id, v_uid, v_schedule_id)
+  ON CONFLICT (share_id, user_id) DO NOTHING
+  RETURNING true INTO v_claimed;
+
+  IF NOT coalesce(v_claimed, false) THEN
+    SELECT i.schedule_id INTO v_existing_schedule_id
+    FROM public.zane_social_plan_share_imports i
+    WHERE i.share_id = p_share_id AND i.user_id = v_uid;
+    RETURN jsonb_build_object(
+      'imported', false,
+      'schedule_id', v_existing_schedule_id
+    );
+  END IF;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_exercises)
+  LOOP
+    IF jsonb_typeof(v_row) <> 'object' THEN RAISE EXCEPTION 'Invalid exercise'; END IF;
+    v_ex_id := v_row->>'id';
+    IF v_ex_id IS NULL OR v_ex_id !~ '^[A-Za-z0-9_.:-]{1,200}$'
+       OR char_length(trim(coalesce(v_row->>'name', ''))) NOT BETWEEN 1 AND 120
+       OR jsonb_typeof(coalesce(v_row->'tags', '[]'::jsonb)) <> 'array'
+       OR jsonb_array_length(coalesce(v_row->'tags', '[]'::jsonb)) > 20
+       OR (nullif(v_row->>'progression_reps', '') IS NOT NULL
+         AND (v_row->>'progression_reps')::integer NOT BETWEEN 0 AND 1000)
+       OR (nullif(v_row->>'progression_increment', '') IS NOT NULL
+         AND (v_row->>'progression_increment')::numeric NOT BETWEEN 0 AND 1000)
+       OR jsonb_typeof(coalesce(v_row->'horn_labels', '[]'::jsonb)) NOT IN ('array', 'null') THEN
+      RAISE EXCEPTION 'Invalid exercise';
+    END IF;
+    IF v_ex_id = ANY(v_exercise_ids) THEN RAISE EXCEPTION 'Duplicate exercise'; END IF;
+    v_exercise_ids := array_append(v_exercise_ids, v_ex_id);
+    SELECT coalesce(array_agg(value), ARRAY[]::text[]) INTO v_tags
+    FROM jsonb_array_elements_text(coalesce(v_row->'tags', '[]'::jsonb));
+    IF EXISTS (SELECT 1 FROM unnest(v_tags) tag WHERE char_length(tag) > 40) THEN
+      RAISE EXCEPTION 'Invalid exercise tags';
+    END IF;
+    IF jsonb_typeof(v_row->'horn_labels') = 'array'
+       AND (
+         jsonb_array_length(v_row->'horn_labels') > 12
+         OR EXISTS (
+           SELECT 1
+           FROM jsonb_array_elements(v_row->'horn_labels') AS horn(label)
+           WHERE jsonb_typeof(horn.label) <> 'string'
+              OR char_length(horn.label #>> '{}') > 80
+         )
+       ) THEN
+      RAISE EXCEPTION 'Invalid horn labels';
+    END IF;
+    IF v_row->>'bodyweight_mode' IS NOT NULL
+       AND v_row->>'bodyweight_mode' NOT IN ('pull', 'plus_load') THEN
+      RAISE EXCEPTION 'Invalid bodyweight mode';
+    END IF;
+    IF v_row->>'youtube_url' IS NOT NULL
+       AND (char_length(v_row->>'youtube_url') > 500
+         OR v_row->>'youtube_url' !~* '^https://([a-z0-9-]+\.)?(youtube\.com|youtu\.be)/') THEN
+      RAISE EXCEPTION 'Invalid video URL';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_exercises e WHERE e.id = v_ex_id AND e.user_id <> v_uid) THEN
+      RAISE EXCEPTION 'Exercise identifier collision';
+    END IF;
+    INSERT INTO public.zane_exercises AS owned_exercise (
+      id, user_id, name, tags, note, category, unilateral, equipment,
+      progression_reps, movement_type, no_weight_reps, log_mode,
+      pull_bodyweight, bodyweight_mode, youtube_url, note_pinned,
+      progression_increment, horn_labels
+    ) VALUES (
+      v_ex_id, v_uid, trim(v_row->>'name'), v_tags,
+      left(coalesce(v_row->>'note', ''), 2000), nullif(left(v_row->>'category', 80), ''),
+      coalesce((v_row->>'unilateral')::boolean, false), nullif(left(v_row->>'equipment', 80), ''),
+      (v_row->>'progression_reps')::integer, nullif(left(v_row->>'movement_type', 40), ''),
+      coalesce((v_row->>'no_weight_reps')::boolean, false), nullif(left(v_row->>'log_mode', 40), ''),
+      coalesce((v_row->>'pull_bodyweight')::boolean, false), nullif(v_row->>'bodyweight_mode', ''),
+      nullif(v_row->>'youtube_url', ''), coalesce((v_row->>'note_pinned')::boolean, false),
+      nullif((v_row->>'progression_increment')::numeric, 0), v_row->'horn_labels'
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      name = EXCLUDED.name,
+      tags = EXCLUDED.tags,
+      note = EXCLUDED.note,
+      category = EXCLUDED.category,
+      unilateral = EXCLUDED.unilateral,
+      equipment = EXCLUDED.equipment,
+      progression_reps = EXCLUDED.progression_reps,
+      movement_type = EXCLUDED.movement_type,
+      no_weight_reps = EXCLUDED.no_weight_reps,
+      log_mode = EXCLUDED.log_mode,
+      pull_bodyweight = EXCLUDED.pull_bodyweight,
+      bodyweight_mode = EXCLUDED.bodyweight_mode,
+      youtube_url = EXCLUDED.youtube_url,
+      note_pinned = EXCLUDED.note_pinned,
+      progression_increment = EXCLUDED.progression_increment,
+      horn_labels = EXCLUDED.horn_labels
+    WHERE owned_exercise.user_id = v_uid;
+  END LOOP;
+
+  FOR v_day IN SELECT value FROM jsonb_array_elements(coalesce(p_schedule->'days', '[]'::jsonb))
+  LOOP
+    IF jsonb_typeof(v_day) <> 'object'
+       OR char_length(trim(coalesce(v_day->>'name', ''))) NOT BETWEEN 1 AND 80
+       OR jsonb_typeof(coalesce(v_day->'items', '[]'::jsonb)) <> 'array'
+       OR jsonb_array_length(coalesce(v_day->'items', '[]'::jsonb)) > 100 THEN
+      RAISE EXCEPTION 'Invalid training day';
+    END IF;
+    FOR v_item IN SELECT value FROM jsonb_array_elements(coalesce(v_day->'items', '[]'::jsonb))
+    LOOP
+      v_ex_id := v_item->>'exId';
+      IF jsonb_typeof(v_item) <> 'object' OR v_ex_id IS NULL
+         OR coalesce((v_item->>'sets')::integer, 0) NOT BETWEEN 0 AND 30
+         OR NOT EXISTS (
+           SELECT 1 FROM public.zane_exercises e
+           WHERE e.id = v_ex_id AND e.user_id = v_uid
+         ) THEN
+        RAISE EXCEPTION 'Invalid training item';
+      END IF;
+    END LOOP;
+  END LOOP;
+
+  IF EXISTS (SELECT 1 FROM public.zane_schedules s WHERE s.id = v_schedule_id AND s.user_id <> v_uid) THEN
+    RAISE EXCEPTION 'Schedule identifier collision';
+  END IF;
+  INSERT INTO public.zane_schedules AS owned_schedule (
+    id, user_id, name, days, archived, versions, is_flex,
+    program_type, program_data, is_template
+  ) VALUES (
+    v_schedule_id, v_uid, trim(p_schedule->>'name'), coalesce(p_schedule->'days', '[]'::jsonb),
+    false, '[]'::jsonb, false,
+    CASE WHEN p_schedule->>'program_type' = '531' THEN '531' ELSE NULL END,
+    p_schedule->'program_data', false
+  )
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    days = EXCLUDED.days,
+    archived = false,
+    versions = '[]'::jsonb,
+    is_flex = false,
+    program_type = EXCLUDED.program_type,
+    program_data = EXCLUDED.program_data,
+    is_template = false
+  WHERE owned_schedule.user_id = v_uid;
+
+  UPDATE public.zane_social_plan_shares
+  SET imported_at = coalesce(imported_at, now())
+  WHERE id = p_share_id AND recipient_id = v_uid;
+
+  RETURN jsonb_build_object('imported', true, 'schedule_id', v_schedule_id);
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.push_training_plan_to_client(
+  p_coaching_id text,
+  p_operation_id text,
+  p_schedule jsonb,
+  p_exercises jsonb
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_caller uuid := auth.uid();
+  v_client uuid;
+  v_existing_schedule public.zane_schedules%ROWTYPE;
+  v_row jsonb;
+  v_version jsonb;
+  v_days jsonb;
+  v_day jsonb;
+  v_item jsonb;
+  v_schedule_id text := p_schedule->>'id';
+  v_exercise_id text;
+  v_exercise_ids text[] := ARRAY[]::text[];
+  v_tags text[];
+BEGIN
+  IF v_caller IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  SELECT c.client_id INTO v_client
+  FROM public.zane_coaching c
+  WHERE c.id = p_coaching_id
+    AND c.coach_id = v_caller
+    AND c.status = 'active'
+    AND c.id NOT LIKE 'support_%'
+  FOR UPDATE;
+  IF v_client IS NULL THEN RAISE EXCEPTION 'Active coaching relationship required'; END IF;
+
+  IF p_schedule IS NULL OR jsonb_typeof(p_schedule) <> 'object'
+     OR p_exercises IS NULL OR jsonb_typeof(p_exercises) <> 'array'
+     OR p_operation_id IS DISTINCT FROM v_schedule_id
+     OR v_schedule_id !~ '^[A-Za-z0-9_.:-]{1,200}$'
+     OR char_length(trim(coalesce(p_schedule->>'name', ''))) NOT BETWEEN 1 AND 120
+     OR jsonb_typeof(coalesce(p_schedule->'days', '[]'::jsonb)) <> 'array'
+     OR jsonb_array_length(coalesce(p_schedule->'days', '[]'::jsonb)) > 14
+     OR jsonb_typeof(coalesce(p_schedule->'versions', '[]'::jsonb)) <> 'array'
+     OR jsonb_array_length(coalesce(p_schedule->'versions', '[]'::jsonb)) > 52
+     OR jsonb_array_length(p_exercises) > 500
+     OR octet_length((p_schedule || jsonb_build_object('exercises', p_exercises))::text) > 500000
+     OR (p_schedule->'program_data' IS NOT NULL
+       AND jsonb_typeof(p_schedule->'program_data') NOT IN ('object', 'null'))
+     OR (p_schedule->>'program_type' IS NOT NULL AND p_schedule->>'program_type' <> '531')
+     OR (p_schedule->>'mesocycle_autoregulate_mode' IS NOT NULL
+       AND p_schedule->>'mesocycle_autoregulate_mode' <> 'load') THEN
+    RAISE EXCEPTION 'Invalid training plan payload';
+  END IF;
+
+  SELECT s.* INTO v_existing_schedule
+  FROM public.zane_schedules s
+  WHERE s.id = v_schedule_id
+  FOR UPDATE;
+  IF v_existing_schedule.id IS NOT NULL THEN
+    IF v_existing_schedule.user_id <> v_client THEN
+      RAISE EXCEPTION 'Schedule identifier collision';
+    END IF;
+    RETURN v_schedule_id;
+  END IF;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_exercises)
+  LOOP
+    v_exercise_id := v_row->>'id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_exercise_id IS NULL OR v_exercise_id !~ '^[A-Za-z0-9_.:-]{1,200}$'
+       OR char_length(trim(coalesce(v_row->>'name', ''))) NOT BETWEEN 1 AND 120
+       OR jsonb_typeof(coalesce(v_row->'tags', '[]'::jsonb)) <> 'array'
+       OR jsonb_array_length(coalesce(v_row->'tags', '[]'::jsonb)) > 20
+       OR (nullif(v_row->>'progression_reps', '') IS NOT NULL
+         AND (v_row->>'progression_reps')::integer NOT BETWEEN 0 AND 1000)
+       OR (nullif(v_row->>'progression_increment', '') IS NOT NULL
+         AND (v_row->>'progression_increment')::numeric NOT BETWEEN 0 AND 100000)
+       OR jsonb_typeof(coalesce(v_row->'horn_labels', '[]'::jsonb)) NOT IN ('array', 'null')
+       OR (v_row->>'movement_type' IS NOT NULL
+         AND v_row->>'movement_type' NOT IN ('bilateral', 'unilateral', 'assisted', 'mobility', 'cardio'))
+       OR (v_row->>'log_mode' IS NOT NULL
+         AND v_row->>'log_mode' NOT IN ('checkbox', 'reps', 'time', 'weight', 'weight_reps'))
+       OR (v_row->>'bodyweight_mode' IS NOT NULL
+         AND v_row->>'bodyweight_mode' NOT IN ('pull', 'plus_load')) THEN
+      RAISE EXCEPTION 'Invalid exercise';
+    END IF;
+    IF v_exercise_id = ANY(v_exercise_ids) THEN RAISE EXCEPTION 'Duplicate exercise'; END IF;
+    v_exercise_ids := array_append(v_exercise_ids, v_exercise_id);
+    SELECT coalesce(array_agg(value), ARRAY[]::text[]) INTO v_tags
+    FROM jsonb_array_elements_text(coalesce(v_row->'tags', '[]'::jsonb));
+    IF EXISTS (SELECT 1 FROM unnest(v_tags) tag WHERE char_length(tag) > 40) THEN
+      RAISE EXCEPTION 'Invalid exercise tags';
+    END IF;
+    IF jsonb_typeof(v_row->'horn_labels') = 'array'
+       AND (
+         jsonb_array_length(v_row->'horn_labels') > 12
+         OR EXISTS (
+           SELECT 1 FROM jsonb_array_elements(v_row->'horn_labels') AS horn(label)
+           WHERE jsonb_typeof(horn.label) <> 'string'
+              OR char_length(horn.label #>> '{}') > 80
+         )
+       ) THEN
+      RAISE EXCEPTION 'Invalid horn labels';
+    END IF;
+    IF v_row->>'youtube_url' IS NOT NULL
+       AND (char_length(v_row->>'youtube_url') > 500
+         OR v_row->>'youtube_url' !~* '^https://([a-z0-9-]+\.)?(youtube\.com|youtu\.be)/') THEN
+      RAISE EXCEPTION 'Invalid video URL';
+    END IF;
+    IF EXISTS (
+      SELECT 1 FROM public.zane_exercises e
+      WHERE e.id = v_exercise_id AND e.user_id <> v_client
+    ) THEN
+      RAISE EXCEPTION 'Exercise identifier collision';
+    END IF;
+    INSERT INTO public.zane_exercises AS owned_exercise (
+      id, user_id, name, tags, note, category, unilateral, equipment,
+      progression_reps, movement_type, no_weight_reps, log_mode,
+      pull_bodyweight, bodyweight_mode, youtube_url, note_pinned,
+      progression_increment, horn_labels
+    ) VALUES (
+      v_exercise_id, v_client, trim(v_row->>'name'), v_tags,
+      left(coalesce(v_row->>'note', ''), 2000), nullif(left(v_row->>'category', 80), ''),
+      coalesce((v_row->>'unilateral')::boolean, false), nullif(left(v_row->>'equipment', 80), ''),
+      (v_row->>'progression_reps')::integer, nullif(v_row->>'movement_type', ''),
+      coalesce((v_row->>'no_weight_reps')::boolean, false), nullif(v_row->>'log_mode', ''),
+      coalesce((v_row->>'pull_bodyweight')::boolean, false), nullif(v_row->>'bodyweight_mode', ''),
+      nullif(v_row->>'youtube_url', ''), coalesce((v_row->>'note_pinned')::boolean, false),
+      nullif((v_row->>'progression_increment')::numeric, 0), v_row->'horn_labels'
+    )
+    ON CONFLICT (id) DO NOTHING;
+  END LOOP;
+
+  FOR v_version IN SELECT value FROM jsonb_array_elements(coalesce(p_schedule->'versions', '[]'::jsonb))
+  LOOP
+    IF jsonb_typeof(v_version) <> 'object'
+       OR coalesce(v_version->>'validFrom', '') !~ '^\d{4}-\d{2}-\d{2}$'
+       OR jsonb_typeof(v_version->'days') IS DISTINCT FROM 'array'
+       OR jsonb_array_length(v_version->'days') > 14 THEN
+      RAISE EXCEPTION 'Invalid plan version';
+    END IF;
+  END LOOP;
+
+  FOR v_days IN
+    SELECT p_schedule->'days'
+    UNION ALL
+    SELECT value->'days'
+    FROM jsonb_array_elements(coalesce(p_schedule->'versions', '[]'::jsonb))
+  LOOP
+    FOR v_day IN SELECT value FROM jsonb_array_elements(v_days)
+    LOOP
+      IF jsonb_typeof(v_day) <> 'object'
+         OR coalesce(v_day->>'id', '') !~ '^[A-Za-z0-9_.:-]{1,200}$'
+         OR char_length(trim(coalesce(v_day->>'name', ''))) NOT BETWEEN 1 AND 80
+         OR jsonb_typeof(coalesce(v_day->'items', '[]'::jsonb)) <> 'array'
+         OR jsonb_array_length(coalesce(v_day->'items', '[]'::jsonb)) > 100
+         OR ((v_day->>'weekday') IS NOT NULL AND (v_day->>'weekday')::integer NOT BETWEEN 0 AND 6) THEN
+        RAISE EXCEPTION 'Invalid training day';
+      END IF;
+      FOR v_item IN SELECT value FROM jsonb_array_elements(coalesce(v_day->'items', '[]'::jsonb))
+      LOOP
+        v_exercise_id := v_item->>'exId';
+        IF jsonb_typeof(v_item) <> 'object'
+           OR v_exercise_id IS NULL
+           OR coalesce((v_item->>'sets')::integer, 0) NOT BETWEEN 0 AND 30
+           OR NOT EXISTS (
+             SELECT 1 FROM public.zane_exercises e
+             WHERE e.id = v_exercise_id AND e.user_id = v_client
+           ) THEN
+          RAISE EXCEPTION 'Invalid training item';
+        END IF;
+      END LOOP;
+    END LOOP;
+  END LOOP;
+
+  INSERT INTO public.zane_schedules (
+    id, user_id, name, days, archived, versions, is_flex,
+    sessions_per_week, mesocycle_weeks, mesocycle_start_rir,
+    mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate,
+    mesocycle_autoregulate_mode, program_type, program_data, is_template
+  ) VALUES (
+    v_schedule_id, v_client, trim(p_schedule->>'name'), p_schedule->'days', false,
+    coalesce(p_schedule->'versions', '[]'::jsonb), coalesce((p_schedule->>'is_flex')::boolean, false),
+    (p_schedule->>'sessions_per_week')::integer, (p_schedule->>'mesocycle_weeks')::integer,
+    (p_schedule->>'mesocycle_start_rir')::integer, (p_schedule->>'mesocycle_end_rir')::integer,
+    coalesce((p_schedule->>'mesocycle_rir_enabled')::boolean, true),
+    coalesce((p_schedule->>'mesocycle_autoregulate')::boolean, false),
+    nullif(p_schedule->>'mesocycle_autoregulate_mode', ''),
+    nullif(p_schedule->>'program_type', ''), p_schedule->'program_data', false
+  )
+  ON CONFLICT (id) DO NOTHING;
+  IF NOT FOUND THEN
+    SELECT s.* INTO v_existing_schedule
+    FROM public.zane_schedules s
+    WHERE s.id = v_schedule_id;
+    IF v_existing_schedule.id IS NULL OR v_existing_schedule.user_id <> v_client THEN
+      RAISE EXCEPTION 'Schedule identifier collision';
+    END IF;
+  END IF;
+  RETURN v_schedule_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.push_meal_plan_to_client(
+  p_coaching_id text,
+  p_operation_id text,
+  p_plan jsonb,
+  p_recipes jsonb,
+  p_slots jsonb,
+  p_activate boolean
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_caller uuid := auth.uid();
+  v_client uuid;
+  v_existing_plan public.zane_food_meal_plans%ROWTYPE;
+  v_row jsonb;
+  v_id text;
+  v_plan_id text := p_plan->>'id';
+BEGIN
+  IF v_caller IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  SELECT c.client_id INTO v_client
+  FROM public.zane_coaching c
+  WHERE c.id = p_coaching_id
+    AND c.coach_id = v_caller
+    AND c.status = 'active'
+    AND c.id NOT LIKE 'support_%'
+  FOR UPDATE;
+  IF v_client IS NULL THEN RAISE EXCEPTION 'Active coaching relationship required'; END IF;
+  IF p_plan IS NULL OR jsonb_typeof(p_plan) <> 'object'
+     OR p_recipes IS NULL OR jsonb_typeof(p_recipes) <> 'array'
+     OR p_slots IS NULL OR jsonb_typeof(p_slots) <> 'array'
+     OR p_operation_id IS DISTINCT FROM v_plan_id
+     OR v_plan_id !~ '^mealpush_[a-z0-9]{2,200}$'
+     OR char_length(trim(coalesce(p_plan->>'name', ''))) NOT BETWEEN 1 AND 200
+     OR jsonb_array_length(p_recipes) > 100
+     OR jsonb_array_length(p_slots) > 500
+     OR octet_length((p_plan || jsonb_build_object('recipes', p_recipes, 'slots', p_slots))::text) > 1000000 THEN
+    RAISE EXCEPTION 'Invalid meal plan payload';
+  END IF;
+
+  SELECT p.* INTO v_existing_plan
+  FROM public.zane_food_meal_plans p
+  WHERE p.id = v_plan_id
+  FOR UPDATE;
+  IF v_existing_plan.id IS NOT NULL
+     AND (v_existing_plan.user_id <> v_client OR v_existing_plan.coach_id IS DISTINCT FROM v_caller) THEN
+    RAISE EXCEPTION 'Plan identifier collision';
+  END IF;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_recipes)
+  LOOP
+    v_id := v_row->>'id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_id IS NULL
+       OR v_id !~ '^mealrecipe_[a-z0-9]{2,200}$'
+       OR char_length(trim(coalesce(v_row->>'name', ''))) NOT BETWEEN 1 AND 200
+       OR jsonb_typeof(coalesce(v_row->'items', '[]'::jsonb)) <> 'array'
+       OR coalesce((v_row->>'portions')::integer, 0) NOT BETWEEN 1 AND 10000
+       OR octet_length(coalesce(v_row->'items', '[]'::jsonb)::text) > 500000 THEN
+      RAISE EXCEPTION 'Invalid recipe';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_food_recipes r WHERE r.id = v_id AND r.user_id <> v_client) THEN
+      RAISE EXCEPTION 'Recipe identifier collision';
+    END IF;
+    INSERT INTO public.zane_food_recipes AS owned_recipe (id, user_id, name, items, portions, updated_at)
+    VALUES (v_id, v_client, trim(v_row->>'name'), coalesce(v_row->'items', '[]'::jsonb), (v_row->>'portions')::integer, now())
+    ON CONFLICT (id) DO UPDATE SET
+      name = EXCLUDED.name, items = EXCLUDED.items, portions = EXCLUDED.portions, updated_at = now()
+    WHERE owned_recipe.user_id = v_client;
+  END LOOP;
+
+  INSERT INTO public.zane_food_meal_plans AS owned_plan (id, user_id, name, archived, is_template, coach_id, updated_at)
+  VALUES (v_plan_id, v_client, trim(p_plan->>'name'), false, false, v_caller, now())
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name, archived = false, is_template = false, coach_id = v_caller, updated_at = now()
+  WHERE owned_plan.user_id = v_client AND owned_plan.coach_id = v_caller;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_slots)
+  LOOP
+    v_id := v_row->>'id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_id IS NULL
+       OR v_id !~ '^mealslot_[a-z0-9]{2,200}$'
+       OR v_row->>'meal_plan_id' IS DISTINCT FROM v_plan_id
+       OR char_length(trim(coalesce(v_row->>'food_name', ''))) NOT BETWEEN 1 AND 200
+       OR coalesce((v_row->>'quantity_g')::numeric, 0) <= 0
+       OR coalesce((v_row->>'calories')::integer, -1) < 0
+       OR coalesce((v_row->>'protein')::numeric, -1) < 0
+       OR coalesce((v_row->>'carbs')::numeric, -1) < 0
+       OR coalesce((v_row->>'fat')::numeric, -1) < 0
+       OR coalesce((v_row->>'hour')::integer, -1) NOT BETWEEN 0 AND 23
+       OR coalesce(v_row->>'day_type', 'any') NOT IN ('any', 'training', 'rest')
+       OR (v_row->'recipe_items' IS NOT NULL AND jsonb_typeof(v_row->'recipe_items') NOT IN ('array', 'null')) THEN
+      RAISE EXCEPTION 'Invalid meal plan slot';
+    END IF;
+    IF nullif(v_row->>'recipe_id', '') IS NOT NULL
+       AND NOT EXISTS (
+         SELECT 1
+         FROM public.zane_food_recipes recipe
+         WHERE recipe.id = v_row->>'recipe_id'
+           AND recipe.user_id = v_client
+       ) THEN
+      RAISE EXCEPTION 'Invalid meal plan recipe';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_food_template_slots s WHERE s.id = v_id AND s.user_id <> v_client) THEN
+      RAISE EXCEPTION 'Meal slot identifier collision';
+    END IF;
+    INSERT INTO public.zane_food_template_slots AS owned_slot (
+      id, user_id, food_id, food_name, brand, source, quantity_g, calories,
+      protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items,
+      recipe_id, logged_total_portions, logged_cooked_grams,
+      logged_cooked_weight_g, hour, day_type, sort_idx, meal_plan_id
+    ) VALUES (
+      v_id, v_client, nullif(v_row->>'food_id', ''), trim(v_row->>'food_name'),
+      nullif(left(v_row->>'brand', 200), ''), nullif(left(v_row->>'source', 40), ''),
+      (v_row->>'quantity_g')::numeric, (v_row->>'calories')::integer,
+      (v_row->>'protein')::numeric, (v_row->>'carbs')::numeric, (v_row->>'fat')::numeric,
+      (v_row->>'fiber')::numeric, (v_row->>'sugar')::numeric, (v_row->>'sat_fat')::numeric,
+      (v_row->>'sodium_mg')::numeric, v_row->'recipe_items', nullif(v_row->>'recipe_id', ''),
+      (v_row->>'logged_total_portions')::integer, (v_row->>'logged_cooked_grams')::numeric,
+      (v_row->>'logged_cooked_weight_g')::numeric, (v_row->>'hour')::integer,
+      coalesce(v_row->>'day_type', 'any'), coalesce((v_row->>'sort_idx')::integer, 0), v_plan_id
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      food_id = EXCLUDED.food_id, food_name = EXCLUDED.food_name, brand = EXCLUDED.brand,
+      source = EXCLUDED.source, quantity_g = EXCLUDED.quantity_g, calories = EXCLUDED.calories,
+      protein = EXCLUDED.protein, carbs = EXCLUDED.carbs, fat = EXCLUDED.fat,
+      fiber = EXCLUDED.fiber, sugar = EXCLUDED.sugar, sat_fat = EXCLUDED.sat_fat,
+      sodium_mg = EXCLUDED.sodium_mg, recipe_items = EXCLUDED.recipe_items,
+      recipe_id = EXCLUDED.recipe_id, logged_total_portions = EXCLUDED.logged_total_portions,
+      logged_cooked_grams = EXCLUDED.logged_cooked_grams,
+      logged_cooked_weight_g = EXCLUDED.logged_cooked_weight_g, hour = EXCLUDED.hour,
+      day_type = EXCLUDED.day_type, sort_idx = EXCLUDED.sort_idx, meal_plan_id = v_plan_id
+    WHERE owned_slot.user_id = v_client;
+  END LOOP;
+
+  INSERT INTO public.zane_user_settings (user_id, plan_mode, active_meal_template_id)
+  VALUES (v_client, true, CASE WHEN p_activate THEN v_plan_id ELSE NULL END)
+  ON CONFLICT (user_id) DO UPDATE SET
+    plan_mode = true,
+    active_meal_template_id = CASE
+      WHEN p_activate THEN v_plan_id
+      ELSE public.zane_user_settings.active_meal_template_id
+    END;
+  RETURN v_plan_id;
+END;
+$function$;
+
+CREATE OR REPLACE FUNCTION public.push_medication_plan_to_client(
+  p_coaching_id text,
+  p_operation_id text,
+  p_plan jsonb,
+  p_medications jsonb,
+  p_plan_items jsonb,
+  p_schedule_slots jsonb
+)
+RETURNS text
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = ''
+AS $function$
+DECLARE
+  v_caller uuid := auth.uid();
+  v_client uuid;
+  v_existing_plan public.zane_medication_plans%ROWTYPE;
+  v_row jsonb;
+  v_id text;
+  v_medication_id text;
+  v_plan_id text := p_plan->>'id';
+  v_weekdays integer[];
+BEGIN
+  IF v_caller IS NULL THEN RAISE EXCEPTION 'Authentication required'; END IF;
+  SELECT c.client_id INTO v_client
+  FROM public.zane_coaching c
+  WHERE c.id = p_coaching_id
+    AND c.coach_id = v_caller
+    AND c.status = 'active'
+    AND c.id NOT LIKE 'support_%'
+  FOR UPDATE;
+  IF v_client IS NULL THEN RAISE EXCEPTION 'Active coaching relationship required'; END IF;
+  IF p_plan IS NULL OR jsonb_typeof(p_plan) <> 'object'
+     OR p_medications IS NULL OR jsonb_typeof(p_medications) <> 'array'
+     OR p_plan_items IS NULL OR jsonb_typeof(p_plan_items) <> 'array'
+     OR p_schedule_slots IS NULL OR jsonb_typeof(p_schedule_slots) <> 'array'
+     OR p_operation_id IS DISTINCT FROM v_plan_id
+     OR v_plan_id !~ '^medpush_[a-z0-9]{2,200}$'
+     OR char_length(trim(coalesce(p_plan->>'name', ''))) NOT BETWEEN 1 AND 200
+     OR jsonb_array_length(p_medications) > 100
+     OR jsonb_array_length(p_plan_items) > 500
+     OR jsonb_array_length(p_schedule_slots) > 1000
+     OR octet_length((p_plan || jsonb_build_object('medications', p_medications, 'items', p_plan_items, 'slots', p_schedule_slots))::text) > 1000000 THEN
+    RAISE EXCEPTION 'Invalid medication plan payload';
+  END IF;
+
+  SELECT p.* INTO v_existing_plan
+  FROM public.zane_medication_plans p
+  WHERE p.id = v_plan_id
+  FOR UPDATE;
+  IF v_existing_plan.id IS NOT NULL
+     AND (v_existing_plan.user_id <> v_client OR v_existing_plan.coach_id IS DISTINCT FROM v_caller) THEN
+    RAISE EXCEPTION 'Plan identifier collision';
+  END IF;
+  IF v_existing_plan.id IS NOT NULL THEN RETURN v_plan_id; END IF;
+
+  INSERT INTO public.zane_medication_plans AS owned_plan (id, user_id, name, archived, is_template, coach_id, active, updated_at)
+  VALUES (v_plan_id, v_client, trim(p_plan->>'name'), false, false, v_caller, true, now())
+  ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name, archived = false, is_template = false, coach_id = v_caller,
+    active = true, updated_at = now()
+  WHERE owned_plan.user_id = v_client AND owned_plan.coach_id = v_caller;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_medications)
+  LOOP
+    v_id := v_row->>'id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_id IS NULL
+       OR v_id !~ '^pushmed_[a-z0-9]{2,200}$'
+       OR char_length(trim(coalesce(v_row->>'name', ''))) NOT BETWEEN 1 AND 200
+       OR char_length(coalesce(v_row->>'unit_label', 'pills')) NOT BETWEEN 1 AND 40
+       OR ((v_row->>'package_size') IS NOT NULL AND (v_row->>'package_size')::numeric <= 0) THEN
+      RAISE EXCEPTION 'Invalid medication';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_medications m WHERE m.id = v_id AND m.user_id <> v_client) THEN
+      RAISE EXCEPTION 'Medication identifier collision';
+    END IF;
+    INSERT INTO public.zane_medications AS owned_medication (
+      id, user_id, name, brand, category, unit_label, package_size,
+      stock_baseline, stock_set_at, archived, exclude_from_pillbox,
+      low_stock_threshold, exclude_from_low_stock, track_stock, updated_at
+    ) VALUES (
+      v_id, v_client, trim(v_row->>'name'), nullif(left(v_row->>'brand', 200), ''),
+      nullif(left(v_row->>'category', 80), ''), coalesce(nullif(left(v_row->>'unit_label', 40), ''), 'pills'),
+      (v_row->>'package_size')::numeric, NULL, NULL, coalesce((v_row->>'archived')::boolean, false),
+      false, NULL, false, false, now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      name = EXCLUDED.name, brand = EXCLUDED.brand, category = EXCLUDED.category,
+      unit_label = EXCLUDED.unit_label, package_size = EXCLUDED.package_size,
+      stock_baseline = NULL, stock_set_at = NULL, archived = EXCLUDED.archived,
+      exclude_from_pillbox = false, low_stock_threshold = NULL,
+      exclude_from_low_stock = false, track_stock = false, updated_at = now()
+    WHERE owned_medication.user_id = v_client;
+  END LOOP;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_plan_items)
+  LOOP
+    v_id := v_row->>'id';
+    v_medication_id := v_row->>'medication_id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_id IS NULL
+       OR v_id !~ '^meditem_[a-z0-9]{2,200}$'
+       OR v_row->>'medication_plan_id' IS DISTINCT FROM v_plan_id
+       OR NOT EXISTS (
+         SELECT 1
+         FROM jsonb_array_elements(p_medications) AS source_medication(value)
+         WHERE source_medication.value->>'id' = v_medication_id
+       )
+       OR NOT EXISTS (
+         SELECT 1
+         FROM public.zane_medications m
+         WHERE m.id = v_medication_id AND m.user_id = v_client
+       ) THEN
+      RAISE EXCEPTION 'Invalid medication plan item';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_medication_plan_items i WHERE i.id = v_id AND i.user_id <> v_client) THEN
+      RAISE EXCEPTION 'Medication plan item identifier collision';
+    END IF;
+    INSERT INTO public.zane_medication_plan_items AS owned_item (id, user_id, medication_plan_id, medication_id)
+    VALUES (v_id, v_client, v_plan_id, v_medication_id)
+    ON CONFLICT (id) DO UPDATE SET medication_plan_id = v_plan_id, medication_id = EXCLUDED.medication_id
+    WHERE owned_item.user_id = v_client;
+  END LOOP;
+
+  FOR v_row IN SELECT value FROM jsonb_array_elements(p_schedule_slots)
+  LOOP
+    v_id := v_row->>'id';
+    v_medication_id := v_row->>'medication_id';
+    IF jsonb_typeof(v_row) <> 'object'
+       OR v_id IS NULL
+       OR v_id !~ '^medslot_[a-z0-9]{2,200}$'
+       OR v_row->>'medication_plan_id' IS DISTINCT FROM v_plan_id
+       OR jsonb_typeof(coalesce(v_row->'weekdays', '[0,1,2,3,4,5,6]'::jsonb)) <> 'array'
+       OR coalesce((v_row->>'hour')::integer, -1) NOT BETWEEN 0 AND 23
+       OR coalesce((v_row->>'dose_qty')::numeric, 0) <= 0
+       OR ((v_row->>'interval_days') IS NOT NULL AND (v_row->>'interval_days')::integer <= 0)
+       OR ((v_row->>'interval_days') IS NOT NULL AND (v_row->>'start_date') IS NULL)
+       OR ((v_row->>'start_date') IS NOT NULL AND (v_row->>'end_date') IS NOT NULL
+         AND (v_row->>'end_date')::date < (v_row->>'start_date')::date)
+       OR NOT EXISTS (
+         SELECT 1
+         FROM jsonb_array_elements(p_medications) AS source_medication(value)
+         WHERE source_medication.value->>'id' = v_medication_id
+       )
+       OR NOT EXISTS (
+         SELECT 1 FROM public.zane_medications m
+         WHERE m.id = v_medication_id AND m.user_id = v_client
+       ) THEN
+      RAISE EXCEPTION 'Invalid medication schedule slot';
+    END IF;
+    SELECT coalesce(array_agg(value::integer), ARRAY[]::integer[]) INTO v_weekdays
+    FROM jsonb_array_elements_text(coalesce(v_row->'weekdays', '[0,1,2,3,4,5,6]'::jsonb));
+    IF EXISTS (SELECT 1 FROM unnest(v_weekdays) weekday WHERE weekday NOT BETWEEN 0 AND 6) THEN
+      RAISE EXCEPTION 'Invalid weekdays';
+    END IF;
+    IF EXISTS (SELECT 1 FROM public.zane_medication_schedule_slots s WHERE s.id = v_id AND s.user_id <> v_client) THEN
+      RAISE EXCEPTION 'Medication slot identifier collision';
+    END IF;
+    INSERT INTO public.zane_medication_schedule_slots AS owned_slot (
+      id, user_id, medication_id, medication_plan_id, weekdays, hour,
+      dose_qty, interval_days, start_date, end_date, updated_at
+    ) VALUES (
+      v_id, v_client, v_medication_id, v_plan_id, v_weekdays,
+      (v_row->>'hour')::integer, (v_row->>'dose_qty')::numeric,
+      (v_row->>'interval_days')::integer, (v_row->>'start_date')::date,
+      (v_row->>'end_date')::date, now()
+    )
+    ON CONFLICT (id) DO UPDATE SET
+      medication_id = EXCLUDED.medication_id, medication_plan_id = v_plan_id,
+      weekdays = EXCLUDED.weekdays, hour = EXCLUDED.hour, dose_qty = EXCLUDED.dose_qty,
+      interval_days = EXCLUDED.interval_days, start_date = EXCLUDED.start_date,
+      end_date = EXCLUDED.end_date, updated_at = now()
+    WHERE owned_slot.user_id = v_client;
+  END LOOP;
+
+  INSERT INTO public.zane_user_settings (user_id, meds_enabled)
+  VALUES (v_client, true)
+  ON CONFLICT (user_id) DO UPDATE SET meds_enabled = true;
+  RETURN v_plan_id;
+END;
+$function$;
+
+REVOKE EXECUTE ON FUNCTION public.social_import_plan_share(uuid, jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.social_import_plan_share(uuid, jsonb, jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.push_training_plan_to_client(text, text, jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.push_training_plan_to_client(text, text, jsonb, jsonb) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.push_meal_plan_to_client(text, text, jsonb, jsonb, jsonb, boolean) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.push_meal_plan_to_client(text, text, jsonb, jsonb, jsonb, boolean) TO authenticated;
+REVOKE EXECUTE ON FUNCTION public.push_medication_plan_to_client(text, text, jsonb, jsonb, jsonb, jsonb) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.push_medication_plan_to_client(text, text, jsonb, jsonb, jsonb, jsonb) TO authenticated;

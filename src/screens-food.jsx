@@ -1451,8 +1451,8 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
     setCoachingMacrosLoaded(false);
-    LB.loadCoachingMacros(coachingId)
-      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+    LB.loadLatestCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data); setCoachingMacrosLoaded(true); } })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [coachingId]);

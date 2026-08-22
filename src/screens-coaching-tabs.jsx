@@ -1278,16 +1278,37 @@ function layoutRows(fields) {
 }
 
 // Convert a raw form value to a submission-ready response value.
+function checkinStrictDecimal(value) {
+  if (value === '' || value == null) return null;
+  const raw = String(value).trim();
+  if (!/^[+-]?(?:\d+|\d*[.,]\d+)$/.test(raw)) return null;
+  const number = Number(raw.replace(',', '.'));
+  return Number.isFinite(number) ? number : null;
+}
+
+function checkinStrictInteger(value) {
+  if (value === '' || value == null) return null;
+  const raw = String(value).trim();
+  if (!/^[+-]?\d+$/.test(raw)) return null;
+  const number = Number(raw);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
 function toResponse(field, raw, distUnit) {
   if (raw === '' || raw == null) return null;
   if (field._distanceField) {
-    const n = parseFloat(String(raw).replace(',', '.'));
-    if (isNaN(n) || n <= 0) return null;
-    return LB.distToM(raw, distUnit);
+    const n = checkinStrictDecimal(raw);
+    if (n == null || n <= 0) return null;
+    return LB.distToM(n, distUnit);
   }
   // Hydration is entered in the viewer's water unit (fl oz for lbs, else ml)
   // and stored canonically in ml, like distance stores meters.
-  if (field.key === 'hydration_ml') { const n = parseInt(raw, 10); return isNaN(n) ? null : UI.waterEntryToMl(n); }
+  if (field.key === 'hydration_ml') {
+    const n = checkinStrictDecimal(raw);
+    if (n == null || n < 0) return null;
+    const ml = UI.waterEntryToMl(n);
+    return Number.isFinite(ml) && ml <= 100000 ? ml : null;
+  }
   if (field.type === 'pace') {
     // Pace is edited as two text inputs, so the form can briefly contain a
     // half-entered value such as `:00` or `6:`. Do not submit those states;
@@ -1296,12 +1317,26 @@ function toResponse(field, raw, distUnit) {
     if (!match) return null;
     const minutes = Number(match[1]);
     const seconds = Number(match[2]);
-    if (!Number.isInteger(minutes) || !Number.isInteger(seconds) || minutes > 99 || seconds > 59) return null;
+    if (!Number.isInteger(minutes) || !Number.isInteger(seconds) || minutes > 99 || seconds > 59 || minutes + seconds === 0) return null;
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
   }
-  if (field.type === 'integer' || field.type === 'percent') { const n = parseInt(raw, 10); return isNaN(n) ? null : n; }
-  if (field.type === 'decimal') { const n = parseFloat(String(raw).replace(',', '.')); return isNaN(n) ? null : n; }
-  return raw; // text, stepper, choice
+  if (field.type === 'integer' || field.type === 'percent' || field.type === 'stepper') {
+    const n = checkinStrictInteger(raw);
+    if (n == null) return null;
+    if (field.type === 'percent' && (n < 0 || n > 100)) return null;
+    if (field.min != null && n < Number(field.min)) return null;
+    if (field.max != null && n > Number(field.max)) return null;
+    return n;
+  }
+  if (field.type === 'decimal') return checkinStrictDecimal(raw);
+  return raw; // text and choice
+}
+
+function checkinResponseValidationError(field, raw, distUnit) {
+  if (raw === '' || raw == null) return null;
+  const numeric = field?._distanceField || field?.key === 'hydration_ml' || ['pace', 'integer', 'decimal', 'percent', 'stepper'].includes(field?.type);
+  if (!numeric || toResponse(field, raw, distUnit) != null) return null;
+  return `Enter a valid ${field.label || 'numeric response'}.`;
 }
 
 // Build initial form state from existing responses + schema.
@@ -1566,9 +1601,11 @@ function CheckInForm({ coachingId, clientId, userId, weekStart, existing, prefil
   // raw string: letters in a required number field or '0' in a required distance
   // field parse to null in toResponse and would otherwise submit silently absent.
   const missing = allFields.filter(f => f.required).filter(f => toResponse(f, form[f.key], distUnit) == null).map(f => f.label);
-  const canSubmit = missing.length === 0;
+  const malformed = allFields.map(f => checkinResponseValidationError(f, form[f.key], distUnit)).filter(Boolean);
+  const canSubmit = missing.length === 0 && malformed.length === 0;
 
   const handleSubmit = async () => {
+    if (malformed.length) { setError(malformed[0]); return; }
     if (!canSubmit) { setError(`Can't submit, please fill in: ${missing.join(', ')}.`); return; }
     setSaving(true); setError('');
     try {
@@ -1726,7 +1763,10 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
     const names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
     return `${names[weekStartDay]}–${names[(weekStartDay + 6) % 7]}`;
   })();
-  const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
+  const {
+    checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory,
+    hasOlder, loadingOlder, loadOlder, load,
+  } = useCoachingCheckins(coachingId);
   const [photosEnabled, setPhotosEnabled] = useStateC(false);
   useEffectC(() => {
     let alive = true;
@@ -1948,7 +1988,7 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
               style={{ width: '100%', display: 'flex', alignItems: 'center', padding: '14px 16px', background: 'none', border: 'none', cursor: 'pointer', WebkitTapHighlightColor: 'transparent', gap: 12 }}
             >
               <div style={{ flex: 1, textAlign: 'left' }}>
-                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Previous Check-ins ({past.length})</div>
+                <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>Previous Check-ins ({past.length}{hasOlder ? '+' : ''})</div>
                 <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginTop: 2 }}>
                   {fmtWeek(past[past.length - 1].weekStart)} – {fmtWeek(past[0].weekStart)}
                 </div>
@@ -1962,6 +2002,12 @@ function ClientCheckInTab({ coachingId, clientId, userId, checkinEnabled = true,
                     <CheckInCard ci={ci} prevCi={past[past.indexOf(ci) + 1]} schema={resolvedSchema} embedded onEdit={checkinEnabled ? () => setEditTarget(ci) : undefined} onDelete={checkinEnabled && !deleting ? () => handleDelete(ci) : undefined} confirmingDelete={confirmDelete === ci.id} coachingMacrosHistory={coachingMacrosHistory} onGenerated={load} isAdmin={isAdmin} />
                   </div>
                 ))}
+                {hasOlder && (
+                  <button onClick={loadOlder} disabled={loadingOlder}
+                    style={{ display: 'block', margin: '12px auto', background: UI.bgRaised, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', cursor: loadingOlder ? 'default' : 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+                    {loadingOlder ? 'Loading…' : 'Load older check-ins'}
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -2145,8 +2191,8 @@ function ClientNutritionReadView({ coachingId }) {
 
   const load = () => {
     setLoading(true); setLoadErr(false);
-    LB.loadCoachingMacros(coachingId)
-      .then(data => setMacros(data[0] || null))
+    LB.loadLatestCoachingMacros(coachingId)
+      .then(data => setMacros(data))
       .catch(() => setLoadErr(true))
       .finally(() => setLoading(false));
   };

@@ -9,11 +9,17 @@ const { spawnSync } = require('child_process');
 
 const root = path.join(__dirname, '..', '..');
 const suites = [
+  'feature-map-bake.test.cjs',
+  'frontend-security-validation.test.cjs',
   'coaching-drive-storage.test.cjs',
   'reminder-time.test.cjs',
   'notification-delivery.test.cjs',
   'store.test.cjs',
 ];
+const configuredTimeout = Number(process.env.ZANE_TEST_SUITE_TIMEOUT_MS);
+const suiteTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000
+  ? configuredTimeout
+  : 120000;
 
 const failures = [];
 for (const suite of suites) {
@@ -23,6 +29,8 @@ for (const suite of suites) {
     cwd: root,
     env: process.env,
     stdio: 'inherit',
+    timeout: suiteTimeoutMs,
+    killSignal: 'SIGTERM',
   });
   if (result.error || result.status !== 0) {
     failures.push({ suite, status: result.status, error: result.error });

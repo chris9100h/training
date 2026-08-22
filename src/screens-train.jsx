@@ -1017,6 +1017,7 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
   // 250ms `now` tick below no longer re-runs a linear scan of the whole library
   // on every render, it only recomputes when the library or current exId change.
   const exercise = useMemoT(() => (entry ? LB.findExercise(store, entry.exId) : null), [store.exercises, entry?.exId]);
+  const exerciseYoutubeUrl = LB.sanitizeYoutubeUrl(exercise?.youtube_url);
 
   // Pinned exercise note: a note flagged note_pinned (migration 0167) pops up in a
   // must-acknowledge sheet the first time its exercise becomes active this session
@@ -6974,8 +6975,8 @@ function TrainingScreenInner({ store, setStore, go, sessionId, userId, session, 
                 <i className="fa-solid fa-clock-rotate-left" style={{ flexShrink: 0, fontSize: 13, color: UI.inkFaint }} />
               </button>
             )}
-            {exercise?.youtube_url && (
-              <a href={exercise.youtube_url} target="_blank" rel="noopener noreferrer"
+            {exerciseYoutubeUrl && (
+              <a href={exerciseYoutubeUrl} target="_blank" rel="noopener noreferrer"
                 aria-label="Watch form video"
                 style={{
                   flexShrink: 0, width: 38, height: 38, borderRadius: 6,

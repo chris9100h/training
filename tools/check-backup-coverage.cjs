@@ -67,6 +67,7 @@ const EXCLUDED = {
   zane_coaching: 'coaching relationships reference other users (export archive only)',
   zane_coaching_threads: 'coaching (export archive only)',
   zane_coaching_notes: 'coaching (export archive only)',
+  zane_chat_attachment_cleanup: 'service-only private Storage cleanup tombstones; operational state, never user content',
   zane_coaching_macros: 'coaching (export archive only)',
   zane_checkins: 'coaching (export archive only)',
   zane_social_profiles: 'friends identity/privacy state is shared social account data and can be regenerated from server state; it is not personal workout backup data',
@@ -90,6 +91,7 @@ const EXCLUDED = {
   zane_recipe_shares: 'recipe share-link snapshots (RPC-only); an adopted share becomes a normal zane_food_recipes row',
   zane_medication_pillbox_checks: 'derived per-week pack-check markers, device/sync state regenerated as needed (not user content)',
   zane_meal_reminder_deliveries: 'server-side reminder delivery ledger, derived provider state rather than user content',
+  zane_reminder_delivery_claims: 'server-side generic, water and daily-log reminder claim ledger, derived provider state rather than user content',
   zane_coaching_drive_connections: 'optional external Google Drive connection metadata; files remain in the coach-owned Drive archive',
   zane_coaching_drive_tokens: 'encrypted OAuth refresh tokens; deliberately never exported to a user backup',
   zane_coaching_drive_oauth_states: 'short-lived one-time OAuth CSRF state; regenerated and never exported',
@@ -172,7 +174,16 @@ function captureImportedColumns() {
   };
   sandbox.global = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(read('src/store.js'), sandbox, { filename: 'store.js' });
+  const restoreGuard = '  throw new Error(BACKUP_RESTORE_UNAVAILABLE_MESSAGE);\n';
+  const storeSource = read('src/store.js');
+  if (!storeSource.includes(restoreGuard)) {
+    throw new Error('production backup restore fail-closed guard is missing');
+  }
+  // Production restore is deliberately fail-closed until the replacement can
+  // be transactional. Remove that one exact guard only inside this isolated
+  // recording VM so the unreachable mapping still detects schema drift. This
+  // never changes or exposes the browser's production function.
+  vm.runInContext(storeSource.replace(restoreGuard, ''), sandbox, { filename: 'store.js' });
   const LB = sandbox.window.LB;
 
   // A minimal but structurally complete backup: one row per table so every

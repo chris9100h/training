@@ -11,6 +11,7 @@ const PUSHOVER_URL          = `${SUPABASE_URL}/functions/v1/pushover`;
 const WEB_PUSH_URL          = `${SUPABASE_URL}/functions/v1/web-push`;
 const COACHING_NOTIFY_URL   = `${SUPABASE_URL}/functions/v1/zane_coaching-notify`;
 const COACHING_DRIVE_URL    = `${SUPABASE_URL}/functions/v1/coaching-drive-sync`;
+const COACHING_CHAT_CLEANUP_URL = `${SUPABASE_URL}/functions/v1/coaching-chat-cleanup`;
 const SOCIAL_NOTIFY_URL     = `${SUPABASE_URL}/functions/v1/zane_social-notify`;
 const ADMIN_SEND_EMAIL_URL  = `${SUPABASE_URL}/functions/v1/admin-send-email`;
 const FOOD_SEARCH_URL       = `${SUPABASE_URL}/functions/v1/search-foods`;
@@ -636,6 +637,37 @@ function xHandleUrl(value) {
   return handle ? `https://x.com/${handle.slice(1)}` : null;
 }
 
+// Accept only concrete YouTube video URLs. React does not block javascript:
+// hrefs in production, and a host-only allowlist would still accept YouTube's
+// redirect endpoints. Canonicalizing a recognized video id removes credentials,
+// ports, redirects and unrelated query parameters before storage or rendering.
+function sanitizeYoutubeUrl(raw) {
+  if (!raw) return null;
+  const text = String(raw).trim();
+  if (!text || /[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2060-\u206f\ufeff]/i.test(text)) return null;
+  let url;
+  const candidate = /^[a-z][a-z\d+.-]*:/i.test(text) ? text : `https://${text.replace(/^\/\//, '')}`;
+  try { url = new URL(candidate); } catch (_) { return null; }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+  if (url.username || url.password || url.port) return null;
+
+  const host = url.hostname.toLowerCase();
+  let videoId = null;
+  if (host === 'youtu.be') {
+    const match = url.pathname.match(/^\/([A-Za-z0-9_-]{11})\/?$/);
+    videoId = match?.[1] || null;
+  } else if (host === 'youtube.com' || host.endsWith('.youtube.com')) {
+    if (url.pathname === '/watch') {
+      const requestedId = url.searchParams.get('v') || '';
+      videoId = /^[A-Za-z0-9_-]{11}$/.test(requestedId) ? requestedId : null;
+    } else {
+      const match = url.pathname.match(/^\/(?:shorts|embed|live)\/([A-Za-z0-9_-]{11})\/?$/);
+      videoId = match?.[1] || null;
+    }
+  }
+  return videoId ? `https://www.youtube.com/watch?v=${videoId}` : null;
+}
+
 // Local calendar date as YYYY-MM-DD. Never use toISOString() here, that
 // returns the UTC date, which is yesterday between midnight and UTC-offset
 // o'clock (and tomorrow in negative-offset timezones from the evening on).
@@ -1062,23 +1094,77 @@ function wiSessionFingerprint(session) {
   return `${session.date}|${wiNormalizeName(session.dayName || '')}|${entries.join('|')}`;
 }
 
-async function wiFetchAllRows(table, select, userId, refine = null) {
-  const out = []; const page = 1000;
-  for (let from = 0; ; from += page) {
+const DB_PAGE_SIZE = 1000;
+
+// PostgREST applies a server-side max-row cap even when the client did not ask
+// for a limit. Any read whose contract says "all rows" must therefore page
+// explicitly. Callers supply a freshly-built, deterministically ordered query
+// for every page. Cursor predicates keep already-read rows behind the cursor,
+// so inserts/deletes in an earlier page cannot shift every later page the way
+// offset ranges do.
+function postgrestCursorValue(value) {
+  if (value == null || (typeof value === 'number' && !Number.isFinite(value))) {
+    throw new Error('Paged query returned an unusable cursor value');
+  }
+  const raw = String(value);
+  // Key columns in this store are ids, dates, timestamps, indices and times.
+  // Reject PostgREST grammar delimiters instead of trying to interpolate an
+  // unexpected free-form value into an `.or()` expression.
+  if (!raw || /[(),\"]/.test(raw)) throw new Error('Paged query returned an unsafe cursor value');
+  return raw;
+}
+
+function keysetFilterAfter(row, keyset) {
+  return keyset.map((key, index) => {
+    const comparisons = [];
+    for (let prefix = 0; prefix < index; prefix++) {
+      comparisons.push(`${keyset[prefix].column}.eq.${postgrestCursorValue(row?.[keyset[prefix].column])}`);
+    }
+    const operator = key.ascending === false ? 'lt' : 'gt';
+    comparisons.push(`${key.column}.${operator}.${postgrestCursorValue(row?.[key.column])}`);
+    return comparisons.length === 1 ? comparisons[0] : `and(${comparisons.join(',')})`;
+  }).join(',');
+}
+
+async function fetchAllRowsPaged(buildQuery, {
+  priority = 'foreground', maxRows = null, keyset = [{ column: 'id', ascending: true }],
+} = {}) {
+  if (!Array.isArray(keyset) || !keyset.length || keyset.some(key => !/^[a-z_][a-z0-9_.]*$/i.test(key?.column || ''))) {
+    throw new Error('Paged query requires a deterministic keyset');
+  }
+  const out = [];
+  let cursor = null;
+  let cursorToken = null;
+  for (;;) {
     const res = await scheduleDbTask(
       () => {
-        let query = _supabase.from(table).select(select).eq('user_id', userId);
-        if (typeof refine === 'function') query = refine(query);
-        return query.range(from, from + page - 1);
+        let query = buildQuery();
+        if (cursor) query = query.or(keysetFilterAfter(cursor, keyset));
+        return query.limit(DB_PAGE_SIZE);
       },
-      { priority: 'foreground', kind: 'read' },
+      { priority, kind: 'read' },
     );
-    if (res?.error) throw res.error;
-    const rows = res?.data || []; out.push(...rows);
-    if (rows.length < page) break;
-    if (out.length > 250000) throw new Error('This account has too much history to compare in one import.');
+    if (res?.error) throw Object.assign(new Error(res.error.message || 'Could not fetch all rows'), { cause: res.error });
+    const rows = res?.data || [];
+    out.push(...rows);
+    if (maxRows != null && out.length > maxRows) {
+      throw new Error(`This account has more than ${maxRows.toLocaleString()} rows to process in one operation.`);
+    }
+    if (rows.length < DB_PAGE_SIZE) break;
+    cursor = rows[rows.length - 1];
+    const nextCursorToken = keyset.map(key => postgrestCursorValue(cursor?.[key.column])).join('\u0000');
+    if (nextCursorToken === cursorToken) throw new Error('Paged query cursor did not advance');
+    cursorToken = nextCursorToken;
   }
   return out;
+}
+
+async function wiFetchAllRows(table, select, userId, refine = null) {
+  return fetchAllRowsPaged(() => {
+    let query = _supabase.from(table).select(select).eq('user_id', userId).order('id');
+    if (typeof refine === 'function') query = refine(query);
+    return query;
+  }, { maxRows: 250000 });
 }
 
 async function wiFetchRowsByIds(table, select, userId, column, ids) {
@@ -1567,33 +1653,29 @@ async function resetPassword(email, redirectTo) {
 async function deleteOwnedStorageObjects(userId) {
   if (!userId) throw new Error('Authentication required');
 
-  const [socialRes, coachingRes, notesRes] = await Promise.all([
-    _supabase.from('zane_social_message_attachments')
-      .select('storage_path').eq('uploaded_by', userId),
-    _supabase.from('zane_coaching_drive_photos')
-      .select('staging_path').eq('client_id', userId),
-    _supabase.from('zane_coaching_notes')
-      .select('attachments').eq('author_id', userId).not('attachments', 'is', null),
+  const [socialRows, coachingRows, noteRows, progressRows] = await Promise.all([
+    fetchAllRowsPaged(() => _supabase.from('zane_social_message_attachments')
+      .select('id, storage_path').eq('uploaded_by', userId).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_coaching_drive_photos')
+      .select('id, staging_path').eq('client_id', userId).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_coaching_notes')
+      .select('id, attachments').eq('author_id', userId).not('attachments', 'is', null).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_drive_progress_photos')
+      .select('id, staging_path').eq('user_id', userId).order('id')),
   ]);
-  for (const result of [socialRes, coachingRes, notesRes]) {
-    if (result?.error) throw new Error(result.error.message || 'Could not prepare storage cleanup');
-  }
 
   const uniquePaths = values => [...new Set((values || []).filter(v => typeof v === 'string' && v.length > 0))];
-  const socialPaths = uniquePaths((socialRes.data || []).map(row => row.storage_path));
-  const coachingPaths = uniquePaths((coachingRes.data || []).map(row => row.staging_path));
-  const chatPrefix = `${SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
-  const chatPaths = uniquePaths((notesRes.data || []).flatMap(row =>
+  const socialPaths = uniquePaths(socialRows.map(row => row.storage_path));
+  const coachingPaths = uniquePaths(coachingRows.map(row => row.staging_path));
+  const chatPaths = uniquePaths(noteRows.flatMap(row =>
     (Array.isArray(row.attachments) ? row.attachments : [])
       .map(file => {
-        if (typeof file?.url !== 'string' || !file.url.startsWith(chatPrefix)) return null;
-        const raw = file.url.slice(chatPrefix.length);
-        try { return decodeURIComponent(raw); } catch { return raw; }
+        const path = chatAttachmentPath(file?.storagePath || file?.url || file?.path);
+        return chatAttachmentPathOwnedBy(path, userId) ? path : null;
       })
-      .filter(path => path && path.split('/')[0] === String(userId))
+      .filter(Boolean)
   ));
-  const progressRes = await _supabase.from('zane_drive_progress_photos').select('staging_path').eq('user_id', userId);
-  const progressPaths = uniquePaths((progressRes.data || []).map(row => row.staging_path).filter(path => path && path.split('/')[0] === String(userId)));
+  const progressPaths = uniquePaths(progressRows.map(row => row.staging_path).filter(path => path && path.split('/')[0] === String(userId)));
 
   const removeInBatches = async (bucket, paths) => {
     for (let offset = 0; offset < paths.length; offset += 1000) {
@@ -1610,7 +1692,15 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   // Backup restore deliberately keeps social/attachment data. The explicit
   // account purge, however, must clear the user's Storage objects before the
   // corresponding metadata rows disappear.
-  if (!keepPush) await deleteOwnedStorageObjects(userId);
+  if (!keepPush) {
+    await deleteOwnedStorageObjects(userId);
+    // Drive connection rows are intentionally not client-deletable and their
+    // refresh tokens live in a service-only table. The authenticated Edge
+    // action revokes the token and removes the connection atomically/idempotently.
+    // A backup restore keeps this external-account connection, just like push
+    // subscriptions and already-shared recipe links.
+    await coachingDriveRequest('delete-connection');
+  }
   const ops = [
     unwrap(_supabase.from('zane_sessions').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_exercises').delete().eq('user_id', userId)),
@@ -1690,10 +1780,11 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
   await Promise.all(ops);
 }
 
-// Validate a parsed backup object BEFORE importFromBackup deletes anything.
-// Returns an error string, or null when the structure looks safe to import.
-// The import is destructive (delete-then-write) and not transactional, so a
-// malformed file must be rejected up front rather than half-applied.
+// Validate a parsed backup object before any restore work is considered.
+// Returns an error string, or null when the outer structure looks like a Zane
+// backup. This is intentionally only a file-format check; a future atomic
+// server restore must still validate every collection and reference inside the
+// same transaction that replaces the live rows.
 function validateBackup(b) {
   if (!b || typeof b !== 'object') return 'File is not a Zane backup.';
   for (const key of ['sessions', 'exercises', 'schedules']) {
@@ -1734,11 +1825,38 @@ function validateBackup(b) {
 // restoring a kg backup gets every weight multiplied by 2.20462.
 function weightAxisUnit(u) { return u === 'lbs' ? 'lbs' : 'kg'; }
 
+// Exercise ids are user/import supplied and may themselves contain underscores.
+// Match the longest complete old-id prefix instead of treating the first
+// underscore as a separator. This preserves the opaque day-id suffix even when
+// either side contains underscores.
+function remapExerciseDayKey(key, idRemap) {
+  if (Object.prototype.hasOwnProperty.call(idRemap || {}, key)) return idRemap[key];
+  const match = Object.keys(idRemap || {})
+    .filter(id => key.startsWith(id + '_'))
+    .sort((a, b) => b.length - a.length)[0];
+  return match ? idRemap[match] + key.slice(match.length) : key;
+}
+
+// Restoring used to issue a client-side delete across 33 tables and then upload
+// the replacement in many unrelated requests. Any tab close, network error or
+// rejected row after the delete left a partially wiped account. Keep restore
+// fail-closed until a staged, size-bounded server contract can validate the
+// complete payload and perform the replacement in one Postgres transaction.
+// Export remains available. Most importantly, direct callers cannot bypass the
+// disabled Settings button and reach the old destructive implementation.
+const BACKUP_RESTORE_AVAILABLE = false;
+const BACKUP_RESTORE_UNAVAILABLE_MESSAGE = 'Backup restore is temporarily unavailable while atomic server-side restore is being completed. No account data was changed.';
+
 async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
   // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs'|'mixed' } | null
-  // Validate before the destructive delete, never half-apply a bad file.
+  // Validate the recognizable outer shape, then fail before constructing rows,
+  // generating replacement ids, reporting destructive progress or touching
+  // Supabase. The unreachable mapping below remains temporarily so the schema
+  // coverage harness can evaluate it after removing this exact guard in its
+  // isolated VM; production has no second callable unsafe function.
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
+  throw new Error(BACKUP_RESTORE_UNAVAILABLE_MESSAGE);
 
   const sett = backup.settings ?? {};
   // Every stored weight has to move with the unit, not just sets[].kg: a
@@ -1777,8 +1895,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   });
   // Exercises got fresh ids above, everything that references an exId must be
   // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
-  // { exId: v } maps; remapExDayKeyed: { exId_dayId: v } maps (uid() has no '_',
-  // so the first underscore splits exId from the dayId suffix, kept verbatim).
+  // { exId: v } maps; remapExDayKeyed: { exId_dayId: v } maps.
   const remapEx = id => idRemap[id] ?? id;
   const remapExKeyed = obj => {
     const out = {};
@@ -1787,10 +1904,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   };
   const remapExDayKeyed = obj => {
     const out = {};
-    for (const k in (obj || {})) {
-      const us = k.indexOf('_');
-      out[us < 0 ? remapEx(k) : remapEx(k.slice(0, us)) + k.slice(us)] = obj[k];
-    }
+    for (const k in (obj || {})) out[remapExerciseDayKey(k, idRemap)] = obj[k];
     return out;
   };
   const remapDays = days => (Array.isArray(days) ? days : []).map(d => ({
@@ -2127,10 +2241,40 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
     ));
     stepsDone++;
   }
+  // Food restore dependency order: recipes and meal-plan slots are parents of
+  // food logs (`recipe_id` / `template_slot_id`). Commit every definition
+  // before uploading a log that may reference it.
+  if (backup.foodRecipes?.length) {
+    prog('Uploading food recipes…');
+    await tag('food recipes', () => unwrap(_supabase.from('zane_food_recipes').upsert(
+      backup.foodRecipes.map(r => ({
+        id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
+        cooked_weight_g: r.cookedWeightG ?? null,
+        updated_at: r.updatedAt ?? new Date().toISOString(),
+      }))
+    )));
+    stepsDone++;
+  }
+  if (backup.foodMealPlans?.length) {
+    prog('Uploading meal plans…');
+    await tag('meal plans', () => unwrap(_supabase.from('zane_food_meal_plans').upsert(
+      backup.foodMealPlans.map(p => ({
+        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
+        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
+      }))
+    )));
+    stepsDone++;
+  }
+  if (backup.foodTemplateSlots?.length) {
+    prog('Uploading meal template…');
+    await tag('meal template', () => unwrap(_supabase.from('zane_food_template_slots').upsert(
+      backup.foodTemplateSlots.map(templateSlotRow(userId))
+    )));
+    stepsDone++;
+  }
   if (backup.foodLogs?.length) {
     prog('Uploading food logs…');
-    await unwrap(_supabase.from('zane_food_logs').upsert(
-      backup.foodLogs.map(l => ({
+    const foodLogRows = backup.foodLogs.map(l => ({
         id: l.id, user_id: userId, date: l.date, time: l.time,
         food_id: l.foodId ?? null, food_name: l.foodName, brand: l.brand ?? null,
         source: l.source ?? null, quantity_g: l.quantityG,
@@ -2141,13 +2285,16 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
         logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
         planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
-      }))
-    ));
+      }));
+    // Shared food-cache rows and old recipe references are advisory because the
+    // log carries a complete nutrition snapshot. Keep the existing FK fallback
+    // used by live sync so one stale reference cannot strand a whole restore.
+    await tag('food logs', () => unwrap(foodLogUpsertWithFkFallback(foodLogRows)));
     stepsDone++;
   }
   if (backup.foodFavorites?.length) {
     prog('Uploading food favorites…');
-    await unwrap(_supabase.from('zane_food_favorites').upsert(
+    await tag('food favorites', () => unwrap(foodFavoriteUpsertWithFkFallback(
       backup.foodFavorites.map(f => ({
         id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
         brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
@@ -2155,7 +2302,7 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         fiber: f.fiber ?? null, sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
         units: f.units ?? [],
       }))
-    ));
+    )));
     stepsDone++;
   }
   if (backup.foodBarcodeOverrides?.length) {
@@ -2169,27 +2316,6 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         created_at: o.createdAt ?? new Date().toISOString(),
         updated_at: o.updatedAt ?? o.createdAt ?? new Date().toISOString(),
       })), { onConflict: 'user_id,source,source_id' }
-    ));
-    stepsDone++;
-  }
-  if (backup.foodRecipes?.length) {
-    prog('Uploading food recipes…');
-    await unwrap(_supabase.from('zane_food_recipes').upsert(
-      backup.foodRecipes.map(r => ({
-        id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
-        cooked_weight_g: r.cookedWeightG ?? null,
-        updated_at: r.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.foodMealPlans?.length) {
-    prog('Uploading meal plans…');
-    await unwrap(_supabase.from('zane_food_meal_plans').upsert(
-      backup.foodMealPlans.map(p => ({
-        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
-        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
-      }))
     ));
     stepsDone++;
   }
@@ -2276,13 +2402,6 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
         reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
         snoozed_until: l.snoozedUntil ?? null,
       }))
-    ));
-    stepsDone++;
-  }
-  if (backup.foodTemplateSlots?.length) {
-    prog('Uploading meal template…');
-    await unwrap(_supabase.from('zane_food_template_slots').upsert(
-      backup.foodTemplateSlots.map(templateSlotRow(userId))
     ));
     stepsDone++;
   }
@@ -2396,97 +2515,236 @@ async function importFromBackup(backup, userId, onProgress, unitConvert = null) 
   onProgress?.(100, 'Done!');
 }
 
-// Builds a complete export object for backup. Fetches ALL session entries and
+function mergeCompleteBackupCollection(freshRows, localRows, baseRows = null, keyOf = row => row?.id) {
+  const localByKey = new Map((localRows || []).map(row => [keyOf(row), row]));
+  const baseByKey = new Map((baseRows || []).map(row => [keyOf(row), row]));
+  const freshKeys = new Set();
+  const merged = [];
+  for (const fresh of (freshRows || [])) {
+    const key = keyOf(fresh);
+    freshKeys.add(key);
+    const local = localByKey.get(key);
+    const base = baseByKey.get(key);
+    if (!local && base) continue; // pending local deletion
+    // A cached row that is unchanged from its confirmed baseline is stale by
+    // definition once a fresh server read differs. Only a genuine local delta
+    // may overlay the authoritative export read.
+    if (local && base && !syncValuesEqual(local, base)) merged.push(local);
+    else merged.push(fresh);
+  }
+  for (const local of (localRows || [])) {
+    const key = keyOf(local);
+    if (freshKeys.has(key)) continue;
+    const base = baseByKey.get(key);
+    // Preserve an unsynced insert/edit, but do not resurrect a pristine cached
+    // row that the server has since deleted.
+    if (!base || !syncValuesEqual(local, base)) merged.push(local);
+  }
+  return merged;
+}
+
+// Fetch every non-windowed backup collection afresh as well. Boot queries are
+// optimized for rendering and can themselves stop at PostgREST's max-row cap;
+// spreading those arrays directly into a destructive-restore backup would make
+// the cap permanent data loss. Local rows overlay matching server rows so
+// pending/offline edits keep the prior export behavior.
+async function fetchCompleteBackupCollections(store, userId, base = null) {
+  const specs = [
+    ['exercises', 'zane_exercises'], ['schedules', 'zane_schedules'], ['skips', 'zane_skips'],
+    ['cardioLogs', 'zane_cardio_logs'], ['dailyLogs', 'zane_daily_logs'], ['waterLogs', 'zane_water_logs'],
+    ['foodFavorites', 'zane_food_favorites'], ['foodRecipes', 'zane_food_recipes'],
+    ['foodTemplateSlots', 'zane_food_template_slots'], ['foodMealPlans', 'zane_food_meal_plans'],
+    ['foodShoppingPrefs', 'zane_food_shopping_prefs'], ['medicationPlans', 'zane_medication_plans'],
+    ['medications', 'zane_medications'], ['medicationPlanItems', 'zane_medication_plan_items'],
+    ['medicationScheduleSlots', 'zane_medication_schedule_slots'], ['workoutTemplates', 'zane_workout_templates'],
+    ['checkinSchemaTemplates', 'zane_checkin_schema_templates'], ['glucoseLogs', 'zane_glucose_logs'],
+    ['bloodPressureLogs', 'zane_blood_pressure_logs'], ['bodyTempLogs', 'zane_body_temp_logs'],
+    ['cardioPlans', 'zane_cardio_plans'], ['statusPeriods', 'zane_status_periods'], ['mesoStates', 'zane_meso_states'],
+  ];
+  const allRows = await Promise.all(specs.map(([, table]) => fetchAllRowsPaged(() =>
+    _supabase.from(table).select('*').eq('user_id', userId).order('id')
+  )));
+  const mapRows = (field, rows) => {
+    switch (field) {
+      case 'exercises': return rows;
+      case 'schedules': return rows.map(s => healScheduleWeekdays({ ...s, days: Array.isArray(s.days) ? s.days : [], versions: Array.isArray(s.versions) ? s.versions : [] }));
+      case 'skips': return rows.map(s => ({ id: s.id, date: s.date, dayId: s.day_id, dayName: s.day_name, skipReason: s.skip_reason, skippedAt: s.skipped_at }));
+      case 'cardioLogs': return rows.map(l => ({ id: l.id, date: l.date, type: l.type ?? null, durationMinutes: l.duration_minutes, distanceM: l.distance_m ?? null, paceFeeling: l.pace_feeling ?? null, effort: l.effort ?? null, note: l.note ?? null, sessionId: l.session_id ?? null, createdAt: l.created_at }));
+      case 'dailyLogs': return rows.map(l => ({
+        id: l.id, date: l.date, weight: l.weight ?? null, steps: l.steps ?? null,
+        waistCm: l.waist_cm ?? null, hipsCm: l.hips_cm ?? null, chestCm: l.chest_cm ?? null,
+        armCm: l.arm_cm ?? null, thighCm: l.thigh_cm ?? null, calfCm: l.calf_cm ?? null,
+        bodyFatPct: l.body_fat_pct ?? null, calories: l.calories ?? null, protein: l.protein ?? null,
+        carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null, waterMl: l.water_ml ?? null,
+        note: l.note ?? null, offPlanNote: l.off_plan_note ?? null, mealOfChoice: !!l.meal_of_choice,
+        mealOfChoiceHour: l.meal_of_choice_hour ?? null, foodDayClosed: !!l.food_day_closed,
+        adherence: l.adherence ?? null, targetsSnap: l.targets_snap ?? null, coachFields: l.daily_coach_fields ?? null,
+        aiSummary: l.ai_summary ?? null, aiSummaryGeneratedAt: l.ai_summary_generated_at ?? null,
+        updatedAt: l.updated_at ?? null, createdAt: l.created_at,
+      }));
+      case 'waterLogs': return rows.map(l => ({ id: l.id, date: l.date, time: l.time, amountMl: l.amount_ml ?? 0, name: l.name ?? null, category: l.category ?? null, breakdown: l.breakdown ?? null, createdAt: l.created_at }));
+      case 'foodFavorites': return rows.map(f => ({
+        id: f.id, foodId: f.food_id ?? null, foodName: f.food_name, brand: f.brand ?? null, source: f.source ?? null,
+        quantityG: parseFloat(f.quantity_g), calories: f.calories, protein: parseFloat(f.protein), carbs: parseFloat(f.carbs), fat: parseFloat(f.fat),
+        fiber: f.fiber != null ? parseFloat(f.fiber) : null, sugar: f.sugar != null ? parseFloat(f.sugar) : null,
+        satFat: f.sat_fat != null ? parseFloat(f.sat_fat) : null, sodiumMg: f.sodium_mg != null ? parseFloat(f.sodium_mg) : null,
+        units: f.units || [], createdAt: f.created_at,
+      }));
+      case 'foodRecipes': return rows.map(r => ({ id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, cookedWeightG: r.cooked_weight_g ?? null, createdAt: r.created_at, updatedAt: r.updated_at }));
+      case 'foodTemplateSlots': return rows.map(mapTemplateSlotRow);
+      case 'foodMealPlans': return rows.map(p => ({ id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template, coachId: p.coach_id ?? null, createdAt: p.created_at, updatedAt: p.updated_at }));
+      case 'foodShoppingPrefs': return rows.map(p => ({
+        id: p.id, foodId: p.food_id, shoppingKey: p.shopping_key, nameOverride: p.name_override ?? null,
+        excluded: !!p.excluded, excludedUntil: p.excluded_until ?? null,
+        packageSizeG: p.package_size_g != null ? parseFloat(p.package_size_g) : null,
+        lowStockThresholdG: p.low_stock_threshold_g != null ? parseFloat(p.low_stock_threshold_g) : null,
+        stockBaselineG: p.stock_baseline_g != null ? parseFloat(p.stock_baseline_g) : null,
+        stockSetAt: p.stock_set_at ?? null, foodName: p.food_name, brand: p.brand ?? null,
+        createdAt: p.created_at, updatedAt: p.updated_at,
+      }));
+      case 'medicationPlans': return rows.map(p => ({ id: p.id, name: p.name, archived: !!p.archived, isTemplate: !!p.is_template, coachId: p.coach_id ?? null, active: !!p.active, createdAt: p.created_at, updatedAt: p.updated_at }));
+      case 'medications': return rows.map(m => ({
+        id: m.id, name: m.name, brand: m.brand ?? null, category: m.category ?? null, unitLabel: m.unit_label ?? 'pills',
+        packageSize: m.package_size != null ? parseFloat(m.package_size) : null,
+        lowStockThreshold: m.low_stock_threshold != null ? parseFloat(m.low_stock_threshold) : null,
+        stockBaseline: m.stock_baseline != null ? parseFloat(m.stock_baseline) : null, stockSetAt: m.stock_set_at ?? null,
+        archived: !!m.archived, excludeFromPillbox: !!m.exclude_from_pillbox,
+        excludeFromLowStock: !!m.exclude_from_low_stock, trackStock: !!m.track_stock,
+        createdAt: m.created_at, updatedAt: m.updated_at,
+      }));
+      case 'medicationPlanItems': return rows.map(it => ({ id: it.id, medicationPlanId: it.medication_plan_id, medicationId: it.medication_id, createdAt: it.created_at }));
+      case 'medicationScheduleSlots': return rows.map(s => ({
+        id: s.id, medicationId: s.medication_id, medicationPlanId: s.medication_plan_id ?? null,
+        weekdays: s.weekdays || [], hour: s.hour, doseQty: s.dose_qty != null ? parseFloat(s.dose_qty) : 0,
+        intervalDays: s.interval_days ?? null, startDate: s.start_date ?? null, endDate: s.end_date ?? null,
+        createdAt: s.created_at, updatedAt: s.updated_at,
+      }));
+      case 'workoutTemplates': return rows.map(t => ({ id: t.id, name: t.name, exercises: Array.isArray(t.exercises) ? t.exercises : [], createdAt: t.created_at }));
+      case 'checkinSchemaTemplates': return rows.map(t => ({ id: t.id, name: t.name, schema: Array.isArray(t.schema) ? t.schema : [], createdAt: t.created_at }));
+      case 'glucoseLogs': return rows.map(l => ({ id: l.id, date: l.date, time: l.time, valueMmol: l.value_mmol != null ? parseFloat(l.value_mmol) : null, context: l.context ?? 'other', note: l.note ?? null, createdAt: l.created_at }));
+      case 'bloodPressureLogs': return rows.map(l => ({ id: l.id, date: l.date, time: l.time, systolic: l.systolic ?? null, diastolic: l.diastolic ?? null, note: l.note ?? null, createdAt: l.created_at }));
+      case 'bodyTempLogs': return rows.map(l => ({ id: l.id, date: l.date, time: l.time, valueC: l.value_c != null ? parseFloat(l.value_c) : null, note: l.note ?? null, createdAt: l.created_at }));
+      case 'cardioPlans': return rows.map(p => ({
+        id: p.id, name: p.name, activityType: p.activity_type, archived: p.archived, mode: p.mode,
+        days: p.days ?? {}, manualTargets: p.manual_targets ?? {}, goal: p.goal ?? null,
+        goalDueDate: p.goal_due_date ?? null, startFitness: p.start_fitness ?? null,
+        generatedWeeks: p.generated_weeks ?? [], planStartDate: p.plan_start_date ?? null, createdAt: p.created_at,
+      }));
+      case 'statusPeriods': return rows.map(p => ({ id: p.id, mode: p.mode, startedAt: p.started_at, endedAt: p.ended_at ?? null }));
+      case 'mesoStates': return rows.map(m => ({
+        id: m.id, scheduleId: m.schedule_id, weeks: m.weeks, startDate: m.start_date,
+        startCycleIndex: m.start_cycle_index ?? 0, startedAt: m.started_at ?? null,
+        deltas: m.deltas ?? {}, jointFlags: m.joint_flags ?? {}, pumpLowCounts: m.pump_low_counts ?? {},
+        weightBoosts: m.weight_boosts ?? {}, weightBoostDeclines: m.weight_boost_declines ?? {},
+        growthCounts: m.growth_counts ?? {}, repMissCounts: m.rep_miss_counts ?? {}, affinity: m.affinity ?? {},
+        autoregState: m.autoreg_state ?? null, completions: m.completions ?? 0,
+        pendingMeso2: m.pending_meso2 ?? false, updatedAt: m.updated_at ?? null,
+      }));
+      default: return rows;
+    }
+  };
+  const out = {};
+  specs.forEach(([field], idx) => {
+    const mapped = mapRows(field, allRows[idx]);
+    const keyOf = field === 'dailyLogs' ? row => row?.date
+      : field === 'mesoStates' ? row => row?.scheduleId
+      : row => row?.id;
+    out[field] = mergeCompleteBackupCollection(mapped, store?.[field], base?.[field], keyOf);
+  });
+  return out;
+}
+
+// Builds a complete export object for backup. Fetches every user-data table and
 // all coaching data fresh from DB (no boot-window restriction). Strips only
 // ephemeral/server-derived fields that have no meaning outside the live session.
 async function exportBackup(store, userId) {
-  // Collect all coaching relationship IDs (regular + self + support tickets)
+  const base = _localSnapshotState.get(userId)?.baseRef || null;
+  // Fetch the complete RLS-visible relationship set. The render store keeps a
+  // single `asClient` relationship for legacy UI, which is not a complete
+  // source for backup discovery when a client has more than one relationship.
+  const relationshipRows = await fetchAllRowsPaged(() => _supabase.from('zane_coaching')
+    .select('*').order('id'));
+  // Also retain cached ids for a just-created/offline relationship that is not
+  // visible in the fresh result yet.
   const regularCoachingIds = [
     ...(store.coaching?.asCoach || []).map(r => r.id),
     ...(store.coaching?.asClient ? [store.coaching.asClient.id] : []),
     ...(store.coaching?.asSelf ? [store.coaching.asSelf.id] : []),
   ];
   const supportCoachingIds = (store.supportTickets || []).map(t => t.coachingId).filter(Boolean);
-  const allCoachingIds = [...new Set([...regularCoachingIds, ...supportCoachingIds])];
+  const allCoachingIds = [...new Set([
+    ...relationshipRows.map(row => row.id), ...regularCoachingIds, ...supportCoachingIds,
+  ].filter(Boolean))];
 
   const fetches = [
-    _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx'),
+    fetchCompleteBackupCollections(store, userId, base),
+    fetchFullTrainingHistory(store, userId, base),
     // store.foodLogs is windowed to FOOD_HISTORY_WINDOW_DAYS at boot, but the
     // import deletes EVERY zane_food_logs row before restoring. Passing the
     // windowed collection through would silently drop every food log older
     // than the window on the next restore, so refetch the full history here
     // (same reasoning as the session entries above).
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
-      .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    fetchAllRowsPaged(() => _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at')
+      .eq('user_id', userId).order('id')),
     // Same reasoning as zane_food_logs above: store.medicationLogs is
     // windowed identically (FOOD_HISTORY_WINDOW_DAYS at boot), but a restore
     // deletes every zane_medication_logs row first, so exporting only the
     // windowed copy would silently drop every dose logged before the window.
-    _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
-      .eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
-    _supabase.from('zane_adaptive_tdee_history').select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
-      .eq('user_id', userId).order('as_of_date', { ascending: false }),
+    fetchAllRowsPaged(() => _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at')
+      .eq('user_id', userId).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_adaptive_tdee_history').select('id, as_of_date, window_start, window_end, tdee_kcal, avg_calories_kcal, weight_start_kg, weight_end_kg, weight_change_kg, weight_rate_kg_week, day_span, calorie_days, weigh_ins, decision, source, targets_snapshot, calculated_at, decided_at, created_at, updated_at')
+      .eq('user_id', userId).order('id')),
     // These rows are deletion tombstones for template auto-fill. The local
     // store keeps only a bounded window, but restore deletes the whole table;
     // fetch every marker so a deliberately removed planned meal never comes
     // back after importing a backup.
-    _supabase.from('zane_food_template_days').select('id, date')
-      .eq('user_id', userId).order('date', { ascending: false }),
-    _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at')
-      .eq('user_id', userId).order('updated_at', { ascending: false }),
+    fetchAllRowsPaged(() => _supabase.from('zane_food_template_days').select('id, date')
+      .eq('user_id', userId).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at')
+      .eq('user_id', userId).order('source').order('source_id'), {
+      keyset: [{ column: 'source', ascending: true }, { column: 'source_id', ascending: true }],
+    }),
   ];
   if (allCoachingIds.length) {
     fetches.push(
-      _supabase.from('zane_coaching_notes').select('*').in('coaching_id', allCoachingIds).order('created_at'),
-      _supabase.from('zane_coaching_threads').select('*').in('coaching_id', allCoachingIds).order('created_at'),
-      _supabase.from('zane_coaching_macros').select('*').in('coaching_id', allCoachingIds).order('set_at'),
-      _supabase.from('zane_checkins').select('*').in('coaching_id', allCoachingIds).order('week_start'),
+      fetchAllRowsPaged(() => _supabase.from('zane_coaching_notes').select('*').order('id')),
+      fetchAllRowsPaged(() => _supabase.from('zane_coaching_threads').select('*').order('id')),
+      fetchAllRowsPaged(() => _supabase.from('zane_coaching_macros').select('*').order('id')),
+      fetchAllRowsPaged(() => _supabase.from('zane_checkins').select('*').order('id')),
     );
   }
 
-  const [entriesRes, foodLogsRes, medicationLogsRes, adaptiveTdeeHistoryRes, foodTemplateDaysRes, foodBarcodeOverridesRes, notesRes, threadsRes, macrosRes, checkinsRes] = await Promise.all(fetches);
-
-  // Import is delete-then-restore, so a silent partial fetch would produce an
-  // incomplete backup that later wipes the missing data. Fail loudly instead.
-  if (entriesRes.error) throw entriesRes.error;
-  if (foodLogsRes.error) throw foodLogsRes.error;
-  if (medicationLogsRes.error) throw medicationLogsRes.error;
-  if (adaptiveTdeeHistoryRes.error) throw adaptiveTdeeHistoryRes.error;
-  if (foodTemplateDaysRes.error) throw foodTemplateDaysRes.error;
-  if (foodBarcodeOverridesRes.error) throw foodBarcodeOverridesRes.error;
-  if (notesRes?.error) throw notesRes.error;
-  if (threadsRes?.error) throw threadsRes.error;
-  if (macrosRes?.error) throw macrosRes.error;
-  if (checkinsRes?.error) throw checkinsRes.error;
-
-  const bySession = {};
-  for (const e of (entriesRes.data || [])) {
-    if (!bySession[e.session_id]) bySession[e.session_id] = [];
-    bySession[e.session_id].push(e);
-  }
+  // Every promise above either returns the complete paged row list or throws.
+  // Import is delete-then-restore, so a partial result must never be serialized
+  // as if it were a valid backup.
+  const [completeCollections, fullSessions, foodLogRows, medicationLogRows, adaptiveTdeeHistoryRows, foodTemplateDayRows, foodBarcodeOverrideRows, noteRows, threadRows, macroRows, checkinRows] = await Promise.all(fetches);
 
   const { exerciseBests, nextReminderAt, supportUnread, adminSupportUnread, friends, ...rest } = store;
   return {
     _version: 2,
     _exportedAt: new Date().toISOString(),
     ...rest,
-    sessions: store.sessions.map(s => ({
-      ...s,
-      entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
-    })),
+    ...completeCollections,
+    sessions: fullSessions,
     // Full history, not the boot window that sits in store.foodLogs.
-    foodLogs: (foodLogsRes.data || []).map(mapFoodLogRow),
+    foodLogs: mergeCompleteBackupCollection(
+      foodLogRows.map(mapFoodLogRow), store?.foodLogs, base?.foodLogs,
+    ),
     // Full history, not the boot window that sits in store.medicationLogs,
     // same mapping shape loadFromSupabase uses for this table.
-    medicationLogs: (medicationLogsRes.data || []).map(l => ({
+    medicationLogs: mergeCompleteBackupCollection(medicationLogRows.map(l => ({
       id: l.id, medicationId: l.medication_id ?? null, medicationName: l.medication_name,
       date: l.date, time: l.time, doseQty: l.dose_qty != null ? parseFloat(l.dose_qty) : 0,
       planned: !!l.planned, skipped: !!l.skipped, scheduleSlotId: l.schedule_slot_id ?? null,
       reminderSentAt: l.reminder_sent_at ?? null, reminderCount: l.reminder_count ?? 0,
       snoozedUntil: l.snoozed_until ?? null, createdAt: l.created_at,
-    })),
-    foodTemplateDays: (foodTemplateDaysRes.data || []).map(d => ({ id: d.id, date: d.date })),
-    foodBarcodeOverrides: (foodBarcodeOverridesRes.data || []).map(o => ({
+    })), store?.medicationLogs, base?.medicationLogs),
+    foodTemplateDays: mergeCompleteBackupCollection(
+      foodTemplateDayRows.map(d => ({ id: d.id, date: d.date })),
+      store?.foodTemplateDays,
+      base?.foodTemplateDays,
+    ),
+    foodBarcodeOverrides: mergeCompleteBackupCollection(foodBarcodeOverrideRows.map(o => ({
       id: `${o.source}:${o.source_id}`,
       source: o.source, sourceId: o.source_id,
       foodName: o.food_name, brand: o.brand ?? null,
@@ -2495,14 +2753,18 @@ async function exportBackup(store, userId) {
       carbsPer100g: parseFloat(o.carbs_per_100g),
       fatPer100g: parseFloat(o.fat_per_100g),
       createdAt: o.created_at, updatedAt: o.updated_at ?? o.created_at,
-    })),
-    adaptiveTdeeHistory: (adaptiveTdeeHistoryRes.data || []).map(mapAdaptiveTdeeHistoryRow),
+    })), store?.foodBarcodeOverrides, base?.foodBarcodeOverrides),
+    adaptiveTdeeHistory: mergeCompleteBackupCollection(
+      adaptiveTdeeHistoryRows.map(mapAdaptiveTdeeHistoryRow),
+      store?.adaptiveTdeeHistory,
+      base?.adaptiveTdeeHistory,
+    ),
     coaching: allCoachingIds.length ? {
-      relationships: store.coaching,
-      notes: notesRes?.data || [],
-      threads: threadsRes?.data || [],
-      macros: macrosRes?.data || [],
-      checkins: checkinsRes?.data || [],
+      relationships: { ...(store.coaching || {}), all: relationshipRows },
+      notes: noteRows || [],
+      threads: threadRows || [],
+      macros: macroRows || [],
+      checkins: checkinRows || [],
     } : store.coaching,
   };
 }
@@ -2612,23 +2874,75 @@ function mapEntryRows(entryRows) {
   }));
 }
 
-// Full training history for the "Export Training CSV" button (Settings →
-// Data): store.sessions is windowed to HISTORY_WINDOW_DAYS in memory (see
-// docs/internals.md), so entries/sets for anything older have to be fetched
-// fresh, same reasoning and same query shape as exportBackup uses for the
-// JSON backup.
-async function fetchFullTrainingHistory(store, userId) {
-  const { data, error } = await _supabase.from('zane_session_entries').select('*, sets:zane_sets(*)').eq('user_id', userId).order('entry_idx');
-  if (error) throw error;
+function mapFullSessionRow(s) {
+  return {
+    id: s.id,
+    scheduleId: s.schedule_id,
+    dayId: s.day_id,
+    dayName: s.day_name,
+    date: s.date,
+    startedAt: s.started_at ?? null,
+    ended: s.ended,
+    entries: [],
+    durationMinutes: s.duration_minutes ?? null,
+    feel: s.feel ?? null,
+    ...(s.is_bonus ? { isBonus: true } : {}),
+    ...(s.is_freestyle ? { isFreestyle: true } : {}),
+    ...(s.is_deload ? { isDeload: true } : {}),
+    ...(s.is_cleanup ? { isCleanup: true } : {}),
+    ...(s.imported ? { imported: true } : {}),
+    ...(s.meso_recap ? { mesoRecap: s.meso_recap } : {}),
+    ...(s.readiness ? { readiness: s.readiness } : {}),
+    ...(s.signal_weight ? { signalWeight: s.signal_weight } : {}),
+    ...(s.cycle_pos != null ? { cyclePos: s.cycle_pos } : {}),
+  };
+}
+
+async function fetchFullTrainingRows(userId) {
+  const [sessionRows, entryRows, setRows] = await Promise.all([
+    fetchAllRowsPaged(() => _supabase.from('zane_sessions')
+      .select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, imported, meso_recap, readiness, signal_weight, cycle_pos')
+      .eq('user_id', userId).order('id')),
+    fetchAllRowsPaged(() => _supabase.from('zane_session_entries')
+      .select('*').eq('user_id', userId).order('id')),
+    // Fetch sets as their own top-level resource. An embedded
+    // `sets:zane_sets(*)` relation can be capped independently of the parent
+    // entry page, which is unacceptable for a destructive-restore backup.
+    fetchAllRowsPaged(() => _supabase.from('zane_sets')
+      .select('*').eq('user_id', userId).order('id')),
+  ]);
+
+  const setsByEntry = {};
+  for (const row of setRows) {
+    if (!setsByEntry[row.entry_id]) setsByEntry[row.entry_id] = [];
+    setsByEntry[row.entry_id].push(row);
+  }
   const bySession = {};
-  for (const e of (data || [])) {
+  for (const row of entryRows) {
+    const e = { ...row, sets: setsByEntry[row.id] || [] };
     if (!bySession[e.session_id]) bySession[e.session_id] = [];
     bySession[e.session_id].push(e);
   }
-  return store.sessions.map(s => ({
-    ...s,
-    entries: bySession[s.id] ? mapEntryRows(bySession[s.id]) : s.entries,
-  }));
+  for (const rows of Object.values(bySession)) rows.sort((a, b) => a.entry_idx - b.entry_idx);
+  sessionRows.sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')) || String(b.id).localeCompare(String(a.id)));
+  return { sessionRows, bySession };
+}
+
+// Full training history for the "Export Training CSV" button (Settings →
+// Data) and JSON backups. Session metadata, entries and sets are all fetched
+// fresh and paged. The local store is still overlaid for rows it knows about so
+// an in-memory/offline edit keeps the same export semantics as before, while
+// server rows beyond the boot query's cap are no longer omitted.
+async function fetchFullTrainingHistory(store, userId, base = null) {
+  const { sessionRows, bySession } = await fetchFullTrainingRows(userId);
+  const freshSessions = sessionRows.map(row => {
+    const mapped = mapFullSessionRow(row);
+    return {
+      ...mapped,
+      entries: bySession[row.id] ? mapEntryRows(bySession[row.id]) : [],
+    };
+  });
+  return mergeCompleteBackupCollection(freshSessions, store?.sessions, base?.sessions);
 }
 
 // The Macros/Adherence/Targets Health cards merged into one composite
@@ -2923,76 +3237,80 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const isCoachLoad = !!_opts.coachLoad;
   const histCutoff = historyWindowCutoffISO();
   const foodHistCutoff = historyWindowCutoffISO(new Date(), FOOD_HISTORY_WINDOW_DAYS);
+  // Factories keep every builder lazy until its hydration stage starts. They
+  // are also required for paged collections: every range must be applied to a
+  // fresh builder instead of reusing a mutated PostgREST query object.
   const queries = [
-    _supabase.from('zane_profiles').select('id, name, tier, tier_granted_at, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
-    _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId),
-    _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId),
+    () => _supabase.from('zane_profiles').select('id, name, tier, tier_granted_at, x_handle, x_handle_public, x_handle_prompt_opted_out').eq('id', userId).maybeSingle(),
+    () => _supabase.from('zane_exercises').select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels').eq('user_id', userId).order('id'),
+    () => _supabase.from('zane_schedules').select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template').eq('user_id', userId).order('id'),
     // Session METADATA stays complete (cheap; streaks/calendar need the full
     // date list), the legacy entries JSONB is no longer selected.
-    _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, imported, meso_recap, readiness, signal_weight, cycle_pos')
-      .eq('user_id', userId).order('date', { ascending: false }),
-    _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
-    _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId),
+    () => _supabase.from('zane_sessions').select('id, schedule_id, day_id, day_name, date, started_at, ended, duration_minutes, feel, is_bonus, is_freestyle, is_deload, is_cleanup, imported, meso_recap, readiness, signal_weight, cycle_pos')
+      .eq('user_id', userId).order('date', { ascending: false }).order('id', { ascending: false }),
+    () => _supabase.from('zane_user_settings').select('*').eq('user_id', userId).maybeSingle(),
+    () => _supabase.from('zane_skips').select('id, date, day_id, day_name, skip_reason, skipped_at').eq('user_id', userId).order('id'),
     // Boot window: relational set data only for recent sessions (the inner
     // join filters on the parent session's date). An in-progress session
     // older than the window is fetched separately below.
-    _supabase.from('zane_session_entries')
+    () => _supabase.from('zane_session_entries')
       .select('*, sets:zane_sets(*), session:zane_sessions!inner(date)')
       .eq('user_id', userId)
       .gte('session.date', histCutoff)
-      .order('entry_idx'),
+      .order('entry_idx').order('id'),
     // Server-side history aggregates (migrations 0059/0060): all-time PR
     // baselines per exercise + per-session volume/set counts for everything
     // outside the boot window. Passing p_user_id covers coach loads too.
-    _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
-    _supabase.rpc('get_session_stats', { p_user_id: userId, p_cutoff: histCutoff }),
+    () => _supabase.rpc('get_exercise_best_e1rm', { p_user_id: userId }),
+    () => _supabase.rpc('get_session_stats', { p_user_id: userId, p_cutoff: histCutoff }),
     // Coaching data, only for own store load, not when a coach loads a client
-    isCoachLoad ? null : _supabase.rpc('get_coach_info'),
-    isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
-    isCoachLoad ? null : _supabase.from('zane_coaching_notes')
+    () => isCoachLoad ? null : _supabase.rpc('get_coach_info'),
+    () => isCoachLoad ? null : _supabase.rpc('get_coaching_clients'),
+    () => isCoachLoad ? null : _supabase.from('zane_coaching_notes')
       .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
       .is('read_at', null)
       .neq('author_id', userId)
-      .not('coaching_id', 'like', 'support_%'),
+      .not('coaching_id', 'like', 'support_%')
+      .order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Real coaching row (for check-in requests), exclude self-coaching and support rows.
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
+    () => isCoachLoad ? null : _supabase.from('zane_coaching').select('id, checkin_requested_at, checkin_enabled').eq('client_id', userId).eq('status', 'active').neq('coach_id', userId).not('id', 'like', 'support_%').maybeSingle(),
     // Self-coaching row (coach_id = client_id), if the user is their own coach
-    isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
+    () => isCoachLoad ? null : _supabase.from('zane_coaching').select('id').eq('coach_id', userId).eq('client_id', userId).eq('status', 'active').maybeSingle(),
     // Cardio quick-logs, all records for the user (typically < a few hundred rows)
-    _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    () => _supabase.from('zane_cardio_logs').select('id, date, type, duration_minutes, distance_m, pace_feeling, effort, note, session_id, created_at').eq('user_id', userId).order('date', { ascending: false }).order('id', { ascending: false }),
     // Cardio training plans, manual weekly targets or progressive goal plans
-    _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => _supabase.from('zane_cardio_plans').select('id, name, activity_type, archived, mode, days, manual_targets, goal, goal_due_date, start_fitness, generated_weeks, plan_start_date, created_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Daily health logs (weight / steps / macros / water), one row per day,
     // all records for the user. Coach reads a client's via the same RLS path.
-    _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }),
+    () => _supabase.from('zane_daily_logs').select('id, date, weight, waist_cm, hips_cm, chest_cm, arm_cm, thigh_cm, calf_cm, body_fat_pct, steps, calories, protein, carbs, fat, fiber, water_ml, note, off_plan_note, meal_of_choice, meal_of_choice_hour, food_day_closed, adherence, targets_snap, daily_coach_fields, ai_summary, ai_summary_generated_at, updated_at, created_at').eq('user_id', userId).order('date', { ascending: false }).order('id', { ascending: false }),
     // Sick/vacation history periods, used for missed-workout stats and training adherence.
     // Coach reads client's periods via coach-of-client RLS policy (migration 0084).
-    _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }),
+    () => _supabase.from('zane_status_periods').select('id, mode, started_at, ended_at').eq('user_id', userId).order('started_at', { ascending: false }).order('id', { ascending: false }),
     // Support tickets, user's own ticket list, newest activity first
-    isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
+    () => isCoachLoad ? null : _supabase.rpc('get_user_support_chats'),
     // Blood glucose readings, multiple per day, value always in mmol/L (migration 0101)
-    _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => _supabase.from('zane_glucose_logs').select('id, date, time, value_mmol, context, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Blood pressure readings: multiple per day, systolic/diastolic in mmHg (migration 0173)
-    _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => _supabase.from('zane_blood_pressure_logs').select('id, date, time, systolic, diastolic, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Body temperature readings: multiple per day, value always in Celsius (migration 0173)
-    _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => _supabase.from('zane_body_temp_logs').select('id, date, time, value_c, note, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Reusable workout templates (migration 0107)
-    _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => _supabase.from('zane_workout_templates').select('id, name, exercises, created_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Mesocycle state per plan, replaces localStorage logbook-meso-state (migration 0120)
-    _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId),
+    () => _supabase.from('zane_meso_states').select('id, schedule_id, weeks, start_date, start_cycle_index, started_at, deltas, joint_flags, pump_low_counts, weight_boosts, weight_boost_declines, growth_counts, rep_miss_counts, affinity, autoreg_state, completions, pending_meso2, updated_at').eq('user_id', userId).order('id'),
     // Coach's own saved check-in schema templates: irrelevant when loading a
     // CLIENT's store as a coach, these belong to the acting coach, not the client.
-    isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_checkin_schema_templates').select('id, name, schema, created_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Plan-editor drafts (migration 0162): in-progress autosave, own store only.
-    isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId),
+    () => isCoachLoad ? null : _supabase.from('zane_plan_drafts').select('schedule_id, draft, updated_at').eq('user_id', userId).order('schedule_id'),
     // Water tracker per-entry logs (migration 0180): multiple entries per day,
     // all records for the user. Coach reads a client's via coach-of-client RLS.
-    _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => _supabase.from('zane_water_logs').select('id, date, time, amount_ml, name, category, breakdown, created_at').eq('user_id', userId).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Food tracker per-entry logs (migration 0186): multiple entries per day,
     // denormalized at write time. Coach reads a client's via coach-of-client RLS.
     // Windowed to FOOD_HISTORY_WINDOW_DAYS (see its own comment): nothing
     // reads food history further back than that today.
-    _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => _supabase.from('zane_food_logs').select('id, date, time, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, logged_unit, split_batch, planned, template_slot_id, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Food tracker quick-add: user-starred foods and saved recipes (migration
     // 0187), own store only: a coach's read-only client view has no use for
     // another user's personal shortcuts. Favorites are owner-only RLS; recipes
@@ -3000,27 +3318,27 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // skipped on a coach load because the client view doesn't render them,
     // pushMealPlanToClient fetches the client's recipes directly when it needs
     // them for its dedup.
-    isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_food_favorites').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, units, created_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Per-user barcode corrections. The shared zane_foods cache remains the
     // provider snapshot; these rows are the owner's private overlay.
-    isCoachLoad ? null : _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, cooked_weight_g, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_food_barcode_overrides').select('source, source_id, food_name, brand, kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g, created_at, updated_at').eq('user_id', userId).order('updated_at', { ascending: false }).order('source').order('source_id'),
+    () => isCoachLoad ? null : _supabase.from('zane_food_recipes').select('id, name, items, portions, cooked_weight_g, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Plan Mode meal-template slots (migration 0197), own store only, same
     // owner-only reasoning as favorites/recipes above.
-    isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }),
+    () => isCoachLoad ? null : _supabase.from('zane_food_template_slots').select('id, food_id, food_name, brand, source, quantity_g, calories, protein, carbs, fat, fiber, sugar, sat_fat, sodium_mg, recipe_items, recipe_id, logged_total_portions, logged_cooked_grams, logged_cooked_weight_g, hour, day_type, sort_idx, meal_plan_id, created_at').eq('user_id', userId).order('sort_idx', { ascending: true }).order('id'),
     // Plan Mode auto-fill markers (migration 0198): which days the template was
     // already auto-materialized for, cross-device. Only recent days matter (the
     // fill effect only ever runs for today), so window like the food logs.
-    isCoachLoad ? null : _supabase.from('zane_food_template_days').select('id, date').eq('user_id', userId).gte('date', foodHistCutoff),
+    () => isCoachLoad ? null : _supabase.from('zane_food_template_days').select('id, date').eq('user_id', userId).gte('date', foodHistCutoff).order('id'),
     // Plan Mode meal plans (migration 0199): named containers (Cut/Bulk), one
     // active. Mirrors zane_schedules. Own store only, same reasoning as the
     // slots/favorites/recipes above.
-    isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_food_meal_plans').select('id, name, archived, is_template, coach_id, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
     // Shopping List per-food preferences (migration 0215/0216/0217/0227): name
     // override, exclude flag, package size, stock baseline, identity
     // snapshot, own store only like the rest of the Food Tracker's personal
     // collections above.
-    isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, excluded_until, package_size_g, low_stock_threshold_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId),
+    () => isCoachLoad ? null : _supabase.from('zane_food_shopping_prefs').select('id, food_id, shopping_key, name_override, excluded, excluded_until, package_size_g, low_stock_threshold_g, stock_baseline_g, stock_set_at, food_name, brand, created_at, updated_at').eq('user_id', userId).order('id'),
     // Medications feature (migration 0218): own store only for the same
     // reason as the meal-plan collections above, isCoachLoad's own narrow
     // purpose (loadClientStore, only ever used to safely append a pushed
@@ -3028,29 +3346,85 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
     // for any of these either. A coach VIEWS a client's medications through
     // its own direct RLS-backed query (mirrors ClientNutritionTab in
     // screens-coaching-detail.jsx), not through this boot load.
-    isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }),
-    isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId),
-    isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId),
+    () => isCoachLoad ? null : _supabase.from('zane_medication_plans').select('id, name, archived, is_template, coach_id, active, created_at, updated_at').eq('user_id', userId).order('created_at', { ascending: false }).order('id', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_medications').select('id, name, brand, category, unit_label, package_size, stock_baseline, stock_set_at, archived, exclude_from_pillbox, low_stock_threshold, exclude_from_low_stock, track_stock, created_at, updated_at').eq('user_id', userId).order('id'),
+    () => isCoachLoad ? null : _supabase.from('zane_medication_schedule_slots').select('id, medication_id, medication_plan_id, weekdays, hour, dose_qty, interval_days, start_date, end_date, created_at, updated_at').eq('user_id', userId).order('id'),
     // Windowed like foodLogsRes above (same FOOD_HISTORY_WINDOW_DAYS cutoff):
     // the timeline only ever needs recent history, materialized/older doses
     // don't need to sit in memory forever.
-    isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }),
+    () => isCoachLoad ? null : _supabase.from('zane_medication_logs').select('id, medication_id, medication_name, date, time, dose_qty, planned, skipped, schedule_slot_id, reminder_sent_at, reminder_count, snoozed_until, created_at').eq('user_id', userId).gte('date', foodHistCutoff).order('date', { ascending: false }).order('time', { ascending: false }).order('id', { ascending: false }),
     // Migration 0221: which medication belongs to which plan(s), many-to-many.
-    isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId),
+    () => isCoachLoad ? null : _supabase.from('zane_medication_plan_items').select('id, medication_plan_id, medication_id, created_at').eq('user_id', userId).order('id'),
     // Weekly Prep pack-check marker (migration 0223): forward-looking, unlike
     // foodTemplateDaysRes's backward-looking history window, since packing is
     // always for the coming days, never the past.
-    isCoachLoad ? null : _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()),
+    () => isCoachLoad ? null : _supabase.from('zane_medication_pillbox_checks').select('id, date, schedule_slot_id').eq('user_id', userId).gte('date', todayISO()).order('id'),
   ];
   // Stage one contains only the data needed to render Home correctly and to
   // resume or start training. Query builders are lazy, so secondary requests
   // do not hit the network until the second Promise.all below.
   const coreQueryIndexes = [0, 1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 23];
   const medicationQueryIndexes = [35, 36, 37, 38, 39, 40];
+  const ownStoreOnlyQueryIndexes = new Set([
+    9, 10, 11, 12, 13, 18, 24, 25, 28, 29, 30, 31, 32, 33, 34,
+    ...medicationQueryIndexes,
+  ]);
+  const pagedQueryIndexes = new Set([
+    1, 2, 3, 5, 6, 11, 14, 15, 16, 17, 19, 20, 21, 22, 23,
+    24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+  ]);
+  const pagedQueryKeysets = new Map([
+    [3, [{ column: 'date', ascending: false }, { column: 'id', ascending: false }]],
+    [6, [{ column: 'entry_idx', ascending: true }, { column: 'id', ascending: true }]],
+    [11, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [14, [{ column: 'date', ascending: false }, { column: 'id', ascending: false }]],
+    [15, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [16, [{ column: 'date', ascending: false }, { column: 'id', ascending: false }]],
+    [17, [{ column: 'started_at', ascending: false }, { column: 'id', ascending: false }]],
+    [19, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+    [20, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+    [21, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+    [22, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [24, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [25, [{ column: 'schedule_id', ascending: true }]],
+    [26, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+    [27, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+    [28, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [29, [{ column: 'updated_at', ascending: false }, { column: 'source', ascending: true }, { column: 'source_id', ascending: true }]],
+    [30, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [31, [{ column: 'sort_idx', ascending: true }, { column: 'id', ascending: true }]],
+    [33, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [35, [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }]],
+    [38, [{ column: 'date', ascending: false }, { column: 'time', ascending: false }, { column: 'id', ascending: false }]],
+  ]);
   const queryResults = new Array(queries.length);
-  await runDbTaskBatch(coreQueryIndexes, async idx => {
-    queryResults[idx] = await queries[idx];
-  }, { priority: 'foreground' });
+  const runLoadStage = async (indexes, priority) => {
+    await Promise.all(indexes.map(async idx => {
+      if (pagedQueryIndexes.has(idx)) {
+        // fetchAllRowsPaged schedules each individual page. Do not wrap this
+        // call in runDbTaskBatch/scheduleDbTask: an outer task waiting for an
+        // inner scheduled page can occupy every slot and deadlock the queue.
+        try {
+          queryResults[idx] = {
+            data: await fetchAllRowsPaged(queries[idx], {
+              priority,
+              keyset: pagedQueryKeysets.get(idx) || [{ column: 'id', ascending: true }],
+            }),
+            error: null,
+          };
+        } catch (error) {
+          // Preserve the old Supabase result contract so optional coaching
+          // reads can still soft-fail below. Unexpected factory/programming
+          // errors have no PostgREST cause and must keep rejecting directly.
+          if (!error?.cause) throw error;
+          queryResults[idx] = { data: null, error: error.cause };
+        }
+      } else {
+        queryResults[idx] = await scheduleDbTask(queries[idx], { priority, kind: 'read' });
+      }
+    }));
+  };
+  await runLoadStage(coreQueryIndexes, 'foreground');
 
   const coreProfileRes = queryResults[0];
   const coreSettRes = queryResults[4];
@@ -3124,21 +3498,24 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // Omitted (not empty) on failure, so the boot merges keep the cached map.
   const exerciseBests = bestsFailed ? undefined : bestsMap;
 
-  // statsBySession is one of the two proofs that an unended session holds
-  // real work; the other is entriesBySession. When the stats RPC failed the
-  // map is empty for every session, so an unended session whose sets live
-  // only on the server would look verifiably empty and get deleted. Skip the
-  // sweep entirely rather than delete on missing evidence.
-  const orphanIds = (isCoachLoad || sessionStatsFailed) ? [] : (queryResults[3].data || [])
-    .filter(s => {
-      if (s.ended !== null || s.id === sett.in_progress_session_id) return false;
-      const entryRows = entriesBySession[s.id];
-      const stats = statsBySession[s.id];
-      return !(entryRows && entryRows.length > 0) && !(stats && stats.exercise_count > 0);
-    })
-    .map(s => s.id);
-  if (orphanIds.length) {
-    _supabase.from('zane_sessions').delete().in('id', orphanIds).then(() => {}, () => {});
+  // Boot can identify cleanup candidates, but it must never DELETE from this
+  // multi-request snapshot: another device may create a session between the
+  // settings/session/entry reads. The RPC rechecks pointer, age and relational
+  // emptiness atomically immediately before deleting one candidate. A failed
+  // derived-stats read supplies insufficient evidence, so skip even the safe
+  // RPC candidate pass in that case.
+  const orphanStartedBefore = new Date(Date.now() - ORPHAN_SESSION_MIN_AGE_MS).toISOString();
+  const orphanCandidateIds = findEmptyOrphanSessionCandidates(
+    queryResults[3].data, sett.in_progress_session_id, entriesBySession, statsBySession,
+    { coachLoad: isCoachLoad, statsFailed: sessionStatsFailed, startedBefore: orphanStartedBefore },
+  );
+  for (const id of orphanCandidateIds) {
+    _supabase.rpc('delete_empty_orphan_session', {
+      p_session_id: id,
+      p_started_before: orphanStartedBefore,
+    }).then(({ error }) => {
+      if (error) console.warn('orphan session cleanup failed:', error);
+    }, error => console.warn('orphan session cleanup failed:', error));
   }
 
   if (typeof _opts.onEssential === 'function') {
@@ -3157,10 +3534,9 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   const medsEnabledAtLoad = !isCoachLoad && !!coreSettRes.data?.meds_enabled;
   const deferredQueryIndexes = queries.map((_, idx) => idx)
     .filter(idx => !coreQueryIndexes.includes(idx))
+    .filter(idx => !isCoachLoad || !ownStoreOnlyQueryIndexes.has(idx))
     .filter(idx => medsEnabledAtLoad || !medicationQueryIndexes.includes(idx));
-  await runDbTaskBatch(deferredQueryIndexes, async idx => {
-    queryResults[idx] = await queries[idx];
-  }, { priority: 'background' });
+  await runLoadStage(deferredQueryIndexes, 'background');
   for (const idx of medicationQueryIndexes) {
     if (!queryResults[idx]) queryResults[idx] = { data: [], error: null };
   }
@@ -3268,6 +3644,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
   // with >1 active coach yields a PGRST116 "multiple rows" error, do NOT throw
   // on these or such a user can't boot; degrade the banner instead.
 
+  const hydratedUnreadRows = await hydrateCoachingNoteRows(unreadNotesRes?.data || []);
   const result = {
     // tier is server-authored (granted by the founding-member trigger) and never
     // written back by syncStore. Defaults to 'free' so a profile row that predates
@@ -3534,7 +3911,7 @@ async function loadFromSupabase(userId, _depth = 0, _opts = {}) {
         checkinEnabled: r.checkin_enabled ?? true,
       })),
       asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
-      unreadNotes: (unreadNotesRes?.data || []).map(n => ({
+      unreadNotes: hydratedUnreadRows.map(n => ({
         id: n.id,
         coachingId: n.coaching_id,
         authorId: n.author_id,
@@ -3589,7 +3966,10 @@ async function autoArchiveMissedDays(userId, state) {
 
   const nowISO = new Date().toISOString();
   const rows = toCreate.map(({ date, dayId, dayName }) => ({
-    id: uid(), user_id: userId, date, day_id: dayId, day_name: dayName,
+    // Deterministic across devices: two concurrent boots now target the same
+    // primary key instead of minting two logical skip rows for one missed day.
+    id: `autoskip_${encodeURIComponent(userId)}_${date}_${encodeURIComponent(dayId || '')}`,
+    user_id: userId, date, day_id: dayId, day_name: dayName,
     skip_reason: '—', skipped_at: nowISO,
   }));
   // Add the archived skips to the returned state and fire the INSERT WITHOUT
@@ -3603,7 +3983,10 @@ async function autoArchiveMissedDays(userId, state) {
     id: r.id, date: r.date, dayId: r.day_id, dayName: r.day_name,
     skipReason: r.skip_reason, skippedAt: r.skipped_at,
   })));
-  _supabase.from('zane_skips').insert(rows).then(({ error }) => {
+  _supabase.from('zane_skips').upsert(rows, {
+    onConflict: 'user_id,date,day_id',
+    ignoreDuplicates: true,
+  }).then(({ error }) => {
     if (error) console.error('auto-archive missed days:', error);
   });
 }
@@ -3643,12 +4026,27 @@ function diffWindowedCollectionById(prevList, nextList, collection) {
   // cannot accidentally turn into deletes.
   const currentIds = new Set((nextList || []).map(row => row?.id).filter(id => id != null));
   const remembered = _localDeletedRows.get(collection);
-  const deletedRows = remembered
-    ? [...remembered.values()].filter(row => row?.id != null && !currentIds.has(row.id))
-    : [];
+  const observed = _localObservedRows.get(collection);
+  const deletedRowsById = new Map();
+  for (const row of (remembered ? remembered.values() : [])) {
+    if (row?.id != null && !currentIds.has(row.id)) deletedRowsById.set(row.id, row);
+  }
+  for (const row of (observed ? observed.values() : [])) {
+    if (row?.id != null && !currentIds.has(row.id)) deletedRowsById.set(row.id, row);
+  }
+  const deletedRows = [...deletedRowsById.values()];
   const diff = diffCollectionById([...(prevList || []), ...deletedRows.filter(row => !(prevList || []).some(p => p?.id === row.id))], nextList);
   if (diff.removed.length) rememberLocalDeletedRows(collection, diff.removed);
   const confirmed = _localConfirmedRows.get(collection);
+  if (confirmed) {
+    let observedRows = _localObservedRows.get(collection);
+    if (!observedRows) { observedRows = new Map(); _localObservedRows.set(collection, observedRows); }
+    for (const row of (nextList || [])) {
+      const serverRow = confirmed.get(row?.id);
+      if (serverRow && syncValuesEqual(row, serverRow)) observedRows.set(row.id, serverRow);
+    }
+    while (observedRows.size > LOCAL_CONFIRMED_ROWS_MAX) observedRows.delete(observedRows.keys().next().value);
+  }
   if (!confirmed || !diff.upsert.length) return diff;
   diff.upsert = diff.upsert.filter(row => {
     const serverRow = confirmed.get(row?.id);
@@ -4726,6 +5124,29 @@ async function parseMealText(description, photo, previousItems) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) return { ok: false, error: data?.error || `Request failed (${res.status})` };
   return { ok: true, items: Array.isArray(data.items) ? data.items : [] };
+}
+
+const ORPHAN_SESSION_MIN_AGE_MS = 15 * 60 * 1000;
+
+function findEmptyOrphanSessionCandidates(sessionRows, inProgressId, entriesBySession, statsBySession, {
+  coachLoad = false,
+  statsFailed = false,
+  startedBefore = new Date(Date.now() - ORPHAN_SESSION_MIN_AGE_MS).toISOString(),
+} = {}) {
+  if (coachLoad || statsFailed) return [];
+  const cutoffMs = Date.parse(startedBefore);
+  if (!Number.isFinite(cutoffMs)) return [];
+  return (sessionRows || []).filter(s => {
+    if (s.ended !== null || s.id === inProgressId) return false;
+    // `started_at` is the creation guard. A null/invalid timestamp is
+    // insufficient proof and must fail closed rather than deleting a session
+    // another device may have only just created.
+    const startedMs = Date.parse(s.started_at || '');
+    if (!Number.isFinite(startedMs) || startedMs >= cutoffMs) return false;
+    const entryRows = entriesBySession?.[s.id];
+    const stats = statsBySession?.[s.id];
+    return !(entryRows && entryRows.length > 0) && !(stats && stats.exercise_count > 0);
+  }).map(s => s.id);
 }
 
 // Parses a recipe photo (and an optional note such as "8 servings") through
@@ -7189,6 +7610,11 @@ const _localSnapshotState = new Map();
 // Keep the registry bounded too: it is a process-local aid, never an archive.
 const _localConfirmedRows = new Map();
 const LOCAL_CONFIRMED_ROWS_MAX = 1000;
+// A confirmed lazy row becomes deletion-authoritative only after it was also
+// observed in the live store. This distinction prevents a fetch that never
+// merged into UI state from turning into a delete, while still allowing a
+// later removal to be retried when the boot-window base never contained it.
+const _localObservedRows = new Map();
 // Rows fetched lazily and then deleted while offline need a durable marker.
 // Keep the complete row when available so a future boot can reconstruct the
 // last server baseline and emit the DELETE again. This registry is process
@@ -7560,6 +7986,7 @@ function loadLocalState(userId) {
     // A user switch must never let lazy rows from the previous account
     // influence the next account's pending-diff decision.
     _localConfirmedRows.clear();
+    _localObservedRows.clear();
     _localDeletedRows.clear();
     const pairKey = `logbook-pair-${userId}`;
     let pairRaw = localStorage.getItem(pairKey);
@@ -7751,11 +8178,13 @@ function clearLocal(userId) {
       localStorage.removeItem(`logbook-base-${userId}`);
       localStorage.removeItem(`logbook-pair-${userId}`);
       _localSnapshotState.delete(userId);
+      _localObservedRows.clear();
       _localDeletedRows.clear();
       return;
     }
     Object.keys(localStorage).filter(k => k.startsWith('logbook-')).forEach(k => localStorage.removeItem(k));
     _localSnapshotState.clear();
+    _localObservedRows.clear();
     _localDeletedRows.clear();
   } catch (_) {}
 }
@@ -8032,6 +8461,47 @@ async function signedSocialAttachment(row) {
   return mapSocialAttachment(row, data?.signedUrl || null);
 }
 
+const SOCIAL_ATTACHMENT_SIGN_BATCH_SIZE = 100;
+
+// Sign the bounded message snapshot in deterministic, API-sized batches. A
+// missing/failed item only loses its display URL, never its attachment metadata;
+// the same fallback applies to every row in a failed batch. Match results by
+// their returned path rather than array position because Storage is free to
+// return a different order. The positional fallback covers older client
+// responses that omit `path` while still preserving the request order.
+async function signedSocialAttachments(rows) {
+  const source = Array.isArray(rows) ? rows : [];
+  const mapped = source.map(row => mapSocialAttachment(row));
+  const eligible = source
+    .map((row, index) => ({ row, index, path: typeof row?.storage_path === 'string' ? row.storage_path : '' }))
+    .filter(item => item.path);
+
+  for (let offset = 0; offset < eligible.length; offset += SOCIAL_ATTACHMENT_SIGN_BATCH_SIZE) {
+    const batch = eligible.slice(offset, offset + SOCIAL_ATTACHMENT_SIGN_BATCH_SIZE);
+    const paths = batch.map(item => item.path);
+    let result;
+    try {
+      result = await _supabase.storage.from('social-chat-attachments').createSignedUrls(paths, 300);
+    } catch (_) {
+      continue;
+    }
+    if (result?.error || !Array.isArray(result?.data)) continue;
+
+    const urlsByPath = new Map();
+    result.data.forEach((item, index) => {
+      if (!item || item.error) return;
+      const path = typeof item.path === 'string' && item.path ? item.path : paths[index];
+      const signedUrl = item.signedUrl || item.signedURL || null;
+      if (path && signedUrl) urlsByPath.set(path, signedUrl);
+    });
+    for (const item of batch) {
+      const signedUrl = urlsByPath.get(item.path);
+      if (signedUrl) mapped[item.index] = mapSocialAttachment(item.row, signedUrl);
+    }
+  }
+  return mapped;
+}
+
 async function loadSocialWorkoutFeed() {
   return runOptionalDbTask(async () => {
     const { data, error } = await scheduleDbTask(
@@ -8135,9 +8605,9 @@ async function loadFriendsStateUncached(userId, weekStart) {
   if (firstError) throw firstError;
   if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
   const messageIds = new Set((messagesRes.data || []).map(row => row.id));
-  const attachments = await runDbTaskBatch((attachmentsRes.data || [])
-    .filter(row => messageIds.has(row.message_id))
-    .map(row => row), row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)), { priority: 'background' });
+  const attachments = await signedSocialAttachments(
+    (attachmentsRes.data || []).filter(row => messageIds.has(row.message_id)),
+  );
   const reads = new Set((readsRes.data || []).filter(r => r.user_id === userId).map(r => r.message_id));
   const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
   const groups = (groupsRes.data || []).map(g => ({
@@ -8237,10 +8707,8 @@ async function loadSocialMessageState(userId) {
     if (firstError) throw firstError;
     if (attachmentsRes.error) console.warn('social attachment metadata load failed:', attachmentsRes.error);
     const messageIds = new Set((messagesRes.data || []).map(row => row.id));
-    const attachments = await runDbTaskBatch(
+    const attachments = await signedSocialAttachments(
       (attachmentsRes.data || []).filter(row => messageIds.has(row.message_id)),
-      row => signedSocialAttachment(row).catch(() => mapSocialAttachment(row)),
-      { priority: 'background' },
     );
     const reads = new Set((readsRes.data || []).map(row => row.message_id));
     const messages = [...(messagesRes.data || [])].reverse().map(row => mapSocialMessage(row, attachments));
@@ -8547,8 +9015,55 @@ async function createSocialGroupPlanShare(groupId, planName, snapshot) {
 }
 
 async function markSocialPlanImported(shareId) {
-  const { error } = await _supabase.rpc('social_mark_plan_imported', { p_share_id: shareId });
+  const { data, error } = await _supabase.rpc('social_mark_plan_imported', { p_share_id: shareId });
   if (error) throw error;
+  // Older deployments returned a boolean while the current receipt-only RPC
+  // returns void. A void response is successful without making arbitrary
+  // objects or an explicit legacy false result truthy.
+  return data == null ? true : data === true;
+}
+
+async function importSocialPlanShareAtomically(shareId, schedule, exercises) {
+  const { data, error } = await _supabase.rpc('social_import_plan_share', {
+    p_share_id: shareId,
+    p_schedule: schedule,
+    p_exercises: exercises,
+  });
+  if (error) throw error;
+  const scheduleId = typeof data?.schedule_id === 'string' && data.schedule_id ? data.schedule_id : null;
+  if (!scheduleId || typeof data?.imported !== 'boolean') {
+    throw new Error('Shared plan import returned an invalid receipt');
+  }
+  if (data.imported && scheduleId !== schedule?.id) {
+    throw new Error('Shared plan import returned a mismatched schedule id');
+  }
+  return { imported: data.imported, scheduleId };
+}
+
+async function loadImportedSocialPlan(scheduleId) {
+  if (!scheduleId) return null;
+  const scheduleResult = await _supabase.from('zane_schedules')
+    .select('id, name, days, archived, versions, is_flex, sessions_per_week, mesocycle_weeks, mesocycle_start_rir, mesocycle_end_rir, mesocycle_rir_enabled, mesocycle_autoregulate, mesocycle_autoregulate_mode, program_type, program_data, is_template')
+    .eq('id', scheduleId)
+    .maybeSingle();
+  if (scheduleResult.error) throw scheduleResult.error;
+  if (!scheduleResult.data) return null;
+  const schedule = healScheduleWeekdays({
+    ...scheduleResult.data,
+    days: Array.isArray(scheduleResult.data.days) ? scheduleResult.data.days : [],
+    versions: Array.isArray(scheduleResult.data.versions) ? scheduleResult.data.versions : [],
+  });
+  const exerciseIds = [...new Set((schedule.days || []).flatMap(day => (day?.items || []).map(item => item?.exId)).filter(Boolean))];
+  let exercises = [];
+  if (exerciseIds.length) {
+    const exerciseResult = await _supabase.from('zane_exercises')
+      .select('id, name, tags, note, category, unilateral, equipment, progression_reps, movement_type, no_weight_reps, log_mode, pull_bodyweight, bodyweight_mode, youtube_url, note_pinned, progression_increment, horn_labels')
+      .in('id', exerciseIds)
+      .order('id');
+    if (exerciseResult.error) throw exerciseResult.error;
+    exercises = exerciseResult.data || [];
+  }
+  return { schedule, exercises };
 }
 
 async function deleteSocialPlanShare(shareId) {
@@ -8768,29 +9283,40 @@ async function loadClientStore(clientId) {
   return loadFromSupabase(clientId, 0, { coachLoad: true });
 }
 
+function deterministicPushId(prefix, payload) {
+  const value = stableJson(payload);
+  let first = 0x811c9dc5;
+  let second = 0x9e3779b9;
+  for (let index = 0; index < value.length; index++) {
+    const code = value.charCodeAt(index);
+    first = Math.imul(first ^ code, 0x01000193) >>> 0;
+    second = Math.imul(second ^ (code + index), 0x85ebca6b) >>> 0;
+  }
+  return `${prefix}_${first.toString(36)}${second.toString(36)}`;
+}
+
 // Push a meal plan into a client's account (Plan Mode coaching). Copies the
 // plan + its slots, copies referenced recipes (deduped by name against the
 // client's own), enables the client's plan mode so the plan is reachable, and
-// optionally activates it. Mirrors the training pushToClient: ordered writes
-// (plan first, active pointer second) via syncStore retargeted to the client,
-// best-effort coaching note after. Shared by the coach's FoodTemplateScreen
+// optionally activates it. The server RPC validates the coaching relationship
+// and writes the plan, child rows, and active settings in one transaction;
+// the coaching note remains best-effort. Shared by the coach's FoodTemplateScreen
 // and the client-detail Nutrition tab. Foods carry self-contained snapshots so
 // there is no food-library dedup, unlike a schedule push. Throws on write
 // failure; the note is best-effort. Returns the new plan id.
 async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachingId, clientId, activateNow }) {
-  const clientData = await loadClientStore(clientId);
-  // loadClientStore is a coach-load, which deliberately skips the client's
-  // recipes (loadFromSupabase nulls that query), so clientData.foodRecipes is
-  // always empty and the name-dedup below would always miss, inserting a
-  // duplicate same-named recipe on every push. Fetch the client's recipes
-  // directly instead (coach-of-client read RLS on zane_food_recipes, migration
-  // 0200). Best-effort: on failure fall back to always-copy.
-  let clientRecipes = [];
-  try {
-    const { data } = await _supabase.from('zane_food_recipes').select('id, name').eq('user_id', clientId);
-    clientRecipes = data || [];
-  } catch (_) { clientRecipes = []; }
-  const newPlanId = uid();
+  // A push needs only recipe names for dedup plus the rows it is about to add.
+  // Loading the client's whole store pulled their full session metadata and
+  // every health collection across the network just to append one plan.
+  const clientRecipes = await fetchAllRowsPaged(() => _supabase.from('zane_food_recipes')
+    .select('id, name').eq('user_id', clientId).order('id'));
+  const pushSeed = {
+    clientId, coachUserId, coachingId, plan,
+    slots: slots || [], recipes: recipes || [],
+  };
+  // Deterministic ids let the transactional server RPC recognize a retry of
+  // the same payload instead of creating another plan and child set.
+  const newPlanId = deterministicPushId('mealpush', pushSeed);
   const nowISO = new Date().toISOString();
   const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, createdAt: nowISO, updatedAt: nowISO };
   const recipeIdMap = {};
@@ -8801,26 +9327,34 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
     if (!src) { recipeIdMap[s.recipeId] = null; continue; }
     const existing = clientRecipes.find(r => (r.name || '').trim().toLowerCase() === src.name.trim().toLowerCase());
     if (existing) { recipeIdMap[s.recipeId] = existing.id; continue; }
-    const nid = uid();
+    const nid = deterministicPushId('mealrecipe', { newPlanId, sourceRecipeId: s.recipeId });
     recipeIdMap[s.recipeId] = nid;
     newRecipes.push({ id: nid, name: src.name, items: src.items || [], portions: src.portions || 1, createdAt: nowISO, updatedAt: nowISO });
   }
-  const slotCopies = (slots || []).map(s => ({
-    ...s, id: uid(), mealPlanId: newPlanId,
+  const slotCopies = (slots || []).map((s, index) => ({
+    ...s,
+    id: deterministicPushId('mealslot', { newPlanId, sourceSlotId: s.id || null, index }),
+    mealPlanId: newPlanId,
     recipeId: s.recipeId ? (recipeIdMap[s.recipeId] ?? null) : null,
     createdAt: nowISO,
   }));
-  const withPlan = {
-    ...clientData,
-    settings: { ...clientData.settings, planMode: true },
-    foodRecipes: [...(clientData.foodRecipes || []), ...newRecipes],
-    foodMealPlans: [...(clientData.foodMealPlans || []), planCopy],
-    foodTemplateSlots: [...(clientData.foodTemplateSlots || []), ...slotCopies],
-  };
-  await syncStore(clientData, withPlan, clientId);
-  if (activateNow) {
-    await syncStore(withPlan, { ...withPlan, activeMealTemplateId: newPlanId }, clientId);
-  }
+  const recipeRows = newRecipes.map(recipe => ({
+    id: recipe.id,
+    name: recipe.name,
+    items: recipe.items,
+    portions: recipe.portions,
+  }));
+  const slotRows = slotCopies.map(templateSlotRow(clientId)).map(({ user_id, ...row }) => row);
+  const { data: pushedPlanId, error: pushError } = await _supabase.rpc('push_meal_plan_to_client', {
+    p_coaching_id: coachingId,
+    p_operation_id: newPlanId,
+    p_plan: { id: planCopy.id, name: planCopy.name },
+    p_recipes: recipeRows,
+    p_slots: slotRows,
+    p_activate: !!activateNow,
+  });
+  if (pushError) throw pushError;
+  if (pushedPlanId !== newPlanId) throw new Error('Meal plan push returned an invalid operation id');
   try {
     // Same 'Nutrition' thread the macros-update flow (ClientNutritionTab) posts
     // to, not a per-plan thread: meal-plan pushes are nutrition coaching, they
@@ -8837,6 +9371,26 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
   return newPlanId;
 }
 
+// Plan plus newly-created exercises must commit as one server transaction.
+// A response can be lost after the database commits; the schedule id is the
+// operation id, so repeating that exact operation is harmless and never leaves
+// a schedule pointing at exercises a client-side compensating delete removed.
+async function pushTrainingPlanToClient({ coachingId, clientId, schedule, exercises }) {
+  if (!coachingId || !clientId || !schedule?.id) throw new Error('Invalid training plan push');
+  const scheduleRow = { ...schedule };
+  delete scheduleRow.mode;
+  const exerciseRows = (exercises || []).map(exercise => ({ ...exercise }));
+  const { data: pushedPlanId, error: pushError } = await _supabase.rpc('push_training_plan_to_client', {
+    p_coaching_id: coachingId,
+    p_operation_id: scheduleRow.id,
+    p_schedule: scheduleRow,
+    p_exercises: exerciseRows,
+  });
+  if (pushError) throw pushError;
+  if (pushedPlanId !== scheduleRow.id) throw new Error('Training plan push returned an invalid operation id');
+  return pushedPlanId;
+}
+
 // Mirrors pushMealPlanToClient above almost exactly, one level deeper (plan ->
 // medications -> schedule slots, vs. food's plan -> slots): copies a
 // coach-authored template plan + its medications + their plan membership +
@@ -8850,13 +9404,18 @@ async function pushMealPlanToClient({ plan, slots, recipes, coachUserId, coachin
 // flips the client's own medsEnabled on, same reasoning as planMode above: a
 // pushed plan the client's own feature toggle hides would be pointless.
 async function pushMedicationPlanToClient({ plan, medications, planItems, scheduleSlots, coachUserId, coachingId, clientId }) {
-  const clientData = await loadClientStore(clientId);
-  const newPlanId = uid();
+  const pushSeed = {
+    clientId, coachUserId, coachingId, plan,
+    medications: medications || [], planItems: planItems || [], scheduleSlots: scheduleSlots || [],
+  };
+  // Deterministic ids let the transactional server RPC recognize a retry of
+  // the same payload instead of creating another plan and child set.
+  const newPlanId = deterministicPushId('medpush', pushSeed);
   const nowISO = new Date().toISOString();
   const planCopy = { id: newPlanId, name: plan.name, archived: false, isTemplate: false, coachId: coachUserId, active: true, createdAt: nowISO, updatedAt: nowISO };
   const medIdMap = {};
   const medCopies = (medications || []).map(m => {
-    const nid = uid();
+    const nid = deterministicPushId('pushmed', { newPlanId, sourceMedicationId: m.id });
     medIdMap[m.id] = nid;
     // stockBaseline/stockSetAt/trackStock/excludeFromLowStock/lowStockThreshold/
     // excludeFromPillbox are explicitly reset, not spread from the coach's own
@@ -8882,19 +9441,53 @@ async function pushMedicationPlanToClient({ plan, medications, planItems, schedu
   // land under the copied plan rather than orphaned/planless.
   const planItemCopies = (planItems || [])
     .filter(it => medIdMap[it.medicationId])
-    .map(it => ({ id: uid(), medicationPlanId: newPlanId, medicationId: medIdMap[it.medicationId], createdAt: nowISO }));
+    .map((it, index) => ({
+      id: deterministicPushId('meditem', { newPlanId, sourcePlanItemId: it.id || null, index }),
+      medicationPlanId: newPlanId, medicationId: medIdMap[it.medicationId], createdAt: nowISO,
+    }));
   const slotCopies = (scheduleSlots || [])
     .filter(s => medIdMap[s.medicationId])
-    .map(s => ({ ...s, id: uid(), medicationId: medIdMap[s.medicationId], medicationPlanId: newPlanId, createdAt: nowISO, updatedAt: nowISO }));
-  const withPlan = {
-    ...clientData,
-    settings: { ...clientData.settings, medsEnabled: true },
-    medicationPlans: [...(clientData.medicationPlans || []), planCopy],
-    medications: [...(clientData.medications || []), ...medCopies],
-    medicationPlanItems: [...(clientData.medicationPlanItems || []), ...planItemCopies],
-    medicationScheduleSlots: [...(clientData.medicationScheduleSlots || []), ...slotCopies],
-  };
-  await syncStore(clientData, withPlan, clientId);
+    .map((s, index) => ({
+      ...s,
+      id: deterministicPushId('medslot', { newPlanId, sourceSlotId: s.id || null, index }),
+      medicationId: medIdMap[s.medicationId], medicationPlanId: newPlanId,
+      createdAt: nowISO, updatedAt: nowISO,
+    }));
+  const medicationRows = medCopies.map(medication => ({
+    id: medication.id,
+    name: medication.name,
+    brand: medication.brand ?? null,
+    category: medication.category ?? null,
+    unit_label: medication.unitLabel || 'pills',
+    package_size: medication.packageSize ?? null,
+    archived: !!medication.archived,
+  }));
+  const planItemRows = planItemCopies.map(item => ({
+    id: item.id,
+    medication_plan_id: item.medicationPlanId,
+    medication_id: item.medicationId,
+  }));
+  const scheduleSlotRows = slotCopies.map(slot => ({
+    id: slot.id,
+    medication_id: slot.medicationId,
+    medication_plan_id: slot.medicationPlanId,
+    weekdays: slot.weekdays || [],
+    hour: slot.hour,
+    dose_qty: slot.doseQty,
+    interval_days: slot.intervalDays ?? null,
+    start_date: slot.startDate ?? null,
+    end_date: slot.endDate ?? null,
+  }));
+  const { data: pushedPlanId, error: pushError } = await _supabase.rpc('push_medication_plan_to_client', {
+    p_coaching_id: coachingId,
+    p_operation_id: newPlanId,
+    p_plan: { id: planCopy.id, name: planCopy.name },
+    p_medications: medicationRows,
+    p_plan_items: planItemRows,
+    p_schedule_slots: scheduleSlotRows,
+  });
+  if (pushError) throw pushError;
+  if (pushedPlanId !== newPlanId) throw new Error('Medication plan push returned an invalid operation id');
   try {
     const threadId = await getOrCreateCoachingThread(coachingId, 'Medications', coachUserId);
     const body = `Pushed a new medication plan: ${plan.name}\n\nCheck Medications to see what's on it.`;
@@ -8912,13 +9505,20 @@ async function loadCoachClientsStatus() {
 }
 
 async function reloadCoachingState(userId) {
+  const unreadPromise = fetchAllRowsPaged(() => _supabase.from('zane_coaching_notes')
+    .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
+    .is('read_at', null)
+    .neq('author_id', userId)
+    .not('coaching_id', 'like', 'support_%')
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false }), {
+    priority: 'background',
+    keyset: [{ column: 'created_at', ascending: false }, { column: 'id', ascending: false }],
+  }).then(data => ({ data, error: null }), error => ({ data: null, error: error?.cause || error }));
   const [coachInfoRes, coachClientsRes, unreadRes, coachingRowRes, selfRowRes] = await Promise.all([
     _supabase.rpc('get_coach_info'),
     _supabase.rpc('get_coaching_clients'),
-    _supabase.from('zane_coaching_notes')
-      .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, thread_id, attachments, edited_at')
-      .is('read_at', null)
-      .neq('author_id', userId),
+    unreadPromise,
     // not.like support_% on BOTH: a user with a real coach AND an open support
     // ticket matches two rows, and maybeSingle() then returns PGRST116 with no
     // data. The error was ignored, so checkinEnabled silently fell back to
@@ -8945,6 +9545,7 @@ async function reloadCoachingState(userId) {
     || [coachingRowRes, selfRowRes].find(r => !soft(r))?.error;
   if (firstErr) throw firstErr;
 
+  const hydratedUnreadRows = await hydrateCoachingNoteRows(unreadRes?.data || []);
   return {
     asClient: (coachInfoRes?.data?.[0]) ? {
       id: coachInfoRes.data[0].coaching_id,
@@ -8960,7 +9561,7 @@ async function reloadCoachingState(userId) {
       clientName: r.client_name, status: r.status, checkinEnabled: r.checkin_enabled ?? true,
     })),
     asSelf: selfRowRes?.data ? { id: selfRowRes.data.id } : null,
-    unreadNotes: (unreadRes?.data || []).map(n => ({
+    unreadNotes: hydratedUnreadRows.map(n => ({
       id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
       type: n.type, entityId: n.entity_id, entityName: n.entity_name,
       threadId: n.thread_id, body: n.body, createdAt: n.created_at,
@@ -9051,14 +9652,9 @@ function diffSchedule(before, after, exercises) {
 }
 
 async function addCoachingNote(coachingId, type, entityId, entityName, body, authorId, threadId = null, attachments = null) {
-  const id = 'cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-  const { error } = await _supabase.from('zane_coaching_notes').insert({
-    id, coaching_id: coachingId, author_id: authorId,
-    type, entity_id: entityId || null, entity_name: entityName || null, body,
-    thread_id: threadId || null,
-    ...(attachments && attachments.length ? { attachments } : {}),
+  const id = await insertCoachingNote({
+    coachingId, type, entityId, entityName, body, authorId, threadId, attachments,
   });
-  if (error) throw error;
   // Fire-and-forget push to the other party (fails silently if push not enabled).
   // Skip for self-coaching, there's no "other party" to notify. The author is
   // derived server-side from the JWT, so it can't be spoofed.
@@ -9085,14 +9681,175 @@ function isNoteFromClient(store, notes) {
   return notes.some(n => clientIds.has(n.authorId));
 }
 
-// Upload an image to the chat-attachments bucket (own folder per RLS) and return
-// its public URL. Shared by support tickets and coaching notes.
+function chatAttachmentPath(urlOrPath) {
+  const value = typeof urlOrPath === 'string' ? urlOrPath.trim() : '';
+  if (!value) return null;
+  const clean = value.split('#')[0].split('?')[0];
+  const markers = [
+    '/storage/v1/object/public/chat-attachments/',
+    '/storage/v1/object/sign/chat-attachments/',
+    '/storage/v1/object/authenticated/chat-attachments/',
+  ];
+  let raw = clean;
+  for (const marker of markers) {
+    const at = clean.indexOf(marker);
+    if (at >= 0) { raw = clean.slice(at + marker.length); break; }
+  }
+  if (/^https?:\/\//i.test(raw)) return null;
+  raw = raw.replace(/^\/+/, '');
+  try { raw = decodeURIComponent(raw); } catch { /* keep the parseable raw path */ }
+  return raw || null;
+}
+
+function chatAttachmentPathOwnedBy(path, userId) {
+  if (!path || !userId || path.includes('\\')) return false;
+  const parts = path.split('/');
+  return parts.length >= 2
+    && parts[0] === String(userId)
+    && parts.slice(1).every(part => part && part !== '.' && part !== '..');
+}
+
+function persistChatAttachments(attachments) {
+  return (attachments || []).map(attachment => {
+    const path = chatAttachmentPath(attachment?.path || attachment?.storagePath || attachment?.url);
+    if (!path) throw new Error('Chat attachment is missing its private storage path');
+    // Signed URLs expire and may grant unintended access if copied elsewhere.
+    // The durable row stores only the private bucket path; hydration signs it
+    // again for the current authenticated reader.
+    const { storagePath: _storagePath, ...stable } = attachment || {};
+    return { ...stable, path, url: path };
+  });
+}
+
+async function insertCoachingNote({
+  id = null,
+  coachingId,
+  authorId,
+  type = 'general',
+  entityId = null,
+  entityName = null,
+  body = '',
+  threadId = null,
+  attachments = null,
+  uploadedPaths = null,
+}) {
+  if (!coachingId || !authorId) throw new Error('Message is incomplete');
+  const noteId = id || ('cnote_' + Math.random().toString(36).slice(2) + Date.now().toString(36));
+  const persistedAttachments = persistChatAttachments(attachments);
+  const { error } = await _supabase.from('zane_coaching_notes').insert({
+    id: noteId, coaching_id: coachingId, author_id: authorId,
+    type, entity_id: entityId || null, entity_name: entityName || null, body,
+    thread_id: threadId || null,
+    ...(persistedAttachments.length ? { attachments: persistedAttachments } : {}),
+  });
+  if (error) {
+    // Only remove paths explicitly identified by the caller as uploads made
+    // for this insert attempt. Existing message attachments may be referenced
+    // again and must never be deleted as a side effect of an insert failure.
+    const cleanupPaths = [...new Set((uploadedPaths || [])
+      .map(path => chatAttachmentPath(path))
+      .filter(path => chatAttachmentPathOwnedBy(path, authorId)))];
+    const cleanup = await Promise.allSettled(cleanupPaths.map(path => deleteChatImage(path, authorId)));
+    cleanup.forEach(result => {
+      if (result.status === 'rejected') console.warn('failed chat insert attachment cleanup failed:', result.reason);
+    });
+    throw Object.assign(new Error(error.message || 'Could not save message'), { cause: error });
+  }
+  return noteId;
+}
+
+async function signChatImage(urlOrPath) {
+  const path = chatAttachmentPath(urlOrPath);
+  if (!path) return null;
+  const { data, error } = await _supabase.storage.from('chat-attachments').createSignedUrl(path, 300);
+  if (error) throw error;
+  return data?.signedUrl || null;
+}
+
+async function signChatImagePaths(paths) {
+  const uniquePaths = [...new Set((paths || []).filter(Boolean))];
+  const signedByPath = new Map();
+  const bucket = _supabase.storage.from('chat-attachments');
+  const batchSize = 100;
+  for (let offset = 0; offset < uniquePaths.length; offset += batchSize) {
+    const batch = uniquePaths.slice(offset, offset + batchSize);
+    if (typeof bucket.createSignedUrls === 'function') {
+      try {
+        const { data, error } = await bucket.createSignedUrls(batch, 300);
+        if (error) throw error;
+        (data || []).forEach((item, idx) => {
+          if (item?.signedUrl) signedByPath.set(batch[idx], item.signedUrl);
+        });
+      } catch (error) {
+        // Older clients and transient batch failures fall through to the
+        // per-object signer below. One failed object must not blank the page.
+        console.warn('chat attachment batch signing failed:', error);
+      }
+    }
+    const missing = batch.filter(path => !signedByPath.has(path));
+    await Promise.all(missing.map(async path => {
+      try {
+        const { data, error } = await bucket.createSignedUrl(path, 300);
+        if (error) throw error;
+        if (data?.signedUrl) signedByPath.set(path, data.signedUrl);
+      } catch (error) {
+        console.warn('chat attachment signing failed:', error);
+      }
+    }));
+  }
+  return signedByPath;
+}
+
+async function hydrateChatAttachmentGroups(groups) {
+  const normalized = (groups || []).map(attachments =>
+    (Array.isArray(attachments) ? attachments : []).map(attachment => ({
+      attachment,
+      path: chatAttachmentPath(attachment?.storagePath || attachment?.path || attachment?.url),
+    }))
+  );
+  const signedByPath = await signChatImagePaths(normalized.flat().map(item => item.path));
+  return normalized.map(items => items.map(({ attachment, path }) => {
+    if (!path) return attachment;
+    const url = signedByPath.get(path);
+    return { ...attachment, storagePath: path, url: url || attachment.url };
+  }));
+}
+
+async function hydrateChatAttachments(attachments) {
+  const [hydrated] = await hydrateChatAttachmentGroups([attachments]);
+  return hydrated;
+}
+
+async function hydrateCoachingNoteRows(rows) {
+  const sourceRows = rows || [];
+  const attachmentGroups = await hydrateChatAttachmentGroups(sourceRows.map(row => row.attachments));
+  return sourceRows.map((row, idx) => ({ ...row, attachments: attachmentGroups[idx] }));
+}
+
+// Upload an image to the private chat-attachments bucket (own folder per RLS)
+// and return its stable object path. Callers persist this path in attachment.url;
+// hydration replaces it with a short-lived signed URL for display.
 async function uploadChatImage(file, userId) {
   const ext = (file.name.split('.').pop() || 'jpg').toLowerCase();
   const path = `${userId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
   const { error } = await _supabase.storage.from('chat-attachments').upload(path, file, { contentType: file.type });
   if (error) throw error;
-  return _supabase.storage.from('chat-attachments').getPublicUrl(path).data.publicUrl;
+  return path;
+}
+
+async function deleteChatImage(urlOrPath, userId) {
+  const path = chatAttachmentPath(urlOrPath);
+  if (!chatAttachmentPathOwnedBy(path, userId)) throw new Error('Chat attachment path is outside this account');
+  const { error } = await _supabase.storage.from('chat-attachments').remove([path]);
+  // Storage remove is normally idempotent already. Some gateways report a
+  // missing object as 404 instead of returning an empty success; that is still
+  // the requested end state and must not wedge message deletion retries.
+  const missing = error && (
+    error.status === 404 || error.statusCode === 404
+    || /not[ -]?found|does not exist|no such object/i.test(error.message || '')
+  );
+  if (error && !missing) throw error;
+  return true;
 }
 
 async function markCoachingNotesRead(noteIds) {
@@ -9103,15 +9860,68 @@ async function markCoachingNotesRead(noteIds) {
   if (error) throw error;
 }
 
-async function loadCoachingNotes(coachingId, threadId = null) {
+const COACHING_NOTES_PAGE_LIMIT = 100;
+
+function coachingNoteCursor(note) {
+  if (!note) return null;
+  const createdAt = note.createdAt ?? note.created_at;
+  const id = note.id;
+  return createdAt && id ? { createdAt: String(createdAt), id: String(id) } : null;
+}
+
+function normalizeCoachingNotesCursor(cursor) {
+  if (!cursor) return null;
+  const normalized = coachingNoteCursor(cursor);
+  if (!normalized || !Number.isFinite(Date.parse(normalized.createdAt))
+      || /[(),\"]/.test(normalized.createdAt) || !/^[A-Za-z0-9_-]{1,200}$/.test(normalized.id)) {
+    throw new Error('Invalid coaching notes cursor');
+  }
+  return normalized;
+}
+
+function compareCoachingNotesAscending(a, b) {
+  return String(a?.createdAt || '').localeCompare(String(b?.createdAt || ''))
+    || String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+// Latest-page refreshes replace only the authoritative newest window while
+// preserving pages the user explicitly loaded below it. Older-page loads are
+// ordinary id merges. This also updates edited rows and removes a deleted row
+// from the newest window without throwing away older history.
+function mergeCoachingNotePage(existing, page, { latest = false } = {}) {
+  const incoming = Array.isArray(page?.notes) ? page.notes : [];
+  let kept = existing || [];
+  if (latest) {
+    if (!page?.hasMore || incoming.length === 0) kept = [];
+    else {
+      const boundary = incoming.reduce((oldest, note) =>
+        compareCoachingNotesAscending(note, oldest) < 0 ? note : oldest
+      );
+      kept = kept.filter(note => compareCoachingNotesAscending(note, boundary) < 0);
+    }
+  }
+  const byId = new Map(kept.map(note => [note.id, note]));
+  incoming.forEach(note => byId.set(note.id, note));
+  return [...byId.values()].sort(compareCoachingNotesAscending);
+}
+
+async function loadCoachingNotes(coachingId, threadId = null, options = null) {
+  const pageLimit = Math.min(COACHING_NOTES_PAGE_LIMIT, Math.max(1, Math.floor(Number(options?.limit) || COACHING_NOTES_PAGE_LIMIT)));
+  const cursor = normalizeCoachingNotesCursor(options?.cursor);
   let q = _supabase.from('zane_coaching_notes')
     .select('*')
     .eq('coaching_id', coachingId);
   if (threadId !== null) q = q.eq('thread_id', threadId);
   else q = q.is('thread_id', null);
-  const { data, error } = await q.order('created_at', { ascending: false });
+  q = q.order('created_at', { ascending: false }).order('id', { ascending: false });
+  if (cursor) {
+    q = q.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await q.limit(pageLimit + 1);
   if (error) throw error;
-  return (data || []).map(n => ({
+  const hasMore = (data || []).length > pageLimit;
+  const rows = await hydrateCoachingNoteRows((data || []).slice(0, pageLimit));
+  const notes = rows.map(n => ({
     id: n.id, coachingId: n.coaching_id, authorId: n.author_id,
     threadId: n.thread_id,
     type: n.type, entityId: n.entity_id, entityName: n.entity_name,
@@ -9119,6 +9929,15 @@ async function loadCoachingNotes(coachingId, threadId = null) {
     editedAt: n.edited_at,
     attachments: n.attachments || null,
   }));
+  // Backward compatibility: every pre-pagination caller used the two-argument
+  // form and expects an array. New callers opt into the page envelope by
+  // passing an options object.
+  if (!options) return notes;
+  return {
+    notes,
+    hasMore,
+    nextCursor: hasMore ? coachingNoteCursor(notes[notes.length - 1]) : null,
+  };
 }
 
 async function updateCoachingNote(noteId, userId, body) {
@@ -9131,34 +9950,110 @@ async function updateCoachingNote(noteId, userId, body) {
     .select('id, coaching_id, author_id, type, entity_id, entity_name, body, created_at, read_at, thread_id, attachments, edited_at')
     .single();
   if (error) throw error;
+  const [hydrated] = await hydrateCoachingNoteRows([data]);
   return {
-    id: data.id, coachingId: data.coaching_id, authorId: data.author_id,
-    threadId: data.thread_id, type: data.type, entityId: data.entity_id,
-    entityName: data.entity_name, body: data.body, createdAt: data.created_at,
-    readAt: data.read_at, editedAt: data.edited_at,
-    attachments: data.attachments || null,
+    id: hydrated.id, coachingId: hydrated.coaching_id, authorId: hydrated.author_id,
+    threadId: hydrated.thread_id, type: hydrated.type, entityId: hydrated.entity_id,
+    entityName: hydrated.entity_name, body: hydrated.body, createdAt: hydrated.created_at,
+    readAt: hydrated.read_at, editedAt: hydrated.edited_at,
+    attachments: hydrated.attachments || null,
   };
 }
 
 async function deleteCoachingNote(noteId, userId) {
   if (!noteId || !userId) throw new Error('Message is incomplete');
-  const { error } = await _supabase.from('zane_coaching_notes')
-    .delete()
-    .eq('id', noteId)
-    .eq('author_id', userId);
-  if (error) throw error;
+  // The authenticated cleanup endpoint performs authorization, tombstone
+  // creation and row deletion in one server transaction, then drains Storage
+  // with service-role access. A failed object removal therefore remains
+  // retryable instead of becoming an unreferenced permanent leak.
+  return coachingChatCleanupRequest('delete-note', { noteId });
 }
 
-async function loadCoachingThreads(coachingId) {
-  const { data, error } = await _supabase.from('zane_coaching_threads')
-    .select('*')
-    .eq('coaching_id', coachingId)
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return (data || []).map(t => ({
+const COACHING_THREADS_PAGE_LIMIT = 50;
+const COACHING_THREAD_IDS_LIMIT = 100;
+
+function mapCoachingThreadRow(t) {
+  return {
     id: t.id, coachingId: t.coaching_id, name: t.name,
     createdBy: t.created_by, createdAt: t.created_at,
-  }));
+  };
+}
+
+function coachingThreadCursor(thread) {
+  if (!thread) return null;
+  const createdAt = thread.createdAt ?? thread.created_at;
+  const id = thread.id;
+  return createdAt && id ? { createdAt: String(createdAt), id: String(id) } : null;
+}
+
+function normalizeCoachingThreadCursor(cursor) {
+  if (!cursor) return null;
+  const normalized = coachingThreadCursor(cursor);
+  if (!normalized || !Number.isFinite(Date.parse(normalized.createdAt))
+      || /[(),\"]/.test(normalized.createdAt) || !/^[A-Za-z0-9_-]{1,200}$/.test(normalized.id)) {
+    throw new Error('Invalid coaching thread cursor');
+  }
+  return normalized;
+}
+
+function compareCoachingThreadsDescending(a, b) {
+  return String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))
+    || String(b?.id || '').localeCompare(String(a?.id || ''));
+}
+
+function mergeCoachingThreadPage(existing, page) {
+  const byId = new Map((existing || []).map(thread => [thread.id, thread]));
+  (page?.threads || []).forEach(thread => byId.set(thread.id, thread));
+  return [...byId.values()].sort(compareCoachingThreadsDescending);
+}
+
+async function loadCoachingThreads(coachingId, options = null) {
+  const paged = !!(options && (options.page === true || options.cursor != null || options.limit != null));
+  const pageLimit = Math.min(COACHING_THREADS_PAGE_LIMIT, Math.max(1, Math.floor(Number(options?.limit) || COACHING_THREADS_PAGE_LIMIT)));
+  const cursor = normalizeCoachingThreadCursor(options?.cursor);
+  let q = _supabase.from('zane_coaching_threads')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: false });
+  if (cursor) {
+    q = q.or(`created_at.lt.${cursor.createdAt},and(created_at.eq.${cursor.createdAt},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await q.limit(pageLimit + 1);
+  if (error) throw error;
+  const hasMore = (data || []).length > pageLimit;
+  const threads = (data || []).slice(0, pageLimit).map(mapCoachingThreadRow);
+  // Older cached callers expect a plain array. They now receive the first
+  // bounded page; pagination-aware screens opt into the envelope with limit.
+  if (!paged) return threads;
+  return {
+    threads,
+    hasMore,
+    nextCursor: hasMore ? coachingThreadCursor(threads[threads.length - 1]) : null,
+  };
+}
+
+async function loadCoachingThreadsByIds(coachingId, threadIds) {
+  const ids = [...new Set((threadIds || []).map(id => String(id || '').trim()).filter(Boolean))];
+  if (ids.some(id => !/^[A-Za-z0-9_-]{1,200}$/.test(id))) {
+    throw new Error('Invalid coaching thread ids');
+  }
+  if (!ids.length) return [];
+  const rows = [];
+  // PostgREST/URL limits make a single unbounded `in (...)` unsafe. Unread
+  // supplementation can legitimately span hundreds of old threads, so retain
+  // strict per-id validation but fetch bounded chunks and merge them all.
+  for (let offset = 0; offset < ids.length; offset += COACHING_THREAD_IDS_LIMIT) {
+    const { data, error } = await _supabase.from('zane_coaching_threads')
+      .select('*')
+      .eq('coaching_id', coachingId)
+      .in('id', ids.slice(offset, offset + COACHING_THREAD_IDS_LIMIT))
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: false });
+    if (error) throw error;
+    rows.push(...(data || []));
+  }
+  return rows.map(mapCoachingThreadRow).sort(compareCoachingThreadsDescending);
 }
 
 async function createCoachingThread(coachingId, name, userId) {
@@ -9179,25 +10074,146 @@ async function getOrCreateCoachingThread(coachingId, name, userId) {
   return createCoachingThread(coachingId, name, userId);
 }
 
-async function deleteCoachingThread(threadId) {
-  const { error } = await _supabase.rpc('delete_coaching_thread', { p_thread_id: threadId });
-  if (error) throw error;
+async function coachingChatCleanupRequest(action, payload) {
+  const res = await fnFetch(COACHING_CHAT_CLEANUP_URL, { action, ...payload });
+  if (!res) throw new Error('Chat cleanup unavailable');
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(body.error || `Chat cleanup failed (${res.status})`);
+  return body;
 }
 
-async function loadCoachingMacros(coachingId) {
-  const { data, error } = await _supabase
-    .from('zane_coaching_macros')
-    .select('*')
-    .eq('coaching_id', coachingId)
-    .order('set_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(r => ({
+async function deleteCoachingThread(threadId) {
+  if (!threadId) throw new Error('Thread is incomplete');
+  // A thread can contain attachments authored by both participants. The
+  // authenticated cleanup endpoint validates the caller, captures every path,
+  // deletes the DB scope transactionally, and uses service-role Storage access
+  // for mixed-owner objects. Failed Storage removals remain durably queued.
+  return coachingChatCleanupRequest('delete-thread', { threadId });
+}
+
+async function deleteSupportTicketChat(coachingId) {
+  if (!coachingId) throw new Error('Support ticket is incomplete');
+  return coachingChatCleanupRequest('delete-support-ticket', { coachingId });
+}
+
+function mapCoachingMacrosRow(r) {
+  return {
     id: r.id, coachingId: r.coaching_id, setBy: r.set_by, setAt: r.set_at,
     caloriesTraining: r.calories_training, proteinTraining: r.protein_training,
     carbsTraining: r.carbs_training, fatTraining: r.fat_training,
     caloriesRest: r.calories_rest, proteinRest: r.protein_rest,
     carbsRest: r.carbs_rest, fatRest: r.fat_rest,
-  }));
+  };
+}
+
+const COACHING_MACROS_PAGE_LIMIT = 25;
+
+function coachingMacroCursor(macro) {
+  if (!macro) return null;
+  const setAt = macro.setAt ?? macro.set_at;
+  const id = macro.id;
+  return setAt && id ? { setAt: String(setAt), id: String(id) } : null;
+}
+
+function normalizeCoachingMacroCursor(cursor) {
+  if (!cursor) return null;
+  const normalized = coachingMacroCursor(cursor);
+  if (!normalized || !Number.isFinite(Date.parse(normalized.setAt))
+      || /[(),\"]/.test(normalized.setAt) || !/^[A-Za-z0-9_-]{1,200}$/.test(normalized.id)) {
+    throw new Error('Invalid coaching macro cursor');
+  }
+  return normalized;
+}
+
+function compareCoachingMacrosDescending(a, b) {
+  return String(b?.setAt || '').localeCompare(String(a?.setAt || ''))
+    || String(b?.id || '').localeCompare(String(a?.id || ''));
+}
+
+function mergeCoachingMacroPage(existing, page) {
+  const byId = new Map((existing || []).map(macro => [macro.id, macro]));
+  (page?.macros || []).forEach(macro => byId.set(macro.id, macro));
+  return [...byId.values()].sort(compareCoachingMacrosDescending);
+}
+
+async function loadCoachingMacros(coachingId, options = null) {
+  const paged = !!(options && (options.page === true || options.cursor != null || options.limit != null));
+  const pageLimit = Math.min(COACHING_MACROS_PAGE_LIMIT, Math.max(1, Math.floor(Number(options?.limit) || COACHING_MACROS_PAGE_LIMIT)));
+  const cursor = normalizeCoachingMacroCursor(options?.cursor);
+  let q = _supabase
+    .from('zane_coaching_macros')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('set_at', { ascending: false })
+    .order('id', { ascending: false });
+  if (cursor) {
+    q = q.or(`set_at.lt.${cursor.setAt},and(set_at.eq.${cursor.setAt},id.lt.${cursor.id})`);
+  }
+  const { data, error } = await q.limit(pageLimit + 1);
+  if (error) throw error;
+  const hasMore = (data || []).length > pageLimit;
+  const macros = (data || []).slice(0, pageLimit).map(mapCoachingMacrosRow);
+  if (!paged) return macros;
+  return {
+    macros,
+    hasMore,
+    nextCursor: hasMore ? coachingMacroCursor(macros[macros.length - 1]) : null,
+  };
+}
+
+// Check-in cards need the macro revision effective at each loaded week's end,
+// not merely the newest 25 history rows. Limit the chronology query to the
+// visible check-in date span, then add exactly one older anchor. That anchor is
+// the effective target for every week before the first revision in the span.
+async function loadCoachingMacrosForCheckins(coachingId, checkins) {
+  const weekEnds = (checkins || [])
+    .map(checkin => weekEnd(checkin?.weekStart ?? checkin?.week_start))
+    .filter(value => /^\d{4}-\d{2}-\d{2}$/.test(value || ''));
+  if (!coachingId || !weekEnds.length) return [];
+  weekEnds.sort();
+  const rangeStart = `${weekEnds[0]}T00:00:00.000Z`;
+  const rangeEnd = `${weekEnds[weekEnds.length - 1]}T23:59:59.999Z`;
+  const columns = 'id, coaching_id, set_by, set_at, calories_training, protein_training, carbs_training, fat_training, calories_rest, protein_rest, carbs_rest, fat_rest';
+  const [rangeRows, anchorRes] = await Promise.all([
+    fetchAllRowsPaged(() => _supabase.from('zane_coaching_macros')
+      .select(columns)
+      .eq('coaching_id', coachingId)
+      .gte('set_at', rangeStart)
+      .lte('set_at', rangeEnd)
+      .order('set_at', { ascending: false })
+      .order('id', { ascending: false }), {
+      priority: 'background',
+      keyset: [{ column: 'set_at', ascending: false }, { column: 'id', ascending: false }],
+    }),
+    _supabase.from('zane_coaching_macros')
+      .select(columns)
+      .eq('coaching_id', coachingId)
+      .lt('set_at', rangeStart)
+      .order('set_at', { ascending: false })
+      .order('id', { ascending: false })
+      .limit(1),
+  ]);
+  if (anchorRes.error) throw anchorRes.error;
+  const byId = new Map();
+  [...rangeRows, ...(anchorRes.data || [])].forEach(row => byId.set(row.id, mapCoachingMacrosRow(row)));
+  return [...byId.values()].sort(compareCoachingMacrosDescending);
+}
+
+// Most client surfaces need only the currently effective targets. Keep the
+// all-history loader above for the coach/check-in history screens, but avoid
+// transferring every revision to Home, Food, Health and the client summary.
+async function loadLatestCoachingMacros(coachingId) {
+  if (!coachingId) throw new Error('Coaching relationship is incomplete');
+  const { data, error } = await _supabase
+    .from('zane_coaching_macros')
+    .select('id, coaching_id, set_by, set_at, calories_training, protein_training, carbs_training, fat_training, calories_rest, protein_rest, carbs_rest, fat_rest')
+    .eq('coaching_id', coachingId)
+    .order('set_at', { ascending: false })
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapCoachingMacrosRow(data) : null;
 }
 
 async function addCoachingMacros(coachingId, macros, userId) {
@@ -9381,30 +10397,89 @@ async function submitCheckin(coachingId, clientId, responses, userId, weekStartA
   return id;
 }
 
-async function loadCheckins(coachingId, { includePhotos = true } = {}) {
-  const [checkinsRes, photosRes] = await Promise.all([
-    _supabase
-      .from('zane_checkins')
-      .select('*')
-      .eq('coaching_id', coachingId)
-      .order('week_start', { ascending: false }),
-    // Photos are kept as metadata after the Drive worker removes the private
-    // staging object.  Loading them here makes the coach dashboard aware of
-    // attachments without putting image bytes into check-in JSON.
-    (includePhotos ? _supabase
+// Home only needs to know whether this reporting week already has a check-in.
+// Keep it independent of loadCheckins so it never fetches historical responses
+// or optional Drive photo metadata for a boolean due-state check.
+async function hasCheckinForWeek(coachingId, weekStart) {
+  if (!coachingId || !weekStart) throw new Error('Check-in week is incomplete');
+  const { data, error } = await _supabase
+    .from('zane_checkins')
+    .select('id')
+    .eq('coaching_id', coachingId)
+    .eq('week_start', weekStart)
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+const COACHING_CHECKINS_PAGE_LIMIT = 26;
+
+function coachingCheckinCursor(checkin) {
+  if (!checkin) return null;
+  const weekStart = checkin.weekStart ?? checkin.week_start;
+  const id = checkin.id;
+  return weekStart && id ? { weekStart: String(weekStart), id: String(id) } : null;
+}
+
+function normalizeCoachingCheckinCursor(cursor) {
+  if (!cursor) return null;
+  const normalized = coachingCheckinCursor(cursor);
+  if (!normalized || !/^\d{4}-\d{2}-\d{2}$/.test(normalized.weekStart)
+      || !Number.isFinite(Date.parse(`${normalized.weekStart}T00:00:00Z`))
+      || !/^[A-Za-z0-9_-]{1,200}$/.test(normalized.id)) {
+    throw new Error('Invalid coaching check-in cursor');
+  }
+  return normalized;
+}
+
+function compareCoachingCheckinsDescending(a, b) {
+  return String(b?.weekStart || '').localeCompare(String(a?.weekStart || ''))
+    || String(b?.id || '').localeCompare(String(a?.id || ''));
+}
+
+function mergeCoachingCheckinPage(existing, page) {
+  const byId = new Map((existing || []).map(checkin => [checkin.id, checkin]));
+  (page?.checkins || []).forEach(checkin => byId.set(checkin.id, checkin));
+  return [...byId.values()].sort(compareCoachingCheckinsDescending);
+}
+
+async function loadCheckins(coachingId, options = null) {
+  const paged = !!(options && (options.page === true || options.cursor != null || options.limit != null));
+  const includePhotos = options?.includePhotos !== false;
+  const pageLimit = Math.min(COACHING_CHECKINS_PAGE_LIMIT, Math.max(1, Math.floor(Number(options?.limit) || COACHING_CHECKINS_PAGE_LIMIT)));
+  const cursor = normalizeCoachingCheckinCursor(options?.cursor);
+  let q = _supabase
+    .from('zane_checkins')
+    .select('*')
+    .eq('coaching_id', coachingId)
+    .order('week_start', { ascending: false })
+    .order('id', { ascending: false });
+  if (cursor) {
+    q = q.or(`week_start.lt.${cursor.weekStart},and(week_start.eq.${cursor.weekStart},id.lt.${cursor.id})`);
+  }
+  const checkinsRes = await q.limit(pageLimit + 1);
+  if (checkinsRes.error) throw checkinsRes.error;
+  const hasMore = (checkinsRes.data || []).length > pageLimit;
+  const visibleRows = (checkinsRes.data || []).slice(0, pageLimit);
+  const visibleIds = visibleRows.map(row => row.id);
+  // Photos are kept as metadata after the Drive worker removes the private
+  // staging object. Query only ids in the visible page; account age must not
+  // increase photo metadata transfer or signed-URL work.
+  const photosRes = includePhotos && visibleIds.length
+    ? await _supabase
       .from('zane_coaching_drive_photos')
       .select('id, checkin_id, file_name, mime_type, byte_size, status, drive_file_id, staging_path, created_at, uploaded_at')
       .eq('coaching_id', coachingId)
+      .in('checkin_id', visibleIds)
       .in('status', ['staged', 'uploaded'])
       .order('created_at', { ascending: true })
-      : Promise.resolve({ data: [], error: null })),
-  ]);
-  if (checkinsRes.error) throw checkinsRes.error;
+    : { data: [], error: null };
   // A deployment that has the check-in table but not the optional Drive photo
   // migration must still be able to load the dashboard.  Treat that one
   // auxiliary query as best-effort; the check-in itself remains authoritative.
   const photoRows = photosRes.error ? [] : (photosRes.data || []);
-  const checkinIds = new Set((checkinsRes.data || []).map(r => r.id));
+  const checkinIds = new Set(visibleIds);
   const photosByCheckin = new Map();
   for (const p of photoRows) {
     if (!checkinIds.has(p.checkin_id)) continue;
@@ -9437,7 +10512,7 @@ async function loadCheckins(coachingId, { includePhotos = true } = {}) {
       } catch (_) {}
     }));
   }
-  return (checkinsRes.data || []).map(r => {
+  const checkins = visibleRows.map(r => {
     // Prefer the responses jsonb (written by new code); fall back to fixed columns
     // for rows that predate the migration and weren't backfilled.
     const resp = r.responses || {
@@ -9469,6 +10544,14 @@ async function loadCheckins(coachingId, { includePhotos = true } = {}) {
       photos: photosByCheckin.get(r.id) || [],
     };
   });
+  // `{ includePhotos: false }` existed before pagination and must keep its
+  // array result. New callers opt into the page envelope with limit/cursor.
+  if (!paged) return checkins;
+  return {
+    checkins,
+    hasMore,
+    nextCursor: hasMore ? coachingCheckinCursor(checkins[checkins.length - 1]) : null,
+  };
 }
 
 async function loadCheckinSchema(coachingId) {
@@ -14394,12 +15477,12 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, WORKOUT_IMPORT_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, weightAxisUnit,
-  loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, deleteOwnedStorageObjects, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, BACKUP_RESTORE_AVAILABLE, BACKUP_RESTORE_UNAVAILABLE_MESSAGE, weightAxisUnit, remapExerciseDayKey,
+  loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, findEmptyOrphanSessionCandidates, autoArchiveMissedDays, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, mergeCompleteBackupCollection, fetchAllRowsPaged, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,
   resignSocialAttachment,
-  uid, normalizeXHandle, xHandleUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, normalizeWeekStartDay, reportingWeekStartISO, reportingWeekEndISO, previousReportingWeekStartISO, reportingWeekEndsToday, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
+  uid, normalizeXHandle, xHandleUrl, sanitizeYoutubeUrl, todayISO, fmtISO, nowHHMM, reconcileManualWaterLogs, positiveNumberOrNull, retainedStateForUser, retainedStateAfterSignedOut, fmtDayLabel, shiftDate, fmtHHMM, fmtClock, nextMondayISO, nextCycleD1ISO, nextCycleD1ISOFromSchedule, parseDate, isoWd, normalizeWeekStartDay, reportingWeekStartISO, reportingWeekEndISO, previousReportingWeekStartISO, reportingWeekEndsToday, weekEnd, findExercise, lastSessionForExercise, recentSessionsForExercise, bestRecentEntry, bestEntryFromSetLists, progressionSuggestion, progressionEnabled, progressionCeilingFor, incrementForExercise, equipmentCfgFor, is531MainLift, todaysDay, nextDay, isWeekdayPlan, isFlexPlan, healScheduleWeekdays, buildPlanSkeleton, instantiateProgram, is531Plan, round531, tmFrom531, tmBump531, weeks531, week531, fiveThreeOneSets, build531Plan, add531MainLift, current531Week, current531Cycle, compute531CycleBumps, prev531MainLiftSession, prev531MainLiftSessionLive, resolve531CycleEnd, suggest531Tm, splitDayCount, frequencyHint, mesoTaperPreview, mesoRirEnabled, mesoActive, autoregLoadOnly, getPlanDaysForDate, getCyclePosForDate, getCycleNumForDate, getCycleStartForNum, getActiveVersionIdx, dedupeVersionsByDate, withVersionedDays, flexVersionPosition, realignCycleForToday, todayCycleStripIndex,
   effReps, fmtDuration, e1rm, isImprovement, isDecline, bestE1rmForExercise, bestAssistLoad, bestTimeForExercise, totalVolume, entryVolume, doneSetCount, buildSeedSets, buildTimeSeedSets, latestBodyweight, bodyweightForDate, exerciseLogMode, isAssisted, shouldPullBodyweight, bodyweightMode, isBodyweightPlusLoad, splitBodyweightLoad, setLoadLabel, chainRoundKg, exerciseHornLabels, isMultiHorn, hornLoadTotal, hornLoadLabel, sameHornLoad, systemExerciseToRow, inferCurrentExIdx, calcBlended,
   refreshExerciseBests, fetchTopExercises, fetchSeedEntries, fetchExerciseHistory, fetchSessionEntries, fetchFullTrainingHistory, fetchFoodLogsForDates, fetchFoodLogsSince, fetchMedicationLogsSince,
   computeNextReminderAt,
@@ -14408,21 +15491,21 @@ window.LB = {
   subscribeToChanges, socialWeekStartISO, socialMetricCatalog: SOCIAL_METRIC_CATALOG, socialDefaultMetricSlots: SOCIAL_DEFAULT_METRIC_SLOTS, normalizeSocialMetricVisibility, normalizeSocialMetricSlots, mapSocialProfile, mapSocialFriend, mapSocialFriendMetrics, mapSocialWorkoutSummary, mapSocialWorkoutComment, mapSocialWorkoutDetail, mapSocialMessage, mapSocialAttachment, loadFriendsState, loadSocialBadge, loadSocialPendingFriendRequests, loadSocialMessageState, loadSocialWorkoutFeed, loadSocialLiveWorkoutFeed, loadSocialFriendMetrics, loadSocialWorkoutDetail, sendSocialWorkoutComment, updateSocialProfile, updateSocialMetricPreferences, lookupSocialProfile,
   sendSocialFriendRequest, respondToSocialFriendRequest, removeSocialFriend, blockSocialUser, notifySocialFriendStarted, flushSocialNotificationOutbox, socialNotifyResponseIsTerminal,
   createSocialGroup, joinSocialGroup, leaveSocialGroup, deleteSocialGroup, sendSocialMessage, updateSocialMessage, deleteSocialMessage, markSocialMessagesRead,
-  uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, deleteSocialPlanShare, reportSocial, subscribeToFriends,
+  uploadSocialAttachment, createSocialPlanShare, createSocialGroupPlanShare, markSocialPlanImported, importSocialPlanShareAtomically, loadImportedSocialPlan, deleteSocialPlanShare, reportSocial, subscribeToFriends,
   openStatusPeriod, closeStatusPeriod, updateStatusPeriodStart, clearStatusMode,
   closeStatusPeriodById, deleteStatusPeriodById, updateStatusPeriodStartById, updateStatusPeriodMode,
   startDeload, endDeload, deloadElapsed, deloadDaysRemaining, deloadPlanDays,
   startCleanup, endCleanup, cleanupElapsed, cleanupDaysRemaining, nextCleanupStartISO, cleanupStarted, repinCleanupStart,
-  updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
-  addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
+  updateDailyLogDerived, loadClientStore, pushTrainingPlanToClient, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
+  addCoachingNote, insertCoachingNote, persistChatAttachments, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, mergeCoachingNotePage, loadCoachingThreads, loadCoachingThreadsByIds, mergeCoachingThreadPage, createCoachingThread, deleteCoachingThread, deleteSupportTicketChat, getOrCreateCoachingThread, uploadChatImage, signChatImage, hydrateChatAttachments, deleteChatImage,
   getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
   listProgressPhotos, loadProgressPhotoBlob, deleteProgressPhoto, stageProgressPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, sessionToRow, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,
-  loadCoachingMacros, addCoachingMacros,
+  loadCoachingMacros, mergeCoachingMacroPage, loadCoachingMacrosForCheckins, loadLatestCoachingMacros, addCoachingMacros,
   diffSchedule,
-  checkinWeekStart, submitCheckin, loadCheckins, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
+  checkinWeekStart, submitCheckin, hasCheckinForWeek, loadCheckins, mergeCoachingCheckinPage, deleteCheckin, loadCoachCheckinStatus, requestCheckin, setCheckinEnabled, loadCheckinSchema, saveCheckinSchema, saveDefaultCheckinSchema,
   cardioWeekPrefill, detectCardioPRs,
   cardioDistUnit, setCardioDistUnit, distToM, mToDisplay, fmtDistance, fmtPace, fmtSpeed, MI_TO_M, recentCardioTypes,
   defaultTempUnit,
@@ -14443,5 +15526,9 @@ window.LB = {
   detectStall, suggestSwap, reentryRamp, STALL_SESSIONS,
   mesoGateSetsFromAnswers, isMesoSessionEditable, applyMesoFeedbackEdit, reearnMesoBoostsFromAnswers, mesoRecapGainsFromEdit, recomputeMesoRepMissCut, remapMesoAnswersExId, deriveSignalWeight, remapMesoRecapRawForSwap, remapMesoStateExId, mesoRowHasExId, laterSessionTrainsExId,
   mesoSetTarget, mesoEarnTarget, mesoRepOutcome, reshapeSetsUnilateral,
-  ...(window.__STORE_TEST__ ? { dbStabilityTest: dbStabilityTestApi(), authRecoveryTest: authRecoveryTestApi() } : {}),
+  ...(window.__STORE_TEST__ ? {
+    dbStabilityTest: dbStabilityTestApi(),
+    authRecoveryTest: authRecoveryTestApi(),
+    socialAttachmentTest: { signedSocialAttachments, batchSize: SOCIAL_ATTACHMENT_SIGN_BATCH_SIZE },
+  } : {}),
 };

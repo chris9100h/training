@@ -13,6 +13,12 @@ let testSession = null; // swapped per test to give fnFetch a bearer token to se
 let testRefreshSession = async () => ({ data: { session: null }, error: null });
 let testClientOptions = null;
 let testRpc = async () => ({ data: null, error: null });
+let testStorageFrom = () => ({
+  upload: async () => ({ data: null, error: null }),
+  createSignedUrl: async path => ({ data: { signedUrl: `signed:${path}` }, error: null }),
+  createSignedUrls: async paths => ({ data: paths.map(path => ({ path, signedUrl: `signed:${path}` })), error: null }),
+  remove: async () => ({ data: [], error: null }),
+});
 const rpcLog = []; // records every rpc(name, args) call
 const channelLog = [];
 const removedChannels = [];
@@ -32,6 +38,7 @@ function loadStore() {
     },
     from: (...args) => testFrom(...args),
     rpc: async (name, args) => { rpcLog.push({ name, args }); return testRpc(name, args); },
+    storage: { from: (...args) => testStorageFrom(...args) },
     channel: (name, options) => {
       const channel = {
         name, options, handlers: [], statusCallback: null,
@@ -54,7 +61,7 @@ function loadStore() {
       removeItem(k) { delete this._d[k]; },
     },
     CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
-    console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON,
+    console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON, URL,
   };
   sandbox.global = sandbox;
   vm.createContext(sandbox);
@@ -167,6 +174,175 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.socialNotifyResponseIsTerminal({ ok: false, status: 400 }), true);
     for (const status of [401, 403, 404, 409, 429, 500, 503]) {
       assert.strictEqual(LB.socialNotifyResponseIsTerminal({ ok: false, status }), false, `${status} must remain queued`);
+    }
+  });
+
+  await testAsync('legacy social plan receipt accepts void success without broad truthiness', async () => {
+    testRpc = async () => ({ data: null, error: null });
+    assert.strictEqual(await LB.markSocialPlanImported('share1'), true);
+    testRpc = async () => ({ data: false, error: null });
+    assert.strictEqual(await LB.markSocialPlanImported('share1'), false);
+    testRpc = async () => ({ data: { claimed: true }, error: null });
+    assert.strictEqual(await LB.markSocialPlanImported('share1'), false);
+    testRpc = async () => ({ data: null, error: { message: 'denied' } });
+    await assert.rejects(() => LB.markSocialPlanImported('share1'), error => error?.message === 'denied');
+  });
+
+  await testAsync('social plan import uses the atomic RPC and validates its receipt', async () => {
+    const calls = [];
+    testRpc = async (name, args) => {
+      calls.push({ name, args });
+      return { data: { imported: true, schedule_id: 'schedule-1' }, error: null };
+    };
+    const schedule = { id: 'schedule-1', name: 'Shared', days: [] };
+    const exercises = [{ id: 'exercise-1', name: 'Squat', tags: [] }];
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(await LB.importSocialPlanShareAtomically('share-1', schedule, exercises))),
+      { imported: true, scheduleId: 'schedule-1' },
+    );
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(calls)), [{ name: 'social_import_plan_share', args: {
+      p_share_id: 'share-1', p_schedule: schedule, p_exercises: exercises,
+    } }]);
+    testRpc = async () => ({ data: { imported: true, schedule_id: 'wrong' }, error: null });
+    await assert.rejects(() => LB.importSocialPlanShareAtomically('share-1', schedule, exercises), /mismatched/);
+    testRpc = async () => ({ data: null, error: null });
+    await assert.rejects(() => LB.importSocialPlanShareAtomically('share-1', schedule, exercises), /invalid receipt/);
+  });
+
+  await testAsync('cross-device social import hydration loads only the persisted schedule exercises', async () => {
+    let requestedExerciseIds = null;
+    testFrom = table => {
+      const builder = {
+        select() { return builder; },
+        eq() { return builder; },
+        in(_column, ids) { requestedExerciseIds = ids; return builder; },
+        maybeSingle: async () => table === 'zane_schedules'
+          ? { data: { id: 'schedule-1', name: 'Shared', days: [{ id: 'day-1', name: 'Day', items: [{ exId: 'exercise-1' }, { exId: 'exercise-1' }] }], versions: [] }, error: null }
+          : { data: null, error: null },
+        order: async () => ({ data: [{ id: 'exercise-1', name: 'Squat', tags: [] }], error: null }),
+      };
+      return builder;
+    };
+    const persisted = await LB.loadImportedSocialPlan('schedule-1');
+    assert.strictEqual(persisted.schedule.id, 'schedule-1');
+    assert.deepStrictEqual(JSON.parse(JSON.stringify(requestedExerciseIds)), ['exercise-1']);
+    assert.deepStrictEqual(persisted.exercises.map(exercise => exercise.id), ['exercise-1']);
+  });
+
+  await testAsync('social attachment signing uses deterministic 100-row batches and maps responses by path', async () => {
+    const previousStorageFrom = testStorageFrom;
+    const calls = [];
+    try {
+      testStorageFrom = bucket => ({
+        createSignedUrls: async (paths, expiresIn) => {
+          calls.push({ bucket, paths: [...paths], expiresIn });
+          return {
+            data: [...paths].reverse().map(path => ({ path, signedUrl: `batch:${path}` })),
+            error: null,
+          };
+        },
+      });
+      const rows = Array.from({ length: 205 }, (_, index) => ({
+        id: `attachment-${index}`,
+        message_id: `message-${index}`,
+        storage_path: `user/image-${String(index).padStart(3, '0')}.jpg`,
+        file_name: `image-${index}.jpg`,
+        mime_type: 'image/jpeg',
+      }));
+      const signed = await LB.socialAttachmentTest.signedSocialAttachments(rows);
+      assert.deepStrictEqual(calls.map(call => call.paths.length), [100, 100, 5]);
+      assert.ok(calls.every(call => call.bucket === 'social-chat-attachments' && call.expiresIn === 300));
+      assert.strictEqual(calls[0].paths[0], 'user/image-000.jpg');
+      assert.strictEqual(calls[2].paths[4], 'user/image-204.jpg');
+      assert.strictEqual(signed.length, rows.length);
+      assert.strictEqual(signed[0].url, 'batch:user/image-000.jpg');
+      assert.strictEqual(signed[204].url, 'batch:user/image-204.jpg');
+      assert.strictEqual(signed[101].messageId, 'message-101');
+    } finally {
+      testStorageFrom = previousStorageFrom;
+    }
+  });
+
+  await testAsync('social attachment signing keeps metadata for per-item and whole-batch failures', async () => {
+    const previousStorageFrom = testStorageFrom;
+    let batchNumber = 0;
+    try {
+      testStorageFrom = () => ({
+        createSignedUrls: async paths => {
+          batchNumber += 1;
+          if (batchNumber === 2) return { data: null, error: { message: 'batch unavailable' } };
+          return {
+            data: paths.map((path, index) => index === 1
+              ? { path, error: { message: 'missing object' }, signedUrl: null }
+              : index === 2
+                ? { path, signedUrl: null }
+                : { path, signedUrl: `batch:${path}` }),
+            error: null,
+          };
+        },
+      });
+      const rows = Array.from({ length: 102 }, (_, index) => ({
+        id: `attachment-${index}`,
+        message_id: 'message-1',
+        storage_path: `user/image-${index}.jpg`,
+        file_name: `image-${index}.jpg`,
+        mime_type: 'image/jpeg',
+      }));
+      const signed = await LB.socialAttachmentTest.signedSocialAttachments(rows);
+      assert.strictEqual(signed[0].url, 'batch:user/image-0.jpg');
+      assert.strictEqual(signed[1].url, null, 'one item error must only fall back for that item');
+      assert.strictEqual(signed[2].url, null, 'one missing URL must only fall back for that item');
+      assert.strictEqual(signed[99].url, 'batch:user/image-99.jpg');
+      assert.strictEqual(signed[100].url, null, 'a failed batch must keep metadata without a URL');
+      assert.strictEqual(signed[101].storagePath, 'user/image-101.jpg');
+    } finally {
+      testStorageFrom = previousStorageFrom;
+    }
+  });
+
+  await testAsync('Home coaching reads use one-row check-in and latest-macro queries', async () => {
+    const previousFrom = testFrom;
+    const calls = [];
+    let checkinRow = { id: 'checkin-1' };
+    try {
+      testFrom = table => {
+        const query = {
+          select(columns) { calls.push({ table, op: 'select', value: columns }); return query; },
+          eq(column, value) { calls.push({ table, op: 'eq', column, value }); return query; },
+          order(column, options) { calls.push({ table, op: 'order', column, options }); return query; },
+          limit(value) { calls.push({ table, op: 'limit', value }); return query; },
+          maybeSingle() {
+            if (table === 'zane_checkins') return Promise.resolve({ data: checkinRow, error: null });
+            return Promise.resolve({ data: {
+              id: 'macro-2', coaching_id: 'coaching-1', set_by: 'coach-1', set_at: '2026-08-22T12:00:00Z',
+              calories_training: 2500, protein_training: 180, carbs_training: 300, fat_training: 70,
+              calories_rest: 2200, protein_rest: 180, carbs_rest: 230, fat_rest: 70,
+            }, error: null });
+          },
+        };
+        return query;
+      };
+
+      assert.strictEqual(await LB.hasCheckinForWeek('coaching-1', '2026-08-10'), true);
+      checkinRow = null;
+      assert.strictEqual(await LB.hasCheckinForWeek('coaching-1', '2026-08-17'), false);
+      const latest = await LB.loadLatestCoachingMacros('coaching-1');
+      assert.strictEqual(latest.id, 'macro-2');
+      assert.strictEqual(latest.proteinTraining, 180);
+
+      const checkinCalls = calls.filter(call => call.table === 'zane_checkins');
+      assert.ok(checkinCalls.some(call => call.op === 'select' && call.value === 'id'));
+      assert.strictEqual(checkinCalls.filter(call => call.op === 'limit').every(call => call.value === 1), true);
+      assert.ok(checkinCalls.some(call => call.op === 'eq' && call.column === 'week_start' && call.value === '2026-08-10'));
+
+      const macroCalls = calls.filter(call => call.table === 'zane_coaching_macros');
+      assert.deepStrictEqual(
+        macroCalls.filter(call => call.op === 'order').map(call => [call.column, call.options.ascending]),
+        [['set_at', false], ['id', false]],
+      );
+      assert.ok(macroCalls.some(call => call.op === 'limit' && call.value === 1));
+    } finally {
+      testFrom = previousFrom;
     }
   });
 
@@ -839,6 +1015,22 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.normalizeXHandle('1234567890123456'), null);
   });
 
+  test('sanitizeYoutubeUrl accepts only concrete YouTube videos and canonicalizes them', () => {
+    const canonical = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ';
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL1'), canonical);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('http://youtu.be/dQw4w9WgXcQ?t=10'), canonical);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('youtube.com/shorts/dQw4w9WgXcQ'), canonical);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://m.youtube.com/embed/dQw4w9WgXcQ'), canonical);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('javascript:alert(1)'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtube.com.evil.example/watch?v=dQw4w9WgXcQ'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtube.com/redirect?q=https://evil.example'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtube.com/@channel'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://user@youtube.com/watch?v=dQw4w9WgXcQ'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtube.com:444/watch?v=dQw4w9WgXcQ'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtu.be/too-short'), null);
+    assert.strictEqual(LB.sanitizeYoutubeUrl('https://youtu.be/dQw4w9WgXcQ\u202e'), null);
+  });
+
   test('validateBackup accepts a well-formed backup', () => {
     assert.strictEqual(LB.validateBackup({
       sessions: [{ id: 's1', entries: [] }],
@@ -859,6 +1051,939 @@ async function testAsync(name, fn) {
     const base = { sessions: [], exercises: [], schedules: [] };
     assert.ok(LB.validateBackup({ ...base, user: { xHandle: 'not valid' } }));
     assert.ok(LB.validateBackup({ ...base, user: { xHandlePublic: 'yes' } }));
+  });
+
+  const pagedReadBuilder = (table, rowsByTable, rangeLog, errorsByTable = {}) => {
+    let keysetFilter = null;
+    const b = {
+      select() { return b; }, eq() { return b; }, in() { return b; }, not() { return b; },
+      order() { return b; },
+      or(filter) { keysetFilter = filter; return b; },
+      limit(value) {
+        const page = rangeLog.filter(call => call.table === table).length;
+        const from = page * value;
+        const to = from + value - 1;
+        rangeLog.push({ table, from, to, keysetFilter });
+        const error = errorsByTable[table] || null;
+        return Promise.resolve({ data: error ? null : (rowsByTable[table] || []).slice(from, to + 1), error });
+      },
+      range(from, to) {
+        rangeLog.push({ table, from, to });
+        const error = errorsByTable[table] || null;
+        return Promise.resolve({ data: error ? null : (rowsByTable[table] || []).slice(from, to + 1), error });
+      },
+    };
+    return b;
+  };
+
+  const bootReadBuilder = (table, { rowsByTable, singleByTable, rangeLog, createLog, gates = {}, errorsByTable = {} }) => {
+    createLog.push(table);
+    const orders = [];
+    const b = {
+      select() { return b; }, eq() { return b; }, gte() { return b; },
+      is() { return b; }, neq() { return b; }, not() { return b; },
+      order(column, options) { orders.push([column, options || null]); return b; },
+      or(filter) { b.keysetFilter = filter; return b; },
+      maybeSingle() {
+        if (gates[table]) return gates[table];
+        return Promise.resolve({ data: singleByTable[table] ?? null, error: null });
+      },
+      range(from, to) {
+        rangeLog.push({ table, from, to, orders: [...orders] });
+        const error = errorsByTable[table] || null;
+        return Promise.resolve({ data: error ? null : (rowsByTable[table] || []).slice(from, to + 1), error });
+      },
+      limit(value) {
+        const page = rangeLog.filter(call => call.table === table).length;
+        const from = page * value;
+        const to = from + value - 1;
+        rangeLog.push({ table, from, to, orders: [...orders], keysetFilter: b.keysetFilter || null });
+        const error = errorsByTable[table] || null;
+        return Promise.resolve({ data: error ? null : (rowsByTable[table] || []).slice(from, to + 1), error });
+      },
+      then(resolve, reject) {
+        return Promise.resolve({ data: rowsByTable[table] || [], error: null }).then(resolve, reject);
+      },
+    };
+    return b;
+  };
+
+  await testAsync('all-row paging uses an advancing keyset and is immune to earlier-page inserts', async () => {
+    let rows = Array.from({ length: 1001 }, (_, i) => ({ id: `id${String(i).padStart(4, '0')}` }));
+    const filters = [];
+    let page = 0;
+    testFrom = () => {
+      let filter = null;
+      const b = {
+        select() { return b; }, order() { return b; },
+        or(value) { filter = value; filters.push(value); return b; },
+        limit(value) {
+          let available = rows;
+          const cursor = filter?.match(/^id\.gt\.([A-Za-z0-9_-]+)$/)?.[1];
+          if (cursor) available = available.filter(row => row.id > cursor);
+          const data = available.slice(0, value);
+          if (page++ === 0) rows = [{ id: 'id-just-inserted-before-cursor' }, ...rows];
+          return Promise.resolve({ data, error: null });
+        },
+      };
+      return b;
+    };
+    const loaded = await LB.fetchAllRowsPaged(() => LB.supabase.from('rows').select('*').order('id'));
+    assert.strictEqual(loaded.length, 1001);
+    assert.strictEqual(new Set(Array.from(loaded, row => row.id)).size, 1001);
+    assert.strictEqual(filters[0], 'id.gt.id0999');
+    assert.strictEqual(loaded.some(row => row.id === 'id-just-inserted-before-cursor'), false);
+  });
+
+  test('backup reconciliation trusts fresh rows unless local state differs from its confirmed base', () => {
+    const fresh = [{ id: 'same', value: 'server-new' }, { id: 'deleted-here', value: 'server' }];
+    const base = [{ id: 'same', value: 'old' }, { id: 'deleted-here', value: 'old' }, { id: 'remote-deleted', value: 'old' }];
+    const staleLocal = [{ id: 'same', value: 'old' }, { id: 'remote-deleted', value: 'old' }];
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(LB.mergeCompleteBackupCollection(fresh, staleLocal, base))),
+      [{ id: 'same', value: 'server-new' }],
+    );
+    const pendingLocal = [{ id: 'same', value: 'offline-edit' }, { id: 'new-local', value: 'pending' }];
+    assert.deepStrictEqual(
+      JSON.parse(JSON.stringify(LB.mergeCompleteBackupCollection(fresh, pendingLocal, base))),
+      [{ id: 'same', value: 'offline-edit' }, { id: 'new-local', value: 'pending' }],
+    );
+  });
+
+  await testAsync('loadFromSupabase does not construct secondary reads before essential hydration completes', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const previousSession = testSession;
+    let releaseProfile;
+    const profileGate = new Promise(resolve => { releaseProfile = resolve; });
+    const rowsByTable = {};
+    const singleByTable = {
+      zane_profiles: { id: 'u1', name: 'Paged Athlete' },
+      zane_user_settings: { user_id: 'u1', meds_enabled: false },
+    };
+    const rangeLog = [];
+    const createLog = [];
+    rpcLog.length = 0;
+    try {
+      testSession = { user: { id: 'u1', email: 'paged@example.com' } };
+      testFrom = table => bootReadBuilder(table, {
+        rowsByTable, singleByTable, rangeLog, createLog,
+        gates: { zane_profiles: profileGate },
+      });
+      testRpc = async name => ({ data: name === 'get_user_support_chats' ? [] : [], error: null });
+
+      let secondarySeenAtEssential = null;
+      const loadPromise = LB.loadFromSupabase('u1', 0, {
+        onEssential: () => {
+          const secondary = new Set(['zane_coaching_notes', 'zane_glucose_logs', 'zane_water_logs', 'zane_food_logs']);
+          secondarySeenAtEssential = createLog.filter(table => secondary.has(table));
+        },
+      });
+      await new Promise(resolve => setTimeout(resolve, 0));
+      assert.strictEqual(createLog.includes('zane_profiles'), true);
+      for (const table of ['zane_coaching_notes', 'zane_glucose_logs', 'zane_water_logs', 'zane_food_logs']) {
+        assert.strictEqual(createLog.includes(table), false, `${table} must remain lazy while a core request is unresolved`);
+      }
+      assert.strictEqual(rpcLog.some(call => call.name === 'get_coach_info'), false, 'secondary RPCs must also remain lazy');
+
+      releaseProfile({ data: singleByTable.zane_profiles, error: null });
+      await loadPromise;
+      assert.deepStrictEqual(secondarySeenAtEssential, [], 'onEssential must run before secondary factories start');
+      assert.strictEqual(createLog.includes('zane_water_logs'), true, 'secondary hydration still runs after the essential callback');
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+      testSession = previousSession;
+    }
+  });
+
+  await testAsync('loadFromSupabase pages core and background collections beyond 1000 without scheduler deadlock', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const previousSession = testSession;
+    const exercises = Array.from({ length: 1001 }, (_, i) => ({ id: `e${String(i).padStart(4, '0')}`, name: `Exercise ${i}`, tags: [] }));
+    const schedules = Array.from({ length: 1001 }, (_, i) => ({ id: `p${String(i).padStart(4, '0')}`, name: `Plan ${i}`, days: [], versions: [] }));
+    const sessions = Array.from({ length: 1001 }, (_, i) => ({
+      id: `s${String(i).padStart(4, '0')}`, date: '2026-08-01', schedule_id: null,
+      day_id: null, day_name: 'Day', ended: '2026-08-01T11:00:00Z',
+    }));
+    const skips = Array.from({ length: 1001 }, (_, i) => ({ id: `k${String(i).padStart(4, '0')}`, date: '2026-07-01' }));
+    const water = Array.from({ length: 1001 }, (_, i) => ({
+      id: `w${String(i).padStart(4, '0')}`, date: '2026-08-01', time: '12:00', amount_ml: i + 1,
+    }));
+    const rowsByTable = {
+      zane_exercises: exercises,
+      zane_schedules: schedules,
+      zane_sessions: sessions,
+      zane_skips: skips,
+      zane_water_logs: water,
+    };
+    const singleByTable = {
+      zane_profiles: { id: 'u1', name: 'Paged Athlete' },
+      zane_user_settings: { user_id: 'u1', meds_enabled: false, active_schedule_id: null },
+    };
+    const rangeLog = [];
+    const createLog = [];
+    let timeoutId;
+    try {
+      testSession = { user: { id: 'u1', email: 'paged@example.com' } };
+      testFrom = table => bootReadBuilder(table, { rowsByTable, singleByTable, rangeLog, createLog });
+      testRpc = async () => ({ data: [], error: null });
+
+      let essential = null;
+      const loadPromise = LB.loadFromSupabase('u1', 0, { onEssential: value => { essential = value; } });
+      const timeout = new Promise((_, reject) => {
+        timeoutId = setTimeout(() => reject(new Error('boot paging stalled inside the DB scheduler')), 2000);
+      });
+      const loaded = await Promise.race([loadPromise, timeout]);
+      clearTimeout(timeoutId);
+
+      assert.strictEqual(essential.exercises.length, 1001);
+      assert.strictEqual(essential.schedules.length, 1001);
+      assert.strictEqual(essential.sessions.length, 1001);
+      assert.strictEqual(essential.skips.length, 1001);
+      assert.strictEqual(essential.waterLogs.length, 0, 'secondary collections stay out of the essential snapshot');
+      assert.strictEqual(loaded.waterLogs.length, 1001);
+      for (const table of ['zane_exercises', 'zane_schedules', 'zane_sessions', 'zane_skips', 'zane_water_logs']) {
+        const pages = rangeLog.filter(call => call.table === table);
+        assert.deepStrictEqual(pages.map(call => [call.from, call.to]), [[0, 999], [1000, 1999]]);
+        assert.strictEqual(pages.every(call => call.orders.length > 0), true, `${table} pages require a deterministic order`);
+      }
+      assert.strictEqual(
+        JSON.stringify(rangeLog.find(call => call.table === 'zane_sessions').orders),
+        JSON.stringify([['date', { ascending: false }], ['id', { ascending: false }]]),
+        'non-unique display ordering needs the id tie-breaker before ranges are applied',
+      );
+    } finally {
+      clearTimeout(timeoutId);
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+      testSession = previousSession;
+    }
+  });
+
+  await testAsync('loadFromSupabase keeps paged coaching failures soft while core collections stay authoritative', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const previousSession = testSession;
+    const rowsByTable = {};
+    const singleByTable = {
+      zane_profiles: { id: 'u1', name: 'Paged Athlete' },
+      zane_user_settings: { user_id: 'u1', meds_enabled: false },
+    };
+    try {
+      testSession = { user: { id: 'u1', email: 'paged@example.com' } };
+      testFrom = table => bootReadBuilder(table, {
+        rowsByTable, singleByTable, rangeLog: [], createLog: [],
+        errorsByTable: { zane_coaching_notes: { code: '57014', message: 'coaching read timed out' } },
+      });
+      testRpc = async () => ({ data: [], error: null });
+      const loaded = await LB.loadFromSupabase('u1');
+      assert.strictEqual(loaded.user.name, 'Paged Athlete');
+      assert.strictEqual(loaded.coaching, undefined, 'the failed optional collection must not blank or abort the main store load');
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+      testSession = previousSession;
+    }
+  });
+
+  await testAsync('fetchFullTrainingHistory paginates sessions, entries and sets independently', async () => {
+    const sessionRows = Array.from({ length: 1001 }, (_, i) => ({
+      id: `s${i}`, date: `2026-01-${String((i % 28) + 1).padStart(2, '0')}`,
+      schedule_id: 'p', day_id: 'd', day_name: 'Day', ended: 'done',
+    }));
+    const entryRows = Array.from({ length: 1001 }, (_, i) => ({
+      id: `e${i}`, session_id: `s${i}`, entry_idx: 0, ex_id: 'bench', name: 'Bench',
+    }));
+    const setRows = Array.from({ length: 1001 }, (_, i) => ({
+      id: `set${i}`, entry_id: `e${i}`, session_id: `s${i}`, set_idx: 0, kg: i, reps: 5, done: true,
+    }));
+    const rows = { zane_sessions: sessionRows, zane_session_entries: entryRows, zane_sets: setRows };
+    const ranges = [];
+    testFrom = table => pagedReadBuilder(table, rows, ranges);
+    const history = await LB.fetchFullTrainingHistory({ sessions: [] }, 'u1');
+    assert.strictEqual(history.length, 1001);
+    assert.strictEqual(history.find(s => s.id === 's1000').entries[0].sets[0].kg, 1000);
+    for (const table of Object.keys(rows)) {
+      assert.deepStrictEqual(ranges.filter(r => r.table === table).map(r => [r.from, r.to]), [[0, 999], [1000, 1999]]);
+    }
+  });
+
+  await testAsync('exportBackup paginates every fresh history query instead of serializing a capped page', async () => {
+    const foodRows = Array.from({ length: 1001 }, (_, i) => ({
+      id: `f${i}`, date: '2026-01-01', time: '12:00', food_name: `Food ${i}`,
+      quantity_g: 1, calories: 1, protein: 1, carbs: 1, fat: 1,
+    }));
+    const rows = {
+      zane_coaching: [
+        { id: 'coaching1', client_id: 'u1', coach_id: 'coach1', status: 'active' },
+        { id: 'coaching2', client_id: 'u1', coach_id: 'coach2', status: 'active' },
+      ],
+      zane_sessions: [], zane_session_entries: [], zane_sets: [],
+      zane_food_logs: foodRows, zane_medication_logs: [], zane_adaptive_tdee_history: [],
+      zane_food_template_days: [], zane_food_barcode_overrides: [],
+    };
+    const ranges = [];
+    testFrom = table => pagedReadBuilder(table, rows, ranges);
+    const backup = await LB.exportBackup({ sessions: [], coaching: { asCoach: [{ id: 'coaching1' }] }, supportTickets: [] }, 'u1');
+    assert.strictEqual(backup.foodLogs.length, 1001);
+    assert.deepStrictEqual(Array.from(backup.coaching.relationships.all, row => row.id), ['coaching1', 'coaching2']);
+    assert.deepStrictEqual(ranges.filter(r => r.table === 'zane_food_logs').map(r => r.from), [0, 1000]);
+    const expectedPagedTables = [
+      'zane_exercises', 'zane_schedules', 'zane_skips', 'zane_cardio_logs', 'zane_daily_logs', 'zane_water_logs',
+      'zane_food_favorites', 'zane_food_recipes', 'zane_food_template_slots', 'zane_food_meal_plans',
+      'zane_food_shopping_prefs', 'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items',
+      'zane_medication_schedule_slots', 'zane_workout_templates', 'zane_checkin_schema_templates', 'zane_glucose_logs',
+      'zane_blood_pressure_logs', 'zane_body_temp_logs', 'zane_cardio_plans', 'zane_status_periods', 'zane_meso_states',
+      'zane_sessions', 'zane_session_entries', 'zane_sets', 'zane_medication_logs', 'zane_adaptive_tdee_history',
+      'zane_food_template_days', 'zane_food_barcode_overrides', 'zane_coaching', 'zane_coaching_notes', 'zane_coaching_threads',
+      'zane_coaching_macros', 'zane_checkins',
+    ];
+    const actuallyPaged = new Set(ranges.map(r => r.table));
+    assert.deepStrictEqual(expectedPagedTables.filter(table => !actuallyPaged.has(table)), []);
+  });
+
+  test('remapExerciseDayKey supports underscores and chooses the longest exercise id', () => {
+    const remap = { old: 'new-short', old_ex_id: 'new-long' };
+    assert.strictEqual(LB.remapExerciseDayKey('old_ex_id_day_with_under', remap), 'new-long_day_with_under');
+    assert.strictEqual(LB.remapExerciseDayKey('old_day', remap), 'new-short_day');
+    assert.strictEqual(LB.remapExerciseDayKey('unrelated_day', remap), 'unrelated_day');
+  });
+
+  await testAsync('backup restore fails closed before any database or RPC call', async () => {
+    const calls = [];
+    testFrom = table => {
+      calls.push(`from:${table}`);
+      throw new Error('restore touched the database');
+    };
+    testRpc = async name => {
+      calls.push(`rpc:${name}`);
+      throw new Error('restore called an RPC');
+    };
+    assert.strictEqual(LB.BACKUP_RESTORE_AVAILABLE, false);
+    await assert.rejects(LB.importFromBackup({
+      sessions: [], schedules: [], exercises: [],
+    }, 'u1'), /temporarily unavailable.*No account data was changed/i);
+    assert.deepStrictEqual(calls, []);
+  });
+
+  await testAsync('backup restore still rejects malformed files without touching the database', async () => {
+    const calls = [];
+    testFrom = table => { calls.push(`from:${table}`); throw new Error('unexpected database call'); };
+    testRpc = async name => { calls.push(`rpc:${name}`); throw new Error('unexpected RPC call'); };
+    await assert.rejects(LB.importFromBackup({ sessions: [] }, 'u1'), /missing or has an invalid "exercises" list/i);
+    assert.deepStrictEqual(calls, []);
+  });
+
+  await testAsync('storage purge paginates metadata and removes every object batch', async () => {
+    const rows = {
+      zane_social_message_attachments: Array.from({ length: 1001 }, (_, i) => ({ id: `a${i}`, storage_path: `u1/a${i}.jpg` })),
+      zane_coaching_drive_photos: [], zane_coaching_notes: [], zane_drive_progress_photos: [],
+    };
+    const ranges = [];
+    const removals = [];
+    testFrom = table => pagedReadBuilder(table, rows, ranges);
+    testStorageFrom = bucket => ({ remove: async paths => { removals.push({ bucket, paths }); return { data: [], error: null }; } });
+    await LB.deleteOwnedStorageObjects('u1');
+    assert.deepStrictEqual(ranges.filter(r => r.table === 'zane_social_message_attachments').map(r => r.from), [0, 1000]);
+    assert.deepStrictEqual(removals.filter(r => r.bucket === 'social-chat-attachments').map(r => r.paths.length), [1000, 1]);
+  });
+
+  await testAsync('storage purge checks progress-photo lookup errors before deleting objects', async () => {
+    const rows = { zane_social_message_attachments: [], zane_coaching_drive_photos: [], zane_coaching_notes: [], zane_drive_progress_photos: [] };
+    let removed = false;
+    testFrom = table => pagedReadBuilder(table, rows, [], { zane_drive_progress_photos: { message: 'progress lookup failed' } });
+    testStorageFrom = () => ({ remove: async () => { removed = true; return { data: [], error: null }; } });
+    await assert.rejects(LB.deleteOwnedStorageObjects('u1'), /progress lookup failed/);
+    assert.strictEqual(removed, false);
+  });
+
+  await testAsync('storage purge propagates a progress-photo object deletion error', async () => {
+    const rows = {
+      zane_social_message_attachments: [], zane_coaching_drive_photos: [], zane_coaching_notes: [],
+      zane_drive_progress_photos: [{ id: 'p1', staging_path: 'u1/progress.jpg' }],
+    };
+    testFrom = table => pagedReadBuilder(table, rows, []);
+    testStorageFrom = bucket => ({
+      remove: async () => ({ data: null, error: bucket === 'drive-progress-staging' ? { message: 'progress delete failed' } : null }),
+    });
+    await assert.rejects(LB.deleteOwnedStorageObjects('u1'), /progress delete failed/);
+  });
+
+  await testAsync('private chat images persist paths, hydrate legacy URLs, and delete only owned objects idempotently', async () => {
+    const calls = [];
+    testStorageFrom = bucket => ({
+      upload: async (path) => { calls.push(['upload', bucket, path]); return { data: null, error: null }; },
+      createSignedUrl: async path => { calls.push(['sign', bucket, path]); return { data: { signedUrl: `https://signed/${path}` }, error: null }; },
+      remove: async paths => { calls.push(['remove', bucket, paths[0]]); return { data: [], error: { status: 404, message: 'not found' } }; },
+    });
+    const path = await LB.uploadChatImage({ name: 'Photo.JPG', type: 'image/jpeg' }, 'u1');
+    assert.ok(path.startsWith('u1/'));
+    assert.ok(!path.startsWith('http'));
+    const legacy = `https://example.supabase.co/storage/v1/object/public/chat-attachments/u1/old%20photo.jpg`;
+    const [hydrated] = await LB.hydrateChatAttachments([{ url: legacy, name: 'old' }]);
+    assert.strictEqual(hydrated.storagePath, 'u1/old photo.jpg');
+    assert.strictEqual(hydrated.url, 'https://signed/u1/old photo.jpg');
+    assert.strictEqual(await LB.deleteChatImage(legacy, 'u1'), true);
+    await assert.rejects(LB.deleteChatImage('u2/not-mine.jpg', 'u1'), /outside this account/);
+    await assert.rejects(LB.deleteChatImage('u1/../escape.jpg', 'u1'), /outside this account/);
+  });
+
+  await testAsync('chat-note insert persists private paths and cleans only new owned uploads on failure', async () => {
+    const inserted = [];
+    const removed = [];
+    testStorageFrom = () => ({
+      remove: async paths => { removed.push(...paths); return { data: [], error: null }; },
+    });
+    testFrom = table => ({
+      insert: async row => {
+        assert.strictEqual(table, 'zane_coaching_notes');
+        inserted.push(row);
+        return { data: null, error: { message: 'insert failed' } };
+      },
+    });
+    await assert.rejects(LB.insertCoachingNote({
+      coachingId: 'support_1', authorId: 'u1', body: 'photo',
+      attachments: [{
+        storagePath: 'u1/new.jpg',
+        url: 'https://example.supabase.co/storage/v1/object/sign/chat-attachments/u1/new.jpg?token=secret',
+      }],
+      uploadedPaths: ['u1/new.jpg', 'u2/not-owned.jpg'],
+    }), /insert failed/);
+    assert.strictEqual(inserted[0].attachments[0].url, 'u1/new.jpg');
+    assert.strictEqual(inserted[0].attachments[0].path, 'u1/new.jpg');
+    assert.strictEqual('storagePath' in inserted[0].attachments[0], false);
+    assert.deepStrictEqual(removed, ['u1/new.jpg']);
+  });
+
+  await testAsync('loadCoachingNotes returns a stable 100-row cursor page and keeps legacy array callers', async () => {
+    const rows = Array.from({ length: 101 }, (_, i) => ({
+      id: `n${String(200 - i).padStart(3, '0')}`,
+      coaching_id: 'c1', author_id: 'u1', thread_id: 't1', type: 'general', body: `Note ${i}`,
+      created_at: i < 2 ? '2026-08-22T12:00:00.000Z' : `2026-08-22T11:${String(99 - i).padStart(2, '0')}:00.000Z`,
+      attachments: null,
+    }));
+    const calls = { orders: [], limits: [], ors: [] };
+    testFrom = () => {
+      const b = {
+        select() { return b; }, eq() { return b; }, is() { return b; },
+        order(column, options) { calls.orders.push([column, options]); return b; },
+        or(filter) { calls.ors.push(filter); return b; },
+        limit(value) { calls.limits.push(value); return Promise.resolve({ data: rows.slice(0, value), error: null }); },
+      };
+      return b;
+    };
+    const page = await LB.loadCoachingNotes('c1', 't1', { limit: 100 });
+    assert.strictEqual(page.notes.length, 100);
+    assert.strictEqual(page.hasMore, true);
+    assert.strictEqual(JSON.stringify(page.nextCursor), JSON.stringify({ createdAt: rows[99].created_at, id: rows[99].id }));
+    assert.strictEqual(JSON.stringify(calls.orders.slice(0, 2)), JSON.stringify([
+      ['created_at', { ascending: false }], ['id', { ascending: false }],
+    ]));
+    assert.strictEqual(calls.limits[0], 101);
+    await LB.loadCoachingNotes('c1', 't1', { cursor: page.nextCursor });
+    assert.strictEqual(calls.ors[0], `created_at.lt.${page.nextCursor.createdAt},and(created_at.eq.${page.nextCursor.createdAt},id.lt.${page.nextCursor.id})`);
+    const legacy = await LB.loadCoachingNotes('c1', 't1');
+    assert.strictEqual(Array.isArray(legacy), true);
+    assert.strictEqual(legacy.length, 100);
+  });
+
+  await testAsync('check-in pages cap at 26, scope photos to visible ids, and keep legacy option callers', async () => {
+    const rows = Array.from({ length: 27 }, (_, i) => ({
+      id: `ci_${String(99 - i).padStart(2, '0')}`,
+      coaching_id: 'c1', client_id: 'u1',
+      week_start: i < 2 ? '2026-08-17' : `2026-07-${String(31 - i).padStart(2, '0')}`,
+      checked_in_at: '2026-08-22T12:00:00.000Z', responses: { days_trained: 3 },
+    }));
+    const calls = { orders: [], ors: [], limits: [], photoIds: [] };
+    testFrom = table => {
+      if (table === 'zane_checkins') {
+        const b = {
+          select() { return b; }, eq() { return b; },
+          order(column, options) { calls.orders.push([column, options]); return b; },
+          or(filter) { calls.ors.push(filter); return b; },
+          limit(value) { calls.limits.push(value); return Promise.resolve({ data: rows.slice(0, value), error: null }); },
+        };
+        return b;
+      }
+      const b = {
+        select() { return b; }, eq() { return b; }, order() { return b; },
+        in(column, values) { if (column === 'checkin_id') calls.photoIds.push([...values]); return b; },
+        then(resolve, reject) {
+          return Promise.resolve({
+            data: [
+              { id: 'photo-visible', checkin_id: rows[0].id, status: 'uploaded', drive_file_id: 'drive1' },
+              { id: 'photo-overflow', checkin_id: rows[26].id, status: 'uploaded', drive_file_id: 'drive2' },
+            ],
+            error: null,
+          }).then(resolve, reject);
+        },
+      };
+      return b;
+    };
+    const page = await LB.loadCheckins('c1', { limit: 26 });
+    assert.strictEqual(page.checkins.length, 26);
+    assert.strictEqual(page.hasMore, true);
+    assert.strictEqual(JSON.stringify(page.nextCursor), JSON.stringify({ weekStart: rows[25].week_start, id: rows[25].id }));
+    assert.strictEqual(calls.limits[0], 27);
+    assert.strictEqual(JSON.stringify(calls.orders.slice(0, 2)), JSON.stringify([
+      ['week_start', { ascending: false }], ['id', { ascending: false }],
+    ]));
+    assert.strictEqual(calls.photoIds[0].length, 26);
+    assert.strictEqual(calls.photoIds[0].includes(rows[26].id), false, 'overflow sentinel must not enter the photo query');
+    assert.strictEqual(page.checkins[0].photos.length, 1);
+    assert.strictEqual(page.checkins.some(checkin => checkin.photos.some(photo => photo.id === 'photo-overflow')), false);
+    await LB.loadCheckins('c1', { limit: 26, cursor: page.nextCursor, includePhotos: false });
+    assert.strictEqual(calls.ors[0], `week_start.lt.${page.nextCursor.weekStart},and(week_start.eq.${page.nextCursor.weekStart},id.lt.${page.nextCursor.id})`);
+    const legacy = await LB.loadCheckins('c1', { includePhotos: false });
+    assert.strictEqual(Array.isArray(legacy), true);
+    assert.strictEqual(legacy.length, 26);
+    await assert.rejects(
+      LB.loadCheckins('c1', { limit: 26, cursor: { weekStart: '2026-08-17),id.eq.ci_bad', id: 'ci_bad' } }),
+      /Invalid coaching check-in cursor/,
+    );
+  });
+
+  await testAsync('macro and thread history use stable same-timestamp keyset pages and reject malformed cursors', async () => {
+    const macroRows = Array.from({ length: 26 }, (_, i) => ({
+      id: `macro_${String(99 - i).padStart(2, '0')}`, coaching_id: 'c1', set_by: 'u1',
+      set_at: '2026-08-22T12:00:00.000Z', protein_training: 150 + i,
+    }));
+    const threadRows = Array.from({ length: 51 }, (_, i) => ({
+      id: `thread_${String(99 - i).padStart(2, '0')}`, coaching_id: 'c1', created_by: 'u1',
+      created_at: '2026-08-22T12:00:00.000Z', name: `Thread ${i}`,
+    }));
+    const calls = { macros: { orders: [], ors: [], limits: [] }, threads: { orders: [], ors: [], limits: [] } };
+    testFrom = table => {
+      const kind = table === 'zane_coaching_macros' ? 'macros' : 'threads';
+      const rowsForKind = kind === 'macros' ? macroRows : threadRows;
+      const b = {
+        select() { return b; }, eq() { return b; },
+        order(column, options) { calls[kind].orders.push([column, options]); return b; },
+        or(filter) { calls[kind].ors.push(filter); return b; },
+        limit(value) { calls[kind].limits.push(value); return Promise.resolve({ data: rowsForKind.slice(0, value), error: null }); },
+      };
+      return b;
+    };
+    const macros = await LB.loadCoachingMacros('c1', { limit: 25 });
+    assert.strictEqual(macros.macros.length, 25);
+    assert.strictEqual(macros.hasMore, true);
+    assert.strictEqual(calls.macros.limits[0], 26);
+    await LB.loadCoachingMacros('c1', { limit: 25, cursor: macros.nextCursor });
+    assert.strictEqual(calls.macros.ors[0], `set_at.lt.${macros.nextCursor.setAt},and(set_at.eq.${macros.nextCursor.setAt},id.lt.${macros.nextCursor.id})`);
+    assert.strictEqual(JSON.stringify(calls.macros.orders.slice(0, 2)), JSON.stringify([
+      ['set_at', { ascending: false }], ['id', { ascending: false }],
+    ]));
+
+    const threads = await LB.loadCoachingThreads('c1', { limit: 50 });
+    assert.strictEqual(threads.threads.length, 50);
+    assert.strictEqual(threads.hasMore, true);
+    assert.strictEqual(calls.threads.limits[0], 51);
+    await LB.loadCoachingThreads('c1', { limit: 50, cursor: threads.nextCursor });
+    assert.strictEqual(calls.threads.ors[0], `created_at.lt.${threads.nextCursor.createdAt},and(created_at.eq.${threads.nextCursor.createdAt},id.lt.${threads.nextCursor.id})`);
+    assert.strictEqual(JSON.stringify(calls.threads.orders.slice(0, 2)), JSON.stringify([
+      ['created_at', { ascending: false }], ['id', { ascending: false }],
+    ]));
+
+    await assert.rejects(
+      LB.loadCoachingMacros('c1', { limit: 25, cursor: { setAt: '2026-08-22T12:00:00Z),id.eq.bad', id: 'bad' } }),
+      /Invalid coaching macro cursor/,
+    );
+    await assert.rejects(
+      LB.loadCoachingThreads('c1', { limit: 50, cursor: { createdAt: 'not-a-date', id: 'thread_1' } }),
+      /Invalid coaching thread cursor/,
+    );
+  });
+
+  await testAsync('coaching realtime reload paginates every unread note', async () => {
+    const notes = Array.from({ length: 1001 }, (_, i) => ({
+      id: `unread_${String(1001 - i).padStart(4, '0')}`,
+      coaching_id: 'c1', author_id: 'other', type: 'general', body: `Unread ${i}`,
+      created_at: '2026-08-22T12:00:00.000Z', attachments: null,
+    }));
+    let notePage = 0;
+    const filters = [];
+    testRpc = async name => ({
+      data: name === 'get_coach_info' ? [{ coaching_id: 'c1', coach_id: 'coach', status: 'active' }] : [],
+      error: null,
+    });
+    testFrom = table => {
+      const b = {
+        select() { return b; }, eq() { return b; }, is() { return b; }, neq() { return b; }, not() { return b; },
+        order() { return b; }, or(filter) { filters.push(filter); return b; },
+        maybeSingle: async () => ({ data: null, error: null }),
+        limit(value) {
+          const from = notePage++ * value;
+          return Promise.resolve({ data: notes.slice(from, from + value), error: null });
+        },
+      };
+      assert.ok(table === 'zane_coaching_notes' || table === 'zane_coaching');
+      return b;
+    };
+    const coaching = await LB.reloadCoachingState('u1');
+    assert.strictEqual(coaching.unreadNotes.length, 1001);
+    assert.match(filters[0], /created_at\.lt\..*,and\(created_at\.eq\..*,id\.lt\.unread_0002\)/);
+  });
+
+  await testAsync('unread coaching threads can be supplemented by bounded ids outside the first page', async () => {
+    const calls = { coachingId: null, ids: [], orders: [] };
+    testFrom = table => {
+      assert.strictEqual(table, 'zane_coaching_threads');
+      let orderCount = 0;
+      let requestedIds = [];
+      const b = {
+        select() { return b; },
+        eq(column, value) { if (column === 'coaching_id') calls.coachingId = value; return b; },
+        in(column, values) { assert.strictEqual(column, 'id'); requestedIds = values; calls.ids.push(values); return b; },
+        order(column, options) {
+          calls.orders.push([column, options]);
+          orderCount++;
+          if (orderCount < 2) return b;
+          return Promise.resolve({
+            data: requestedIds.map((id, index) => ({
+              id, coaching_id: 'c1', created_by: 'u1',
+              created_at: `2025-01-${String((index % 28) + 1).padStart(2, '0')}T12:00:00.000Z`, name: 'Old but unread',
+            })),
+            error: null,
+          });
+        },
+      };
+      return b;
+    };
+    const threads = await LB.loadCoachingThreadsByIds('c1', ['thread_old', 'thread_old']);
+    assert.strictEqual(threads.length, 1);
+    assert.strictEqual(threads[0].id, 'thread_old');
+    assert.strictEqual(calls.coachingId, 'c1');
+    assert.strictEqual(JSON.stringify(calls.ids), JSON.stringify([['thread_old']]));
+    assert.strictEqual(JSON.stringify(calls.orders), JSON.stringify([
+      ['created_at', { ascending: false }], ['id', { ascending: false }],
+    ]));
+    await assert.rejects(
+      LB.loadCoachingThreadsByIds('c1', ['thread.bad']),
+      /Invalid coaching thread ids/,
+    );
+    const tooMany = Array.from({ length: 101 }, (_, i) => `thread_${i}`);
+    const supplemented = await LB.loadCoachingThreadsByIds('c1', tooMany);
+    assert.strictEqual(supplemented.length, 101);
+    assert.strictEqual(calls.ids.at(-2).length, 100);
+    assert.strictEqual(calls.ids.at(-1).length, 1);
+  });
+
+  await testAsync('check-in macro targets use the loaded date range plus one prior anchor', async () => {
+    const calls = [];
+    const rangeRows = [
+      { id: 'macro_b', coaching_id: 'c1', set_by: 'u1', set_at: '2026-01-20T12:00:00.000Z', protein_training: 180 },
+      { id: 'macro_a', coaching_id: 'c1', set_by: 'u1', set_at: '2026-01-20T12:00:00.000Z', protein_training: 170 },
+    ];
+    const anchorRows = [
+      { id: 'macro_anchor', coaching_id: 'c1', set_by: 'u1', set_at: '2026-01-01T12:00:00.000Z', protein_training: 160 },
+    ];
+    testFrom = () => {
+      const state = { orders: [] };
+      calls.push(state);
+      const b = {
+        select() { return b; }, eq() { return b; },
+        gte(_column, value) { state.gte = value; return b; },
+        lte(_column, value) { state.lte = value; return b; },
+        lt(_column, value) { state.lt = value; return b; },
+        order(column, options) { state.orders.push([column, options]); return b; },
+        limit(value) {
+          state.limit = value;
+          return Promise.resolve({ data: state.gte ? rangeRows : anchorRows, error: null });
+        },
+        then(resolve, reject) {
+          return Promise.resolve({ data: rangeRows, error: null }).then(resolve, reject);
+        },
+      };
+      return b;
+    };
+    const history = await LB.loadCoachingMacrosForCheckins('c1', [
+      { weekStart: '2026-02-02' }, { weekStart: '2026-01-05' },
+    ]);
+    assert.deepStrictEqual(Array.from(history, row => row.id), ['macro_b', 'macro_a', 'macro_anchor']);
+    const rangeCall = calls.find(call => call.gte);
+    const anchorCall = calls.find(call => call.lt);
+    assert.strictEqual(rangeCall.gte, '2026-01-11T00:00:00.000Z');
+    assert.strictEqual(rangeCall.lte, '2026-02-08T23:59:59.999Z');
+    assert.strictEqual(anchorCall.lt, rangeCall.gte);
+    assert.strictEqual(anchorCall.limit, 1);
+    assert.strictEqual(JSON.stringify(rangeCall.orders), JSON.stringify([
+      ['set_at', { ascending: false }], ['id', { ascending: false }],
+    ]));
+    assert.strictEqual(JSON.stringify(anchorCall.orders), JSON.stringify(rangeCall.orders));
+  });
+
+  await testAsync('check-in macro chronology pages beyond the PostgREST row cap', async () => {
+    const rangeRows = Array.from({ length: 1001 }, (_, i) => ({
+      id: `macro_${String(1001 - i).padStart(4, '0')}`,
+      coaching_id: 'c1', set_by: 'coach', set_at: '2026-01-20T12:00:00.000Z',
+    }));
+    const anchorRows = [{ id: 'macro_anchor', coaching_id: 'c1', set_by: 'coach', set_at: '2025-12-31T12:00:00.000Z' }];
+    let rangePage = 0;
+    const filters = [];
+    testFrom = () => {
+      const state = { range: false, anchor: false };
+      const b = {
+        select() { return b; }, eq() { return b; },
+        gte() { state.range = true; return b; }, lte() { return b; },
+        lt() { state.anchor = true; return b; }, order() { return b; },
+        or(filter) { filters.push(filter); return b; },
+        limit(value) {
+          if (state.anchor) return Promise.resolve({ data: anchorRows, error: null });
+          const from = rangePage++ * value;
+          return Promise.resolve({ data: rangeRows.slice(from, from + value), error: null });
+        },
+      };
+      return b;
+    };
+    const history = await LB.loadCoachingMacrosForCheckins('c1', [{ weekStart: '2026-01-19' }]);
+    assert.strictEqual(history.length, 1002);
+    assert.match(filters[0], /set_at\.lt\..*,and\(set_at\.eq\..*,id\.lt\.macro_0002\)/);
+  });
+
+  test('coaching history screens guard reload/load-more races and never infer deletion from a partial thread page', () => {
+    const core = fs.readFileSync(path.join(__dirname, '../../src/screens-coaching-core.jsx'), 'utf8');
+    const detail = fs.readFileSync(path.join(__dirname, '../../src/screens-coaching-detail.jsx'), 'utf8');
+    const tabs = fs.readFileSync(path.join(__dirname, '../../src/screens-coaching-tabs.jsx'), 'utf8');
+    assert.match(core, /requestVersionRef\.current !== version/);
+    assert.match(core, /olderRequestRef\.current\?\.version === version/);
+    assert.match(detail, /requestVersionRef\.current !== version/);
+    assert.match(detail, /Load older macro targets/);
+    assert.match(core, /Load older threads/);
+    assert.match(core, /\.filter\(n => !n\.threadId\)/);
+    assert.doesNotMatch(core, /!validThreadIds\.has\(n\.threadId\)/);
+    assert.match(detail, /Load older check-ins/);
+    assert.match(tabs, /Load older check-ins/);
+  });
+
+  test('coaching history migration and schema keep all advisor-recommended leading indexes', () => {
+    const migration = fs.readFileSync(path.join(__dirname, '../../supabase/migrations/20260822083213_coaching_history_keyset_indexes.sql'), 'utf8');
+    const schema = fs.readFileSync(path.join(__dirname, '../../supabase/schema.sql'), 'utf8');
+    const expectedIndexes = [
+      /CREATE INDEX IF NOT EXISTS zane_coaching_macros_history_keyset_idx\s+ON public\.zane_coaching_macros \(coaching_id, set_at DESC, id DESC\);/i,
+      /CREATE INDEX IF NOT EXISTS zane_coaching_threads_history_keyset_idx\s+ON public\.zane_coaching_threads \(coaching_id, created_at DESC, id DESC\);/i,
+      /CREATE INDEX IF NOT EXISTS zane_reminder_delivery_claims_user_idx\s+ON public\.zane_reminder_delivery_claims \(user_id\);/i,
+    ];
+    expectedIndexes.forEach(pattern => assert.match(migration, pattern));
+    assert.match(schema, /CREATE INDEX(?: IF NOT EXISTS)? zane_coaching_macros_history_keyset_idx\s+ON public\.zane_coaching_macros(?: USING btree)? \(coaching_id, set_at DESC, id DESC\);/i);
+    assert.match(schema, /CREATE INDEX(?: IF NOT EXISTS)? zane_coaching_threads_history_keyset_idx\s+ON public\.zane_coaching_threads(?: USING btree)? \(coaching_id, created_at DESC, id DESC\);/i);
+    assert.match(schema, expectedIndexes[2]);
+  });
+
+  await testAsync('coaching note hydration batches signed URLs and falls back per missing object', async () => {
+    const storageCalls = [];
+    testStorageFrom = () => ({
+      createSignedUrls: async (paths, expires) => {
+        storageCalls.push(['batch', paths, expires]);
+        return { data: [{ signedUrl: `signed:${paths[0]}` }], error: null };
+      },
+      createSignedUrl: async (path, expires) => {
+        storageCalls.push(['single', path, expires]);
+        return path.endsWith('missing.jpg')
+          ? { data: null, error: { message: 'missing' } }
+          : { data: { signedUrl: `fallback:${path}` }, error: null };
+      },
+    });
+    const hydrated = await LB.hydrateChatAttachments([
+      { path: 'u1/a.jpg' }, { url: 'u1/a.jpg' }, { path: 'u1/missing.jpg', name: 'kept' },
+    ]);
+    assert.strictEqual(JSON.stringify(storageCalls[0]), JSON.stringify(['batch', ['u1/a.jpg', 'u1/missing.jpg'], 300]));
+    assert.strictEqual(JSON.stringify(storageCalls.slice(1)), JSON.stringify([['single', 'u1/missing.jpg', 300]]));
+    assert.strictEqual(hydrated[0].url, 'signed:u1/a.jpg');
+    assert.strictEqual(hydrated[1].url, 'signed:u1/a.jpg');
+    assert.strictEqual(hydrated[2].storagePath, 'u1/missing.jpg');
+    assert.strictEqual(hydrated[2].name, 'kept');
+  });
+
+  test('coaching note page merge preserves older pages and replaces the newest window', () => {
+    const note = (id, createdAt, body = id) => ({ id, createdAt, body });
+    const existing = [
+      note('old', '2026-08-22T09:00:00Z'), note('boundary', '2026-08-22T10:00:00Z'),
+      note('deleted', '2026-08-22T11:00:00Z'),
+    ];
+    const refreshed = LB.mergeCoachingNotePage(existing, {
+      notes: [note('new', '2026-08-22T12:00:00Z'), note('boundary', '2026-08-22T10:00:00Z', 'edited')],
+      hasMore: true,
+    }, { latest: true });
+    assert.deepStrictEqual(Array.from(refreshed, n => n.id), ['old', 'boundary', 'new']);
+    assert.strictEqual(refreshed.find(n => n.id === 'boundary').body, 'edited');
+    const withOlder = LB.mergeCoachingNotePage(refreshed, {
+      notes: [note('oldest', '2026-08-22T08:00:00Z'), note('old', '2026-08-22T09:00:00Z', 'older-page')],
+      hasMore: false,
+    });
+    assert.deepStrictEqual(Array.from(withOlder, n => n.id), ['oldest', 'old', 'boundary', 'new']);
+    assert.strictEqual(withOlder.find(n => n.id === 'old').body, 'older-page');
+  });
+
+  test('ChatThread pages and merges notes, serializes refresh, and queues post-send reconciliation', () => {
+    const source = fs.readFileSync(path.join(__dirname, '../../src/screens-coaching-core.jsx'), 'utf8');
+    const apiCallLines = source.split('\n').filter(line => line.includes('LB.loadCoachingNotes('));
+    assert.strictEqual(apiCallLines.length, 2);
+    assert.strictEqual(apiCallLines.every(line => line.includes('{ limit: 100')), true);
+    assert.match(source, /loadCoachingNotes\(coachingId, thread\.id, \{ limit: 100 \}\)/);
+    assert.match(source, /loadCoachingNotes\(coachingId, thread\.id, \{ limit: 100, cursor \}\)/);
+    assert.match(source, /latestRequestRef\.current\?\.key === key/);
+    assert.match(source, /queueAfterCurrent = false/);
+    assert.match(source, /return current\.then\(\(\) => \{/);
+    assert.match(source, /setImagePreview\(null\);\s*loadLatestPage\(\{ queueAfterCurrent: true \}\)/);
+    assert.match(source, /document\.hidden/);
+    assert.match(source, /setInterval\(refresh, 60000\)/);
+    assert.match(source, /mergeCoachingNotePage\(prev, page\)/);
+    assert.match(source, /Load older messages/);
+  });
+
+  await testAsync('deleting a coaching note uses authenticated durable cleanup', async () => {
+    const bodies = [];
+    testSession = { access_token: 'token' };
+    testFetch = async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, queued: 2 }) };
+    };
+    const result = await LB.deleteCoachingNote('n1', 'u1');
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(bodies, [{ action: 'delete-note', noteId: 'n1' }]);
+    testSession = null;
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('thread and support-ticket deletion use authenticated mixed-owner cleanup', async () => {
+    const bodies = [];
+    testSession = { access_token: 'token' };
+    testFetch = async (_url, options) => {
+      bodies.push(JSON.parse(options.body));
+      return { ok: true, json: async () => ({ ok: true, queued: 2, cleanup: { removed: 2 } }) };
+    };
+    const threadResult = await LB.deleteCoachingThread('thread1');
+    const ticketResult = await LB.deleteSupportTicketChat('support_1');
+    assert.strictEqual(threadResult.ok, true);
+    assert.strictEqual(ticketResult.ok, true);
+    assert.deepStrictEqual(bodies, [
+      { action: 'delete-thread', threadId: 'thread1' },
+      { action: 'delete-support-ticket', coachingId: 'support_1' },
+    ]);
+    testSession = null;
+    testFetch = async () => ({ ok: true });
+  });
+
+  test('boot orphan detection is conservative and the destructive step is RPC-only', () => {
+    const old = '2026-01-01T00:00:00.000Z';
+    const sessions = [
+      { id: 'active', ended: null, started_at: old }, { id: 'empty', ended: null, started_at: old },
+      { id: 'entries', ended: null, started_at: old }, { id: 'stats', ended: null, started_at: old },
+      { id: 'fresh', ended: null, started_at: new Date().toISOString() },
+      { id: 'unknown-age', ended: null }, { id: 'done', ended: 'x', started_at: old },
+    ];
+    const ids = LB.findEmptyOrphanSessionCandidates(sessions, 'active', { entries: [{}] }, { stats: { exercise_count: 1 } });
+    assert.deepStrictEqual(Array.from(ids), ['empty']);
+    assert.strictEqual(LB.findEmptyOrphanSessionCandidates(sessions, null, {}, {}, { statsFailed: true }).length, 0);
+    const storeSource = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
+    assert.match(storeSource, /p_session_id: id,\s*p_started_before: orphanStartedBefore/);
+    assert.doesNotMatch(storeSource, /from\('zane_sessions'\)\.delete\(\)\.in\('id', orphan/);
+  });
+
+  await testAsync('autoArchiveMissedDays uses the logical unique key with duplicate-ignore semantics', async () => {
+    let options = null;
+    testFrom = table => ({
+      upsert(rows, opts) { if (table === 'zane_skips') options = opts; return Promise.resolve({ data: [], error: null }); },
+    });
+    const now = new Date();
+    const weekday = (now.getDay() + 6) % 7;
+    await LB.autoArchiveMissedDays('u1', {
+      activeScheduleId: 'p',
+      schedules: [{ id: 'p', mode: 'weekday', days: [{ id: 'd1', name: 'Day', weekday, items: [{ exId: 'e1' }] }] }],
+      sessions: [], skips: [],
+    });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.strictEqual(JSON.stringify(options), JSON.stringify({ onConflict: 'user_id,date,day_id', ignoreDuplicates: true }));
+  });
+
+  await testAsync('explicit deleteAllData revokes the Drive connection while restore preserves it', async () => {
+    const actions = [];
+    const rows = { zane_social_message_attachments: [], zane_coaching_drive_photos: [], zane_coaching_notes: [], zane_drive_progress_photos: [] };
+    testFrom = table => {
+      let deleting = false;
+      const read = pagedReadBuilder(table, rows, []);
+      return {
+        ...read,
+        delete() { deleting = true; return this; },
+        eq() { return deleting ? Promise.resolve({ data: [], error: null }) : this; },
+        in() { return Promise.resolve({ data: [], error: null }); },
+      };
+    };
+    testStorageFrom = () => ({ remove: async () => ({ data: [], error: null }) });
+    testSession = { access_token: 'token' };
+    testFetch = async (_url, options) => {
+      actions.push(JSON.parse(options.body).action);
+      return { ok: true, json: async () => ({ ok: true }) };
+    };
+    testRpc = async () => ({ data: null, error: null });
+    await LB.deleteAllData('u1');
+    await LB.deleteAllData('u1', { keepPush: true });
+    assert.deepStrictEqual(actions, ['delete-connection']);
+    testSession = null;
+    testFetch = async () => ({ ok: true });
+  });
+
+  await testAsync('coach plan pushes use one atomic RPC with deterministic mapped payloads', async () => {
+    const touched = [];
+    const atomicCalls = [];
+    testFrom = table => {
+      const b = {
+        select() { return b; }, eq() { return b; }, order() { return b; },
+        or() { return b; },
+        limit() { return Promise.resolve({ data: [], error: null }); },
+        maybeSingle: async () => ({ data: { id: 'thread' }, error: null }),
+        upsert: async rows => { touched.push(table); return { data: rows, error: null }; },
+        insert: async rows => { touched.push(table); return { data: rows, error: null }; },
+      };
+      return b;
+    };
+    testRpc = async (name, args) => {
+      if (name === 'push_meal_plan_to_client' || name === 'push_medication_plan_to_client') {
+        atomicCalls.push({ name, args });
+        return { data: args.p_operation_id, error: null };
+      }
+      return { data: null, error: null };
+    };
+    const mealArgs = {
+      plan: { name: 'Cut' },
+      slots: [{ id: 'old-slot', recipeId: 'r1', foodId: 'food-1', foodName: 'Bowl', quantityG: 100, calories: 200, protein: 10, carbs: 20, fat: 5, hour: 12, dayType: 'training' }],
+      recipes: [{ id: 'r1', name: 'Bowl', items: [], portions: 2 }],
+      coachUserId: 'coach', coachingId: 'c1', clientId: 'client', activateNow: true,
+    };
+    const mealId = await LB.pushMealPlanToClient(mealArgs);
+    const mealRetryId = await LB.pushMealPlanToClient(mealArgs);
+    assert.strictEqual(mealRetryId, mealId, 'retry must target the same deterministic plan id');
+    const mealCalls = atomicCalls.filter(call => call.name === 'push_meal_plan_to_client');
+    assert.strictEqual(mealCalls.length, 2);
+    assert.strictEqual(mealCalls[0].args.p_operation_id, mealCalls[1].args.p_operation_id);
+    assert.strictEqual(mealCalls[0].args.p_plan.id, mealId);
+    assert.strictEqual(mealCalls[0].args.p_activate, true);
+    assert.deepStrictEqual(Object.keys(mealCalls[0].args.p_recipes[0]).sort(), ['id', 'items', 'name', 'portions']);
+    assert.strictEqual(mealCalls[0].args.p_slots[0].meal_plan_id, mealId);
+    assert.strictEqual(mealCalls[0].args.p_slots[0].quantity_g, 100);
+    assert.strictEqual('user_id' in mealCalls[0].args.p_slots[0], false);
+    const medicationArgs = {
+      plan: { name: 'Meds' }, medications: [{ id: 'm1', name: 'Vitamin', unitLabel: 'capsules', packageSize: 30 }],
+      planItems: [{ id: 'old-item', medicationId: 'm1' }], scheduleSlots: [{ id: 'old-slot', medicationId: 'm1', weekdays: [0, 2], hour: 8, doseQty: 1 }],
+      coachUserId: 'coach', coachingId: 'c1', clientId: 'client',
+    };
+    const medicationId = await LB.pushMedicationPlanToClient(medicationArgs);
+    const medicationRetryId = await LB.pushMedicationPlanToClient(medicationArgs);
+    assert.strictEqual(medicationRetryId, medicationId);
+    const medicationCalls = atomicCalls.filter(call => call.name === 'push_medication_plan_to_client');
+    assert.strictEqual(medicationCalls.length, 2);
+    assert.strictEqual(medicationCalls[0].args.p_operation_id, medicationCalls[1].args.p_operation_id);
+    assert.strictEqual(medicationCalls[0].args.p_plan.id, medicationId);
+    assert.strictEqual(medicationCalls[0].args.p_medications[0].unit_label, 'capsules');
+    assert.strictEqual(medicationCalls[0].args.p_plan_items[0].medication_plan_id, medicationId);
+    assert.strictEqual(medicationCalls[0].args.p_schedule_slots[0].hour, 8);
+    assert.strictEqual('user_id' in medicationCalls[0].args.p_schedule_slots[0], false);
+    assert.strictEqual(touched.some(table => [
+      'zane_food_recipes', 'zane_food_meal_plans', 'zane_food_template_slots', 'zane_user_settings',
+      'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items', 'zane_medication_schedule_slots',
+    ].includes(table)), false, 'plan rows must not be written through separate REST requests');
   });
 
   // ── syncStore error propagation (THE core fix) ───────────────────────────
@@ -1360,6 +2485,31 @@ async function testAsync(name, fn) {
     const { sessions } = LB.mergeSessions(fresh, cur, null, null, now);
     assert.strictEqual(sessions[0].entries, cachedEntries, 'windowing must not wipe history already on the device');
     assert.strictEqual(sessions[0].aggVolume, 640, 'fresh aggregates still attached');
+  });
+
+  await testAsync('deleting an observed lazy history row survives a base that never contained it', async () => {
+    const lazy = {
+      id: 'lazy-food-delete', date: '2020-01-01', time: '12:00',
+      foodName: 'Old food', quantityG: 100, calories: 100, protein: 1, carbs: 1, fat: 1,
+    };
+    const deleted = [];
+    testFrom = table => {
+      let deleting = false;
+      const b = {
+        upsert: async () => ({ data: null, error: null }),
+        insert: async () => ({ data: null, error: null }),
+        delete() { deleting = true; return b; },
+        in(_column, ids) { if (deleting) deleted.push([table, ...ids]); return Promise.resolve({ data: null, error: null }); },
+        eq: async () => ({ data: null, error: null }),
+      };
+      return b;
+    };
+    const base = { ...baseStore(), foodLogs: [], medicationLogs: [] };
+    LB.markLocalRowsConfirmed('foodLogs', [lazy]);
+    await LB.syncStore(base, { ...base, foodLogs: [lazy] }, 'u1');
+    assert.strictEqual(deleted.length, 0, 'observing a server row is not itself a delete');
+    await LB.syncStore(base, { ...base, foodLogs: [] }, 'u1');
+    assert.deepStrictEqual(deleted, [['zane_food_logs', 'lazy-food-delete']]);
   });
   test('mergeSessions preserves cached aggregates only when the stats RPC failed', () => {
     const fresh = [{ id: 'old-stats', date: '2025-01-01', ended: 'x', entries: [] }];

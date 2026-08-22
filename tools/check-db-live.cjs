@@ -151,6 +151,18 @@ const EXPECTED_NO_AUTHENTICATED_EXEC = new Set([
   'enqueue_coaching_drive_export()',
   'enqueue_coaching_drive_photo_export()',
   'coaching_drive_photo_guard()',
+  'sweep_stale_session(text, timestamp with time zone)',
+  'request_drive_progress_deletion(uuid, uuid)',
+  'claim_drive_progress_uploads(integer, text)',
+  'finish_drive_progress_upload(uuid, text, text, text, text, timestamp with time zone)',
+  'claim_drive_progress_deletions(integer, text)',
+  'delete_coaching_drive_connection(uuid)',
+  'delete_coaching_chat_scope(uuid, text, text)',
+  'claim_chat_attachment_cleanup(integer)',
+  'claim_reminder_delivery(text, uuid, timestamp with time zone, text, text, uuid, timestamp with time zone)',
+  'finish_reminder_delivery(text, uuid, text, uuid, boolean)',
+  'prune_reminder_delivery_claims(integer)',
+  'clear_feature_map_layers_if_unchanged(jsonb, jsonb)',
 ]);
 
 // ── Config ───────────────────────────────────────────────────────────────────
@@ -167,6 +179,10 @@ const ANON_KEY =
   process.env.SUPABASE_ANON_KEY ||
   fromStoreJs(/const SUPABASE_ANON_KEY\s*=\s*[\s\S]*?['"]([^'"]+)['"]/, 'SUPABASE_ANON_KEY');
 const SERVICE_KEY = (process.env.SUPABASE_SERVICE_ROLE_KEY || '').trim();
+const parsedRequestTimeoutMs = Number(process.env.ZANE_TOOL_REQUEST_TIMEOUT_MS);
+const REQUEST_TIMEOUT_MS = Number.isFinite(parsedRequestTimeoutMs) && parsedRequestTimeoutMs >= 1000 && parsedRequestTimeoutMs <= 300000
+  ? parsedRequestTimeoutMs
+  : 30000;
 
 const args = process.argv.slice(2);
 const argVal = (name) => {
@@ -178,11 +194,34 @@ const errors = [];
 const infos = [];
 
 async function req(url, key, opts = {}) {
-  const res = await fetch(url, {
-    ...opts,
-    headers: { apikey: key, Authorization: `Bearer ${key}`, ...(opts.headers || {}) },
-  });
-  return res;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let detachAbort = null;
+  if (opts.signal) {
+    const abort = () => controller.abort();
+    if (opts.signal.aborted) abort();
+    else {
+      opts.signal.addEventListener('abort', abort, { once: true });
+      detachAbort = () => opts.signal.removeEventListener('abort', abort);
+    }
+  }
+  try {
+    const response = await fetch(url, {
+      ...opts,
+      signal: controller.signal,
+      headers: { apikey: key, Authorization: `Bearer ${key}`, ...(opts.headers || {}) },
+    });
+    const body = Buffer.from(await response.arrayBuffer()).toString('utf8');
+    return {
+      ok: response.ok,
+      status: response.status,
+      text: async () => body,
+      json: async () => JSON.parse(body),
+    };
+  } finally {
+    clearTimeout(timer);
+    if (detachAbort) detachAbort();
+  }
 }
 
 // ── Probe mode: verify schema.sql columns still exist live (anon key) ───────

@@ -3,3 +3,24 @@
 # resolveUser for browser actions and CRON_SECRET/DRIVE_WORKER_SECRET for sync.
 [functions.coaching-drive-sync]
 verify_jwt = false
+
+# These handlers authenticate scheduled requests against CRON_SECRET inside
+# the function. Their bearer value is intentionally not a Supabase user JWT,
+# so gateway JWT verification must remain disabled on every deployment.
+[functions.reminder]
+verify_jwt = false
+
+[functions.water-reminder]
+verify_jwt = false
+
+[functions.meal-reminder]
+verify_jwt = false
+
+[functions.medication-reminder]
+verify_jwt = false
+
+[functions.daily-log-reminder]
+verify_jwt = false
+
+[functions.auto-close-sessions]
+verify_jwt = false

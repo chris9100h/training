@@ -72,7 +72,7 @@
 <link rel="preconnect" href="https://unpkg.com" crossorigin />
 <link rel="preconnect" href="https://cdnjs.cloudflare.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Big+Shoulders+Display:wght@400;700;900&family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@300;400;500;600&display=swap" rel="stylesheet" />
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" crossorigin="anonymous" />
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha384-t1nt8BQoYMLFN5p42tRAtuAAFQaCQODekUVeKKZrEnEyp4H2R0RHFz0KWpmj7i8g" crossorigin="anonymous" />
 <style>
   :root {
     --bg: #07060a;
@@ -1705,8 +1705,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
 </script>
 <!-- React 18, production builds: ~10x smaller and faster to parse than the
      development builds, with no dev-mode runtime overhead. -->
-<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin="anonymous"></script>
-<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" integrity="sha384-DGyLxAyjq0f9SPpVevD6IgztCFlnMF6oW/XQGmfe+IsZ8TqEiDrcHkMLKI6fiB/Z" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" integrity="sha384-gTGxhz21lVGYNMcdJOyq01Edg0jhn/c22nsx0kyqP0TxaV5WVdsSH1fSDUf5YJj1" crossorigin="anonymous"></script>
 
 <!-- Plain JS (no JSX), run directly, no transpile needed.
      whatsnew.js and feature-map-db.js are deliberately NOT here: both are
@@ -2298,7 +2298,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // when nothing is precached and the network is often exactly what was flaky
   // in the first place. __ensureZbarWasm below already worked this way; this
   // brings the script-tag loaders in line with it.
-  function __lazyScript(promiseKey, src, read, crossOrigin) {
+  function __lazyScript(promiseKey, src, read, crossOrigin, integrity) {
     var already = read();
     if (already) return Promise.resolve(already);
     if (!window[promiseKey]) {
@@ -2306,6 +2306,7 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
         var s = document.createElement('script');
         s.src = src;
         if (crossOrigin) s.crossOrigin = 'anonymous';
+        if (integrity) s.integrity = integrity;
         var fail = function (why) {
           window[promiseKey] = null;
           if (s.parentNode) s.parentNode.removeChild(s);
@@ -2331,7 +2332,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // Lazily load html2canvas the first time a screenshot is actually taken.
   window.__ensureHtml2Canvas = function () {
     return __lazyScript('__h2cPromise', 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-      function () { return window.html2canvas; }, true);
+      function () { return window.html2canvas; }, true,
+      'sha384-ZZ1pncU3bQe8y31yfZdMFdSpttDoPmOZg2wguVK9almUodir1PghgT0eY7Mrty8H');
   };
 
   // Two large static data files that used to sit in the blocking
@@ -2356,7 +2358,8 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // centering weren't achievable there.
   window.__ensureXLSX = function () {
     return __lazyScript('__xlsxPromise', 'https://unpkg.com/exceljs@4.4.0/dist/exceljs.min.js',
-      function () { return window.ExcelJS; }, true);
+      function () { return window.ExcelJS; }, true,
+      'sha384-Pqp51FUN2/qzfxZxBCtF0stpc9ONI6MYZpVqmo8m20SoaQCzf+arZvACkLkirlPz');
   };
 
   // Lazily load the barcode-scanner decoder (zbar-wasm, a WebAssembly build
@@ -2367,12 +2370,37 @@ window.applyDarkMode(localStorage.getItem('logbook-dark-mode') || 'dark');
   // zbar-wasm runs its own compiled decoder, so it doesn't depend on any
   // browser barcode API at all. Same on-demand pattern as html2canvas above,
   // not preloaded and not in the SW cache since it (and the food lookup)
-  // needs the network. Native dynamic import(), not a script tag: the
-  // published browser build is an ES module.
+  // needs the network. Dynamic import() has no SRI attribute, so fetch the
+  // fully inlined build as bytes, verify its pinned SHA-384 digest, and only
+  // then execute a local blob module. The inlined build contains its WASM and
+  // therefore has no unverified relative executable dependency.
+  var ZBAR_MODULE_URL = 'https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/inlined/index.mjs';
+  var ZBAR_MODULE_SHA384 = '3IYcdZtNoOQvI/4oCilreV9pcnvJBKna87Hmg3W+5MDenI37eB6o9IvKraxLINCs';
+  function verifiedModuleImport(url, expectedSha384) {
+    if (!window.crypto || !window.crypto.subtle) return Promise.reject(new Error('Module verification is unavailable'));
+    var controller = typeof AbortController === 'function' ? new AbortController() : null;
+    var timer = controller ? setTimeout(function () { controller.abort(); }, 20000) : null;
+    return fetch(url, controller ? { signal: controller.signal } : undefined)
+      .then(function (response) {
+        if (!response.ok) throw new Error('Module fetch failed: ' + response.status);
+        return response.arrayBuffer();
+      })
+      .then(function (bytes) {
+        return window.crypto.subtle.digest('SHA-384', bytes).then(function (digest) {
+          var binary = '';
+          var digestBytes = new Uint8Array(digest);
+          for (var i = 0; i < digestBytes.length; i += 1) binary += String.fromCharCode(digestBytes[i]);
+          if (btoa(binary) !== expectedSha384) throw new Error('Module integrity check failed');
+          var blobUrl = URL.createObjectURL(new Blob([bytes], { type: 'text/javascript' }));
+          return import(blobUrl).finally(function () { URL.revokeObjectURL(blobUrl); });
+        });
+      })
+      .finally(function () { if (timer) clearTimeout(timer); });
+  }
   window.__ensureZbarWasm = function () {
     if (window.__zbarWasm) return Promise.resolve(window.__zbarWasm);
     if (!window.__zbarWasmPromise) {
-      window.__zbarWasmPromise = import('https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.11.0/dist/index.mjs')
+      window.__zbarWasmPromise = verifiedModuleImport(ZBAR_MODULE_URL, ZBAR_MODULE_SHA384)
         .then(function (mod) { window.__zbarWasm = mod; return mod; })
         .catch(function (e) { window.__zbarWasmPromise = null; throw e; });
     }

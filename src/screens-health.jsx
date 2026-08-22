@@ -38,8 +38,91 @@ function healthReportingWeekBounds(anchor, weekStartDay = 0) {
   return { start, end: LB.reportingWeekEndISO(start) };
 }
 
-const healthNum = v => (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(String(v).replace(',', '.'));
-const healthInt = v => (v === '' || v == null || isNaN(parseInt(v, 10))) ? null : parseInt(v, 10);
+function healthNum(value) {
+  if (value === '' || value == null) return null;
+  const raw = String(value).trim();
+  if (!/^[+-]?(?:\d+|\d*[.,]\d+)$/.test(raw)) return null;
+  const number = Number(raw.replace(',', '.'));
+  return Number.isFinite(number) ? number : null;
+}
+
+function healthInt(value) {
+  if (value === '' || value == null) return null;
+  const raw = String(value).trim();
+  if (!/^[+-]?\d+$/.test(raw)) return null;
+  const number = Number(raw);
+  return Number.isSafeInteger(number) ? number : null;
+}
+
+function healthNormalizeEntryTime(value) {
+  const match = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (hour > 23 || minute > 59) return null;
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
+}
+
+function healthEntryTime(value, fallback) {
+  return String(value || '').trim() ? healthNormalizeEntryTime(value) : fallback;
+}
+
+function healthBloodPressureValidation(systolicRaw, diastolicRaw) {
+  const systolic = healthInt(systolicRaw);
+  const diastolic = healthInt(diastolicRaw);
+  if (systolic == null || diastolic == null) return { error: 'Enter whole numbers for systolic and diastolic.' };
+  if (systolic < 40 || systolic > 300 || diastolic < 20 || diastolic > 200) {
+    return { error: 'Enter a plausible blood pressure reading.' };
+  }
+  if (systolic <= diastolic) return { error: 'Systolic pressure must be higher than diastolic pressure.' };
+  return { systolic, diastolic, error: null };
+}
+
+function healthDailyValidationError(form, options = {}) {
+  const decimalFields = [
+    ['weight', 'weight', 0, 1500],
+    ['waistCm', 'waist', 0, 500],
+    ['hipsCm', 'hips', 0, 500],
+    ['chestCm', 'chest', 0, 500],
+    ['armCm', 'arm', 0, 500],
+    ['thighCm', 'thigh', 0, 500],
+    ['calfCm', 'calf', 0, 500],
+    ['bodyFatPct', 'body fat percentage', 0, 100],
+  ];
+  for (const [key, label, min, max] of decimalFields) {
+    const raw = form?.[key];
+    if (raw == null || String(raw).trim() === '') continue;
+    const value = healthNum(raw);
+    if (value == null || value <= min || value > max) return `Enter a valid ${label}.`;
+  }
+  const integerFields = [
+    ['steps', 'steps', 0, 1000000],
+    ...(!options.foodLocked ? [
+      ['protein', 'protein', 0, 5000],
+      ['carbs', 'carbs', 0, 5000],
+      ['fat', 'fat', 0, 5000],
+      ...(options.netCarbs ? [['fiber', 'fiber', 0, 5000]] : []),
+      ['calories', 'calories', 0, 50000],
+    ] : []),
+  ];
+  for (const [key, label, min, max] of integerFields) {
+    const raw = form?.[key];
+    if (raw == null || String(raw).trim() === '') continue;
+    const value = healthInt(raw);
+    if (value == null || value < min || value > max) return `Enter a valid ${label} value.`;
+  }
+  if (!options.foodLocked && options.netCarbs) {
+    const carbs = healthInt(form?.carbs);
+    const fiber = healthInt(form?.fiber);
+    if (carbs != null && fiber != null && fiber > carbs) return 'Fiber cannot be higher than total carbs.';
+  }
+  if (!options.waterLocked && form?.water != null && String(form.water).trim() !== '') {
+    const water = healthNum(form.water);
+    const waterMl = water == null ? null : options.waterEntryToMl?.(water);
+    if (water == null || water < 0 || !Number.isFinite(waterMl) || waterMl > 100000) return 'Enter a valid water amount.';
+  }
+  return null;
+}
 
 const caloriesFromMacros = LB.caloriesFromMacros;
 
@@ -299,9 +382,10 @@ function glucoseDisplay(mmol, unit) {
   return unit === 'mgdl' ? Math.round(mmol * GLUCOSE_FACTOR) : Math.round(mmol * 10) / 10;
 }
 function glucoseFromInput(raw, unit) {
-  const n = parseFloat(String(raw).replace(',', '.'));
-  if (!isFinite(n) || n <= 0) return null;
-  return unit === 'mgdl' ? Math.round(n / GLUCOSE_FACTOR * 1000) / 1000 : n;
+  const n = healthNum(raw);
+  if (n == null || n <= 0) return null;
+  const mmol = unit === 'mgdl' ? Math.round(n / GLUCOSE_FACTOR * 1000) / 1000 : n;
+  return mmol >= 0.5 && mmol <= 60 ? mmol : null;
 }
 // Edit-form prefill: show the stored reading in the display unit but WITHOUT the
 // display rounding, so re-saving an untouched value doesn't clobber the raw mmol.
@@ -325,9 +409,10 @@ function tempDisplay(c, unit) {
   return Math.round(v * 10) / 10;
 }
 function tempFromInput(raw, unit) {
-  const n = parseFloat(String(raw).replace(',', '.'));
-  if (!isFinite(n)) return null;
+  const n = healthNum(raw);
+  if (n == null) return null;
   const c = unit === 'f' ? (n - 32) * 5 / 9 : n;
+  if (c < 25 || c > 45) return null;
   return Math.round(c * 100) / 100;
 }
 // Edit-form prefill: show the stored reading in the display unit but WITHOUT the
@@ -1435,6 +1520,7 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   const [glForm, setGlForm] = useStateH(emptyGl);
   const [editingGlucoseId, setEditingGlucoseId] = useStateH(null);
   const [confirmDeleteGlId, setConfirmDeleteGlId] = useStateH(null);
+  const [savingGlucose, setSavingGlucose] = useStateH(false);
   const setGl = (k, v) => setGlForm(f => ({ ...f, [k]: v }));
 
   // ── Blood pressure readings for this day ──
@@ -1466,21 +1552,11 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   useEffectH(() => {
     if (!open) {
-      setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null);
+      setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); setConfirmDeleteGlId(null); setSavingGlucose(false);
       setAddingBp(false); setBpForm(emptyBp); setEditingBpId(null); setConfirmDeleteBpId(null); setSavingBp(false);
       setAddingTemp(false); setTempForm(emptyTemp); setEditingTempId(null); setConfirmDeleteTempId(null); setSavingTemp(false);
     }
   }, [open]);
-
-  // Normalize a free-text time to zero-padded HH:MM (so entries sort
-  // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
-  const normEntryTime = (s) => {
-    const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
-    if (!m) return null;
-    const h = +m[1], min = +m[2];
-    if (h > 23 || min > 59) return null;
-    return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
-  };
 
   // Glucose, blood pressure and body temperature are written straight to
   // Supabase and are NOT part of the syncStore diff, so a failed write has no
@@ -1493,14 +1569,19 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
 
   const saveBp = async () => {
     if (savingBp) return;
-    const sys = parseInt(bpForm.systolic, 10), dia = parseInt(bpForm.diastolic, 10);
-    if (!isFinite(sys) || sys <= 0 || !isFinite(dia) || dia <= 0) {
-      await confirm('Enter a systolic and diastolic value above 0.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+    const validated = healthBloodPressureValidation(bpForm.systolic, bpForm.diastolic);
+    if (validated.error) {
+      await confirm(validated.error, { title: 'Invalid reading', ok: 'OK', cancel: null });
       return;
     }
+    const time = healthEntryTime(bpForm.time, new Date().toTimeString().slice(0, 5));
+    if (!time) {
+      await confirm('Enter a valid time in HH:MM format.', { title: 'Invalid time', ok: 'OK', cancel: null });
+      return;
+    }
+    const { systolic: sys, diastolic: dia } = validated;
     setSavingBp(true);
     try {
-      const time = normEntryTime(bpForm.time) || new Date().toTimeString().slice(0, 5);
       if (editingBpId) {
         const origEntry = (store.bloodPressureLogs || []).find(l => l.id === editingBpId);
         const updated = { ...origEntry, time, systolic: sys, diastolic: dia, note: bpForm.note.trim() || null };
@@ -1532,12 +1613,16 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     if (savingTemp) return;
     const c = tempFromInput(tempForm.value, tUnit);
     if (c == null) {
-      await confirm('Enter a valid temperature.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      await confirm('Enter a plausible temperature.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      return;
+    }
+    const time = healthEntryTime(tempForm.time, new Date().toTimeString().slice(0, 5));
+    if (!time) {
+      await confirm('Enter a valid time in HH:MM format.', { title: 'Invalid time', ok: 'OK', cancel: null });
       return;
     }
     setSavingTemp(true);
     try {
-      const time = normEntryTime(tempForm.time) || new Date().toTimeString().slice(0, 5);
       let ok = true;
       if (editingTempId) {
         const origEntry = (store.bodyTempLogs || []).find(l => l.id === editingTempId);
@@ -1582,36 +1667,37 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
   };
 
   const saveGlucose = async () => {
+    if (savingGlucose) return;
     const mmol = glucoseFromInput(glForm.value, glUnit);
     // Same "Invalid reading" feedback the BP and temperature forms in this very
     // sheet give: a silent return looked like the Save button was dead.
     if (mmol == null) {
-      await confirm('Enter a valid glucose value.', { title: 'Invalid reading', ok: 'OK', cancel: null });
+      await confirm('Enter a plausible glucose value.', { title: 'Invalid reading', ok: 'OK', cancel: null });
       return;
     }
-    // Normalize the free-text time to zero-padded HH:MM (so entries sort
-    // correctly) and fall back to now if it's blank or invalid ("9", "25:99").
-    const normTime = (s) => {
-      const m = /^(\d{1,2}):(\d{2})$/.exec((s || '').trim());
-      if (!m) return null;
-      const h = +m[1], min = +m[2];
-      if (h > 23 || min > 59) return null;
-      return String(h).padStart(2, '0') + ':' + String(min).padStart(2, '0');
-    };
-    const time = normTime(glForm.time) || new Date().toTimeString().slice(0, 5);
-    if (editingGlucoseId) {
-      const origEntry = (store.glucoseLogs || []).find(l => l.id === editingGlucoseId);
-      const updated = { ...origEntry, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null };
-      setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
-      setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
-      const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
-      if (error) { if (origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) })); await warnWriteFailed('glucose reading'); }
-    } else {
-      const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
-      setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
-      setAddingGlucose(false); setGlForm(emptyGl);
-      const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
-      if (error) { setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('glucose reading'); }
+    const time = healthEntryTime(glForm.time, new Date().toTimeString().slice(0, 5));
+    if (!time) {
+      await confirm('Enter a valid time in HH:MM format.', { title: 'Invalid time', ok: 'OK', cancel: null });
+      return;
+    }
+    setSavingGlucose(true);
+    try {
+      if (editingGlucoseId) {
+        const origEntry = (store.glucoseLogs || []).find(l => l.id === editingGlucoseId);
+        const updated = { ...origEntry, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null };
+        setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? updated : l) }));
+        setEditingGlucoseId(null); setAddingGlucose(false); setGlForm(emptyGl);
+        const { error } = await LB.supabase.from('zane_glucose_logs').update({ time, value_mmol: mmol, context: updated.context, note: updated.note }).eq('id', editingGlucoseId).eq('user_id', userId);
+        if (error) { if (origEntry) setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).map(l => l.id === editingGlucoseId ? origEntry : l) })); await warnWriteFailed('glucose reading'); }
+      } else {
+        const entry = { id: LB.uid(), date, time, valueMmol: mmol, context: glForm.context || 'fasted', note: glForm.note.trim() || null, createdAt: new Date().toISOString() };
+        setStore(s => ({ ...s, glucoseLogs: [entry, ...(s.glucoseLogs || [])] }));
+        setAddingGlucose(false); setGlForm(emptyGl);
+        const { error } = await LB.supabase.from('zane_glucose_logs').insert({ id: entry.id, user_id: userId, date: entry.date, time: entry.time, value_mmol: entry.valueMmol, context: entry.context, note: entry.note });
+        if (error) { setStore(s => ({ ...s, glucoseLogs: (s.glucoseLogs || []).filter(l => l.id !== entry.id) })); await warnWriteFailed('glucose reading'); }
+      }
+    } finally {
+      setSavingGlucose(false);
     }
   };
 
@@ -1693,8 +1779,25 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
     onClose();
   };
 
-  const save = () => {
+  const save = async () => {
     if (!canSave) return;
+    const validationError = healthDailyValidationError(form, {
+      foodLocked,
+      waterLocked,
+      netCarbs,
+      waterEntryToMl: value => UI.waterEntryToMl(value),
+    });
+    if (validationError) {
+      await confirm(validationError, { title: 'Invalid daily log', ok: 'OK', cancel: null });
+      return;
+    }
+    const malformedCoachResponse = coachFields
+      .map(field => checkinResponseValidationError(field, coachForm[field.key], LB.cardioDistUnit()))
+      .find(Boolean);
+    if (malformedCoachResponse) {
+      await confirm(malformedCoachResponse, { title: 'Invalid coach field', ok: 'OK', cancel: null });
+      return;
+    }
     // Belt and suspenders, same reasoning as waterMl below: the locked fields
     // render no real input while foodLocked (see the NUTRITION section), but
     // save() itself never trusts the form for them either, so nothing can
@@ -1729,8 +1832,9 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
       if (dt === 'training' || dt === 'rest') targetsSnap = { dayType: dt };
     }
     const savedCoachFields = {};
+    const coachDistUnit = LB.cardioDistUnit();
     coachFields.forEach(f => {
-      const v = toResponse(f, coachForm[f.key]);
+      const v = toResponse(f, coachForm[f.key], coachDistUnit);
       if (v != null) savedCoachFields[f.key] = v;
     });
     const waterEntry = healthNum(form.water);
@@ -2156,8 +2260,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
               <input type="text" placeholder="…" value={glForm.note} onChange={e => setGl('note', e.target.value)} style={inputStyle} />
             </div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); }} style={{ flex: 1 }}>Cancel</Btn>
-              <Btn onClick={saveGlucose} disabled={!glForm.value} style={{ flex: 2 }}>{editingGlucoseId ? 'Update' : 'Add'}</Btn>
+              <Btn kind="ghost" onClick={() => { setAddingGlucose(false); setGlForm(emptyGl); setEditingGlucoseId(null); }} disabled={savingGlucose} style={{ flex: 1 }}>Cancel</Btn>
+              <Btn onClick={saveGlucose} disabled={!glForm.value || savingGlucose} style={{ flex: 2 }}>{savingGlucose ? 'Saving...' : (editingGlucoseId ? 'Update' : 'Add')}</Btn>
             </div>
           </div>
         ) : (
@@ -5470,8 +5574,8 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
     if (!coachingId) { setCoachingMacros(null); setCoachingMacrosLoaded(true); return; }
     let cancelled = false;
     setCoachingMacrosLoaded(false);
-    LB.loadCoachingMacros(coachingId)
-      .then(data => { if (!cancelled) { setCoachingMacros(data[0] || null); setCoachingMacrosLoaded(true); } })
+    LB.loadLatestCoachingMacros(coachingId)
+      .then(data => { if (!cancelled) { setCoachingMacros(data); setCoachingMacrosLoaded(true); } })
       // Left at false on failure, not flipped to true: the reconcilers below
       // gate on this specifically to avoid scoring against the personal
       // target while the real coaching target is still unknown. Marking a

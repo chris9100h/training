@@ -11,18 +11,114 @@ function useCoachingCheckins(coachingId) {
   const [loadErr, setLoadErr] = useStateC(false);
   const [schema, setSchema] = useStateC(null);
   const [coachingMacrosHistory, setCoachingMacrosHistory] = useStateC(null);
+  const [hasOlder, setHasOlder] = useStateC(false);
+  const [olderCursor, setOlderCursor] = useStateC(null);
+  const [loadingOlder, setLoadingOlder] = useStateC(false);
+  const coachingIdRef = useRefC(coachingId);
+  const requestVersionRef = useRefC(0);
+  const checkinsRef = useRefC(null);
+  const olderRequestRef = useRefC(null);
 
-  const load = () => LB.loadCheckins(coachingId)
-    .then(c => { setCheckins(c); setLoadErr(false); })
-    .catch(() => setLoadErr(true));
-  useEffectC(() => {
+  const loadMacroHistory = async (key, visibleCheckins) => {
+    const [history, latest] = await Promise.all([
+      LB.loadCoachingMacrosForCheckins(key, visibleCheckins),
+      LB.loadLatestCoachingMacros(key),
+    ]);
+    // The range + prior anchor preserves historical cards. The current latest
+    // row additionally keeps a no-history user's live preview correct and is
+    // ignored naturally by older cards whose week end predates it.
+    return LB.mergeCoachingMacroPage(history, { macros: latest ? [latest] : [] });
+  };
+
+  const load = () => {
+    const key = coachingId;
+    const version = ++requestVersionRef.current;
+    coachingIdRef.current = key;
+    olderRequestRef.current = null;
+    setLoadingOlder(false);
     setLoadErr(false);
+    return LB.loadCheckins(key, { limit: 26 })
+      .then(async page => {
+        const macroHistory = await loadMacroHistory(key, page.checkins).catch(() => null);
+        if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+        checkinsRef.current = page.checkins;
+        setCheckins(page.checkins);
+        setHasOlder(page.hasMore);
+        setOlderCursor(page.nextCursor);
+        setCoachingMacrosHistory(macroHistory);
+        setLoadErr(false);
+        return page;
+      })
+      .catch(error => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+        console.error('coaching check-ins reload failed:', error);
+        return null;
+      });
+  };
+
+  const loadOlder = () => {
+    const key = coachingId;
+    const version = requestVersionRef.current;
+    if (!hasOlder || !olderCursor || loadingOlder) return;
+    if (olderRequestRef.current?.key === key && olderRequestRef.current?.version === version) {
+      return olderRequestRef.current.promise;
+    }
+    setLoadingOlder(true);
+    const cursor = olderCursor;
+    const promise = LB.loadCheckins(key, { limit: 26, cursor })
+      .then(async page => {
+        if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+        const merged = LB.mergeCoachingCheckinPage(checkinsRef.current || [], page);
+        const macroHistory = await loadMacroHistory(key, merged).catch(() => null);
+        if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+        checkinsRef.current = merged;
+        setCheckins(merged);
+        setHasOlder(page.hasMore);
+        setOlderCursor(page.nextCursor);
+        setCoachingMacrosHistory(macroHistory);
+        setLoadErr(false);
+        return page;
+      })
+      .catch(error => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+        console.error('older coaching check-ins load failed:', error);
+        return null;
+      })
+      .finally(() => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadingOlder(false);
+        if (olderRequestRef.current?.promise === promise) olderRequestRef.current = null;
+      });
+    olderRequestRef.current = { key, version, promise };
+    return promise;
+  };
+
+  useEffectC(() => {
+    const key = coachingId;
+    coachingIdRef.current = key;
+    requestVersionRef.current += 1;
+    checkinsRef.current = null;
+    olderRequestRef.current = null;
+    setCheckins(null);
+    setLoadErr(false);
+    setSchema(null);
+    setCoachingMacrosHistory(null);
+    setHasOlder(false);
+    setOlderCursor(null);
+    setLoadingOlder(false);
     load();
-    LB.loadCheckinSchema(coachingId).then(s => setSchema(s)).catch(() => {});
-    LB.loadCoachingMacros(coachingId).then(data => setCoachingMacrosHistory(data)).catch(() => {});
+    LB.loadCheckinSchema(key).then(s => {
+      if (coachingIdRef.current === key) setSchema(s);
+    }).catch(() => {});
+    return () => {
+      if (coachingIdRef.current === key) coachingIdRef.current = null;
+      requestVersionRef.current += 1;
+    };
   }, [coachingId]);
 
-  return { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load };
+  return {
+    checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory,
+    hasOlder, loadingOlder, loadOlder, load,
+  };
 }
 
 // Fixed amber pill shown while a coach's edit to a client's plan failed to
@@ -262,6 +358,45 @@ function CoachingUnreadBanner({ store, userId, onOpen }) {
 // ─── ChatThread ───────────────────────────────────────────────────────────────
 // Single named thread, message bubbles + compose input.
 
+async function coachingCreateChatNote({ coachingId, threadId, userId, body, imageFile, imagePreview }) {
+  let uploadedPath = null;
+  let noteSaved = false;
+  try {
+    let persistedAttachments = null;
+    let displayAttachments = null;
+    if (imageFile) {
+      uploadedPath = await LB.uploadChatImage(imageFile, userId);
+      persistedAttachments = [{ path: uploadedPath, url: uploadedPath, name: imageFile.name, type: imageFile.type }];
+      let signedUrl = null;
+      try { signedUrl = await LB.signChatImage(uploadedPath); } catch (_) {}
+      displayAttachments = [{ ...persistedAttachments[0], storagePath: uploadedPath, url: signedUrl || imagePreview || uploadedPath }];
+    }
+    const id = await LB.addCoachingNote(coachingId, 'general', null, null, body, userId, threadId, persistedAttachments);
+    noteSaved = true;
+    return { id, displayAttachments };
+  } catch (error) {
+    if (uploadedPath && !noteSaved) {
+      try { await LB.deleteChatImage(uploadedPath, userId); }
+      catch (cleanupError) { console.error('chat attachment cleanup failed:', cleanupError); }
+    }
+    throw error;
+  }
+}
+
+async function coachingDeleteChatNote(note, userId) {
+  await LB.deleteCoachingNote(note.id, userId);
+  const attachmentPaths = (note.attachments || [])
+    .map(attachment => attachment?.storagePath || attachment?.path || attachment?.url)
+    .filter(Boolean);
+  const cleanupResults = await Promise.allSettled(attachmentPaths.map(path => LB.deleteChatImage(path, userId)));
+  return cleanupResults.every(result => result.status === 'fulfilled');
+}
+
+function coachingChatNearBottom(element, threshold = 72) {
+  if (!element) return true;
+  return element.scrollHeight - element.scrollTop - element.clientHeight <= threshold;
+}
+
 function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack, setStore }) {
   const [confirmEl, confirm] = useConfirm();
   const [notes, setNotes] = useStateC([]);
@@ -275,7 +410,17 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const [editingNoteId, setEditingNoteId] = useStateC(null);
   const [editingNoteBody, setEditingNoteBody] = useStateC('');
   const [noteActionBusy, setNoteActionBusy] = useStateC(false);
+  const [hasOlder, setHasOlder] = useStateC(false);
+  const [olderCursor, setOlderCursor] = useStateC(null);
+  const [loadingOlder, setLoadingOlder] = useStateC(false);
   const bottomRef = useRefC(null);
+  const scrollRef = useRefC(null);
+  const isAtBottomRef = useRefC(true);
+  const threadKeyRef = useRefC('');
+  const latestRequestRef = useRefC(null);
+  const olderRequestRef = useRefC(null);
+  const didLoadOlderRef = useRefC(false);
+  const shouldScrollBottomRef = useRefC(true);
 
   const canModifyNote = note => {
     const createdAt = Date.parse(note?.createdAt || '');
@@ -305,17 +450,85 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     attachImageFile(item.getAsFile());
   };
 
-  // A failed reload right after send() (L14, audit-2026-08) must not blank
-  // out notes that loaded fine a moment ago, addCoachingNote already
-  // persisted the new message server-side either way, so this only shows a
-  // small stale-view hint (below, near the composer) instead of an error
-  // state replacing the message list.
-  const reload = () => {
-    setLoading(true);
-    LB.loadCoachingNotes(coachingId, thread.id)
-      .then(data => { setNotes([...data].reverse()); setLoadErr(false); })
-      .catch(e => { console.error('coaching notes reload failed:', e); setLoadErr(true); })
-      .finally(() => setLoading(false));
+  // The newest-page request is shared by initial load, Broadcast invalidation,
+  // post-send reconciliation and the 60-second fallback. Coalescing it here
+  // prevents overlapping refreshes when a slow request crosses a timer tick.
+  // A refresh replaces only its authoritative newest window; explicitly loaded
+  // older pages stay in the list.
+  const loadLatestPage = ({ initial = false, queueAfterCurrent = false } = {}) => {
+    const key = `${coachingId}:${thread.id}`;
+    if (!initial && !queueAfterCurrent && typeof document !== 'undefined' && document.hidden) return Promise.resolve(null);
+    if (latestRequestRef.current?.key === key) {
+      const current = latestRequestRef.current.promise;
+      if (!queueAfterCurrent) return current;
+      // A send can finish while a refresh that started before the insert is
+      // still in flight. Wait for that stale snapshot, then force one fresh
+      // request so its latest-window merge cannot permanently hide the newly
+      // persisted optimistic note. Concurrent queued callers still coalesce.
+      return current.then(() => {
+        if (threadKeyRef.current !== key) return null;
+        return loadLatestPage();
+      });
+    }
+    if (initial) setLoading(true);
+    const promise = LB.loadCoachingNotes(coachingId, thread.id, { limit: 100 })
+      .then(page => {
+        if (threadKeyRef.current !== key) return page;
+        setNotes(prev => {
+          const priorIds = new Set(prev.map(note => note.id));
+          const hasNewNotes = page.notes.some(note => !priorIds.has(note.id));
+          if (initial || (hasNewNotes && isAtBottomRef.current)) shouldScrollBottomRef.current = true;
+          return LB.mergeCoachingNotePage(initial ? [] : prev, page, { latest: true });
+        });
+        if (!didLoadOlderRef.current || !page.hasMore) {
+          setHasOlder(page.hasMore);
+          setOlderCursor(page.nextCursor);
+          if (!page.hasMore) didLoadOlderRef.current = false;
+        }
+        setLoadErr(false);
+        return page;
+      })
+      .catch(e => {
+        if (threadKeyRef.current === key) setLoadErr(true);
+        console.error(initial ? 'coaching notes reload failed:' : 'coaching notes refresh failed:', e);
+        return null;
+      })
+      .finally(() => {
+        if (threadKeyRef.current === key && initial) setLoading(false);
+        if (latestRequestRef.current?.promise === promise) latestRequestRef.current = null;
+      });
+    latestRequestRef.current = { key, promise };
+    return promise;
+  };
+
+  const loadOlder = () => {
+    const key = `${coachingId}:${thread.id}`;
+    if (!hasOlder || !olderCursor || loadingOlder) return;
+    if (olderRequestRef.current?.key === key) return olderRequestRef.current.promise;
+    setLoadingOlder(true);
+    const cursor = olderCursor;
+    const promise = LB.loadCoachingNotes(coachingId, thread.id, { limit: 100, cursor })
+      .then(page => {
+        if (threadKeyRef.current !== key) return page;
+        didLoadOlderRef.current = true;
+        shouldScrollBottomRef.current = false;
+        setNotes(prev => LB.mergeCoachingNotePage(prev, page));
+        setHasOlder(page.hasMore);
+        setOlderCursor(page.nextCursor);
+        setLoadErr(false);
+        return page;
+      })
+      .catch(e => {
+        if (threadKeyRef.current === key) setLoadErr(true);
+        console.error('older coaching notes load failed:', e);
+        return null;
+      })
+      .finally(() => {
+        if (threadKeyRef.current === key) setLoadingOlder(false);
+        if (olderRequestRef.current?.promise === promise) olderRequestRef.current = null;
+      });
+    olderRequestRef.current = { key, promise };
+    return promise;
   };
 
   // A private Broadcast invalidation reloads unread notes authoritatively, so
@@ -327,7 +540,25 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   const threadUnreadIds = (unreadNotes || []).filter(n => n.threadId === thread.id).map(n => n.id);
   const threadUnreadKey = threadUnreadIds.join(',');
   useEffectC(() => {
-    reload();
+    const key = `${coachingId}:${thread.id}`;
+    threadKeyRef.current = key;
+    didLoadOlderRef.current = false;
+    isAtBottomRef.current = true;
+    shouldScrollBottomRef.current = true;
+    setNotes([]);
+    setHasOlder(false);
+    setOlderCursor(null);
+    setLoadingOlder(false);
+    olderRequestRef.current = null;
+    setLoadErr(false);
+    loadLatestPage({ initial: true });
+    return () => {
+      if (threadKeyRef.current === key) threadKeyRef.current = '';
+    };
+  }, [coachingId, thread.id]);
+
+  useEffectC(() => {
+    if (threadUnreadIds.length) loadLatestPage();
     if (threadUnreadIds.length) {
       // markCoachingNotesRead throws on a failed write (unwrap, see
       // CLAUDE.md), so a rejection here correctly leaves the local badge
@@ -347,23 +578,33 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
   }, [coachingId, thread.id, threadUnreadKey]);
 
   useEffectC(() => {
-    const refresh = () => LB.loadCoachingNotes(coachingId, thread.id)
-      .then(data => { setNotes([...data].reverse()); setLoadErr(false); })
-      .catch(e => { console.error('coaching notes refresh failed:', e); setLoadErr(true); });
+    const refresh = () => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      loadLatestPage();
+    };
     const onInvalidate = event => {
       const resource = event?.detail?.resource;
       if (resource === 'notes' || resource === 'authoritative') refresh();
     };
+    const onVisibility = () => {
+      if (!document.hidden) refresh();
+    };
     window.addEventListener('zane-coaching-invalidate', onInvalidate);
+    document.addEventListener('visibilitychange', onVisibility);
     const timer = setInterval(refresh, 60000);
     return () => {
       window.removeEventListener('zane-coaching-invalidate', onInvalidate);
+      document.removeEventListener('visibilitychange', onVisibility);
       clearInterval(timer);
     };
   }, [coachingId, thread.id]);
 
   useEffectC(() => {
-    if (notes.length && bottomRef.current) bottomRef.current.scrollIntoView({ behavior: 'auto' });
+    if (notes.length && shouldScrollBottomRef.current && bottomRef.current) {
+      shouldScrollBottomRef.current = false;
+      bottomRef.current.scrollIntoView({ behavior: 'auto' });
+      isAtBottomRef.current = true;
+    }
   }, [notes]);
 
   const send = async () => {
@@ -373,30 +614,27 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     const imgFile = imageFile;
     const sentBody = body.trim();
     try {
-      let attachments = null;
-      if (imgFile) {
-        const url = await LB.uploadChatImage(imgFile, userId);
-        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
-      }
-      const id = await LB.addCoachingNote(coachingId, 'general', null, null, sentBody, userId, thread.id, attachments);
+      const { id, displayAttachments } = await coachingCreateChatNote({ coachingId, threadId: thread.id, userId, body: sentBody, imageFile: imgFile, imagePreview });
       // Optimistic append (L14-Rest, audit-2026-08 verification): the write
       // above already succeeded, addCoachingNote persisted it server-side,
-      // but reload() below is a separate fetch that can still fail on its
+      // but loadLatestPage() below is a separate fetch that can still fail on its
       // own (a network blip right after send). Without this, that failure
       // left the message the user just sent invisible until the next
-      // successful reload even though it was never actually lost. Same
-      // shape loadCoachingNotes returns, so a later successful reload's full
-      // server list just supersedes this local copy (same id, no dupe).
+      // successful refresh even though it was never actually lost. Same
+      // shape loadCoachingNotes returns, so a later successful newest-page
+      // merge supersedes this local copy by id without dropping older pages.
+      shouldScrollBottomRef.current = true;
+      isAtBottomRef.current = true;
       setNotes(prev => [...prev, {
         id, coachingId, authorId: userId, threadId: thread.id,
         type: 'general', entityId: null, entityName: null,
         body: sentBody, createdAt: new Date().toISOString(), readAt: null,
-        attachments,
+        attachments: displayAttachments,
       }]);
       setBody('');
       setImageFile(null);
       setImagePreview(null);
-      reload();
+      loadLatestPage({ queueAfterCurrent: true });
     } catch (e) { UI.alert(e.message); } finally { setSending(false); }
   };
 
@@ -442,9 +680,12 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
     if (!await confirm('Delete this message?', { title: 'Delete message', ok: 'Delete', danger: true })) return;
     setNoteActionBusy(true);
     try {
-      await LB.deleteCoachingNote(note.id, userId);
+      const attachmentsRemoved = await coachingDeleteChatNote(note, userId);
       setNotes(prev => prev.filter(item => item.id !== note.id));
       if (editingNoteId === note.id) cancelEditNote();
+      if (!attachmentsRemoved) {
+        UI.alert('Message deleted, but its image could not be removed.');
+      }
     } catch (e) {
       UI.alert(e.message || 'Could not delete message');
     } finally {
@@ -461,7 +702,13 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
         </button>
         <div style={{ fontSize: 14, color: UI.ink, fontFamily: UI.fontUi, fontWeight: 600 }}>{thread.name}</div>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div ref={scrollRef} onScroll={() => { isAtBottomRef.current = coachingChatNearBottom(scrollRef.current); }} style={{ flex: 1, overflowY: 'auto', padding: '12px 16px 8px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+        {!loading && hasOlder && (
+          <button onClick={loadOlder} disabled={loadingOlder}
+            style={{ alignSelf: 'center', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '7px 12px', cursor: loadingOlder ? 'default' : 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+            {loadingOlder ? 'Loading…' : 'Load older messages'}
+          </button>
+        )}
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>
         ) : notes.length === 0 ? (
@@ -545,30 +792,80 @@ function ChatThread({ thread, coachingId, userId, otherName, unreadNotes, onBack
 // ─── ThreadList ────────────────────────────────────────────────────────────────
 // Thread list + inline create, used in both coach Notes tab and client sheet.
 
+function coachingUnreadThreadIds(unreadNotes, coachingId) {
+  return [...new Set((unreadNotes || [])
+    .filter(note => note.coachingId === coachingId && note.threadId)
+    .map(note => note.threadId))];
+}
+
+function prioritizeUnreadCoachingThreads(threads, unreadThreadIds) {
+  const unread = new Set(unreadThreadIds || []);
+  return [...(threads || [])].sort((a, b) => {
+    const unreadOrder = Number(unread.has(b.id)) - Number(unread.has(a.id));
+    return unreadOrder
+      || String(b?.createdAt || '').localeCompare(String(a?.createdAt || ''))
+      || String(b?.id || '').localeCompare(String(a?.id || ''));
+  });
+}
+
 function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canDelete }) {
   const [threads, setThreads] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
   const [loadErr, setLoadErr] = useStateC(false);
+  const [hasOlder, setHasOlder] = useStateC(false);
+  const [olderCursor, setOlderCursor] = useStateC(null);
+  const [loadingOlder, setLoadingOlder] = useStateC(false);
   const [selected, setSelected] = useStateC(null);
   const [creating, setCreating] = useStateC(false);
   const [newName, setNewName] = useStateC('');
   const [saving, setSaving] = useStateC(false);
   const [confirmEl, confirm] = useConfirm();
+  const coachingIdRef = useRefC(coachingId);
+  const requestVersionRef = useRefC(0);
+  const threadsRef = useRefC([]);
+  const olderRequestRef = useRefC(null);
+  const unreadThreadIds = useMemoC(
+    () => coachingUnreadThreadIds(unreadNotes, coachingId),
+    [unreadNotes, coachingId],
+  );
+  const unreadThreadKey = useMemoC(
+    () => [...unreadThreadIds].sort().join('|'),
+    [unreadThreadIds],
+  );
 
   const reload = () => {
+    const key = coachingId;
+    const version = ++requestVersionRef.current;
+    coachingIdRef.current = key;
+    olderRequestRef.current = null;
     setLoading(true);
+    setLoadingOlder(false);
     setLoadErr(false);
-    LB.loadCoachingThreads(coachingId).then(loaded => {
-      setThreads(loaded);
+    const unreadIds = coachingUnreadThreadIds(unreadNotes, key);
+    return Promise.all([
+      LB.loadCoachingThreads(key, { limit: 50 }),
+      LB.loadCoachingThreadsByIds(key, unreadIds).catch(error => {
+        console.warn('unread coaching threads load failed:', error);
+        return [];
+      }),
+    ]).then(([page, unreadThreads]) => {
+      if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+      const merged = LB.mergeCoachingThreadPage([], { threads: [...page.threads, ...unreadThreads] });
+      const visible = prioritizeUnreadCoachingThreads(merged, unreadIds);
+      threadsRef.current = visible;
+      setThreads(visible);
+      setHasOlder(page.hasMore);
+      setOlderCursor(page.nextCursor);
       if (setStore && (unreadNotes || []).length) {
-        const validThreadIds = new Set(loaded.map(t => t.id));
         // Only this coaching's notes, callers pass the global unread list, which
         // also holds other relationships' notes and support_ tickets. Never mark
         // those read here.
-        // Stale = threadless (no UI to show them) OR referencing a deleted thread
+        // A missing thread id is authoritative because the FK uses ON DELETE
+        // SET NULL. A non-null id absent from this page may simply belong to an
+        // unloaded older thread and must never be marked read as "deleted".
         const orphanedIds = (unreadNotes || [])
           .filter(n => n.coachingId === coachingId)
-          .filter(n => !n.threadId || !validThreadIds.has(n.threadId))
+          .filter(n => !n.threadId)
           .map(n => n.id);
         if (orphanedIds.length) {
           setStore(s => ({
@@ -581,11 +878,90 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           LB.markCoachingNotesRead(orphanedIds).catch(() => {});
         }
       }
-    }).catch(e => { console.error('coaching threads reload failed:', e); setLoadErr(true); })
-      .finally(() => setLoading(false));
+      return page;
+    }).catch(e => {
+      if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+      console.error('coaching threads reload failed:', e);
+      return null;
+    }).finally(() => {
+      if (coachingIdRef.current === key && requestVersionRef.current === version) setLoading(false);
+    });
   };
 
-  useEffectC(() => { reload(); }, [coachingId]);
+  const loadOlder = () => {
+    const key = coachingId;
+    const version = requestVersionRef.current;
+    if (!hasOlder || !olderCursor || loadingOlder) return;
+    if (olderRequestRef.current?.key === key && olderRequestRef.current?.version === version) {
+      return olderRequestRef.current.promise;
+    }
+    setLoadingOlder(true);
+    const cursor = olderCursor;
+    const promise = LB.loadCoachingThreads(key, { limit: 50, cursor })
+      .then(page => {
+        if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+        const merged = LB.mergeCoachingThreadPage(threadsRef.current, page);
+        const visible = prioritizeUnreadCoachingThreads(merged, unreadThreadIds);
+        threadsRef.current = visible;
+        setThreads(visible);
+        setHasOlder(page.hasMore);
+        setOlderCursor(page.nextCursor);
+        setLoadErr(false);
+        return page;
+      })
+      .catch(e => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+        console.error('older coaching threads load failed:', e);
+        return null;
+      })
+      .finally(() => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadingOlder(false);
+        if (olderRequestRef.current?.promise === promise) olderRequestRef.current = null;
+      });
+    olderRequestRef.current = { key, version, promise };
+    return promise;
+  };
+
+  useEffectC(() => {
+    const key = coachingId;
+    coachingIdRef.current = key;
+    requestVersionRef.current += 1;
+    threadsRef.current = [];
+    olderRequestRef.current = null;
+    setThreads([]);
+    setSelected(null);
+    setHasOlder(false);
+    setOlderCursor(null);
+    setLoadingOlder(false);
+    reload();
+    return () => {
+      if (coachingIdRef.current === key) coachingIdRef.current = null;
+      requestVersionRef.current += 1;
+    };
+  }, [coachingId]);
+
+  useEffectC(() => {
+    if (loading || coachingIdRef.current !== coachingId) return undefined;
+    const version = requestVersionRef.current;
+    const missingIds = unreadThreadIds.filter(id => !threadsRef.current.some(thread => thread.id === id));
+    if (!missingIds.length) {
+      const visible = prioritizeUnreadCoachingThreads(threadsRef.current, unreadThreadIds);
+      threadsRef.current = visible;
+      setThreads(visible);
+      return undefined;
+    }
+    let cancelled = false;
+    LB.loadCoachingThreadsByIds(coachingId, missingIds)
+      .then(unreadThreads => {
+        if (cancelled || coachingIdRef.current !== coachingId || requestVersionRef.current !== version) return;
+        const merged = LB.mergeCoachingThreadPage(threadsRef.current, { threads: unreadThreads });
+        const visible = prioritizeUnreadCoachingThreads(merged, unreadThreadIds);
+        threadsRef.current = visible;
+        setThreads(visible);
+      })
+      .catch(error => console.warn('unread coaching threads refresh failed:', error));
+    return () => { cancelled = true; };
+  }, [coachingId, loading, unreadThreadKey]);
 
   const deleteThread = async (t, e) => {
     e.stopPropagation();
@@ -640,7 +1016,8 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
           </div>
         ) : threads.length === 0 ? (
           <div style={{ textAlign: 'center', padding: 40, color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>No threads yet.</div>
-        ) : threads.map(t => {
+        ) : <>
+          {threads.map(t => {
           const unread = unreadByThread[t.id] || 0;
           return (
             <div key={t.id} onClick={() => setSelected(t)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', borderBottom: `var(--hair-width) solid ${UI.hair}`, cursor: 'pointer' }}>
@@ -665,7 +1042,14 @@ function ThreadList({ coachingId, userId, otherName, unreadNotes, setStore, canD
               )}
             </div>
           );
-        })}
+          })}
+          {hasOlder && (
+            <button onClick={loadOlder} disabled={loadingOlder}
+              style={{ display: 'block', margin: '12px auto', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', cursor: loadingOlder ? 'default' : 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+              {loadingOlder ? 'Loading…' : 'Load older threads'}
+            </button>
+          )}
+        </>}
       </div>
       <div style={{ flexShrink: 0, borderTop: `var(--hair-width) solid ${UI.hair}`, background: 'transparent' }}>
         <div style={{ padding: '10px 16px' }}>

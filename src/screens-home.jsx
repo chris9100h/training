@@ -2534,14 +2534,14 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     if (!hasCoaching) { setCheckinDue(false); return; }
     const coachingId = asClient?.id || asSelf?.id;
     if (!coachingId) { setCheckinDue(false); return; }
-    // The home-screen due check only needs the week row. Avoid fetching/signing
-    // optional coaching photos here; the coach/client Check-ins tab loads them
-    // when it actually renders the check-in card.
-    LB.loadCheckins(coachingId, { includePhotos: false }).then(rows => {
-      const weekStart = LB.checkinWeekStart(store.settings?.weekStartDay);
-      const thisWeek = rows.find(r => r.weekStart === weekStart);
-      setCheckinDue(!thisWeek);
-    }).catch(() => setCheckinDue(false));
+    const weekStart = LB.checkinWeekStart(store.settings?.weekStartDay);
+    let cancelled = false;
+    // The home-screen due check only needs existence of this one week row. The
+    // full Check-ins tab owns response history and optional Drive photo loads.
+    LB.hasCheckinForWeek(coachingId, weekStart)
+      .then(hasCheckin => { if (!cancelled) setCheckinDue(!hasCheckin); })
+      .catch(() => { if (!cancelled) setCheckinDue(false); });
+    return () => { cancelled = true; };
   }, [store.coaching, store.settings?.weekStartDay]);
 
   useEffect(() => {
@@ -2558,7 +2558,7 @@ function HomeScreen({ store, setStore, go, userId, syncStatus, storageFull, onRe
     const coachingId = store.coaching?.asClient?.id || store.coaching?.asSelf?.id;
     if (!coachingId) { setCoachingMacros(null); return; }
     let cancelled = false;
-    LB.loadCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data[0] || null); }).catch(() => {});
+    LB.loadLatestCoachingMacros(coachingId).then(data => { if (!cancelled) setCoachingMacros(data); }).catch(() => {});
     return () => { cancelled = true; };
   }, [store.coaching?.asClient?.id, store.coaching?.asSelf?.id]);
 

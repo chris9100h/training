@@ -14,6 +14,8 @@
 // is pure risk, so they move over one at a time whenever they are next
 // touched for another reason.
 
+import { fetchWithTimeout } from './fetch.ts';
+
 export const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -50,9 +52,9 @@ export async function resolveUser(req: Request): Promise<Caller | null> {
   if (!token) return null;
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const anon = Deno.env.get('SUPABASE_ANON_KEY') ?? ANON_KEY;
-  const r = await fetch(`${base}/auth/v1/user`, {
+  const r = await fetchWithTimeout(`${base}/auth/v1/user`, {
     headers: { 'Authorization': `Bearer ${token}`, 'apikey': anon },
-  }).catch(() => null);
+  }, 8_000).catch(() => null);
   if (!r?.ok) return null;
   const user = await r.json().catch(() => null);
   return user?.id ? { id: user.id, email: user.email ?? null } : null;
@@ -73,11 +75,11 @@ export async function withinQuota(userId: string, kind: string, limit: number, o
     const base = Deno.env.get('SUPABASE_URL') ?? '';
     const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
     if (!base || !key) return failOpen;
-    const r = await fetch(`${base}/rest/v1/rpc/bump_api_usage`, {
+    const r = await fetchWithTimeout(`${base}/rest/v1/rpc/bump_api_usage`, {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${key}`, 'apikey': key, 'Content-Type': 'application/json' },
       body: JSON.stringify({ p_user_id: userId, p_kind: kind, p_limit: limit }),
-    });
+    }, 8_000);
     if (!r.ok) return failOpen;
     return (await r.json()) !== false;
   } catch (_) {

@@ -43,6 +43,66 @@ const SETTINGS_TEXTAREA_STYLE = {
   fontSize: 14, outline: 'none', resize: 'none', boxSizing: 'border-box', lineHeight: 1.5,
 };
 
+function supportAttachmentDisplayUrl(attachment) {
+  const value = typeof attachment?.url === 'string' ? attachment.url.trim() : '';
+  const storageBase = `${String(LB.SUPABASE_URL || '').replace(/\/$/, '')}/storage/v1/object/`;
+  if (storageBase !== '/storage/v1/object/' && [
+    `${storageBase}sign/chat-attachments/`,
+    `${storageBase}authenticated/chat-attachments/`,
+    `${storageBase}public/chat-attachments/`,
+  ].some(prefix => value.startsWith(prefix))) return value;
+  if (/^blob:/i.test(value)) return value;
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,/i.test(value)) return value;
+  return null;
+}
+
+async function supportHydrateNoteRows(rows) {
+  return Promise.all((rows || []).map(async row => ({
+    ...row,
+    attachments: await LB.hydrateChatAttachments(row.attachments || []),
+  })));
+}
+
+async function supportCreateChatNote({ coachingId, userId, body, imageFile, imagePreview }) {
+  let uploadedPath = null;
+  let attachments = null;
+  if (imageFile) {
+    uploadedPath = await LB.uploadChatImage(imageFile, userId);
+    attachments = [{ path: uploadedPath, url: uploadedPath, name: imageFile.name, type: imageFile.type }];
+  }
+  const id = LB.uid();
+  await LB.insertCoachingNote({
+    id, coachingId, authorId: userId, type: 'general', body: body || '', attachments,
+    uploadedPaths: uploadedPath ? [uploadedPath] : [],
+  });
+  const note = {
+    id, author_id: userId, body: body || '', created_at: new Date().toISOString(),
+    read_at: null, edited_at: null, attachments,
+  };
+  if (!attachments) return note;
+  try {
+    const hydrated = await LB.hydrateChatAttachments(attachments);
+    const hasDisplayUrl = hydrated.some(supportAttachmentDisplayUrl);
+    return {
+      ...note,
+      attachments: hasDisplayUrl ? hydrated : hydrated.map((attachment, index) => ({
+        ...attachment,
+        url: index === 0 && supportAttachmentDisplayUrl({ url: imagePreview }) ? imagePreview : attachment.url,
+      })),
+    };
+  } catch (signError) {
+    console.warn('support attachment signing failed:', signError);
+    return {
+      ...note,
+      attachments: attachments.map((attachment, index) => ({
+        ...attachment,
+        storagePath: attachment.path,
+        url: index === 0 && supportAttachmentDisplayUrl({ url: imagePreview }) ? imagePreview : attachment.url,
+      })),
+    };
+  }
+}
+
 // Admin support-inbox ticket row, active and archived are the same shape,
 // the archived variant just mutes it (dimmed colors/opacity, smaller text,
 // no unread dot / "no messages yet" placeholder / timestamp).
@@ -1445,39 +1505,46 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!supportActiveTicketId) { setSupportActiveNotes([]); return; }
     let mounted = true;
     let first = true;
-    const load = () => {
+    const load = async () => {
       if (first) setSupportActiveLoading(true);
-      LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
-        .eq('coaching_id', supportActiveTicketId)
-        .order('created_at', { ascending: true })
-        .then(({ data }) => {
-          if (!mounted) return;
-          setSupportActiveNotes(data || []);
-          if (first) setSupportActiveLoading(false);
-          // Gated on the just-fetched rows actually containing an unread
-          // message from the other party: without this, every 12s tick fired
-          // an UPDATE that matched zero rows for as long as the sheet stayed
-          // open and idle.
-          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
-          if (hasUnread) LB.supabase.from('zane_coaching_notes')
-            .update({ read_at: new Date().toISOString() })
-            .eq('coaching_id', supportActiveTicketId)
-            .neq('author_id', userId)
-            .is('read_at', null)
-            .then(({ error }) => { if (error || !mounted) return; setStore(s => {
-              const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
-              const delta = ticket ? ticket.unreadCount : 0;
-              return {
-                ...s,
-                supportUnread: Math.max(0, (s.supportUnread || 0) - delta),
-                supportTickets: (s.supportTickets || []).map(t =>
-                  t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
-                ),
-              };
-            }); });
-          first = false;
-        });
+      try {
+        const { data, error } = await LB.supabase.from('zane_coaching_notes')
+          .select('id, author_id, body, created_at, read_at, edited_at, attachments')
+          .eq('coaching_id', supportActiveTicketId)
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        const hydratedRows = await supportHydrateNoteRows(data || []);
+        if (!mounted) return;
+        setSupportActiveNotes(hydratedRows);
+        if (first) setSupportActiveLoading(false);
+        // Gated on the just-fetched rows actually containing an unread
+        // message from the other party: without this, every 12s tick fired
+        // an UPDATE that matched zero rows for as long as the sheet stayed
+        // open and idle.
+        const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+        if (hasUnread) LB.supabase.from('zane_coaching_notes')
+          .update({ read_at: new Date().toISOString() })
+          .eq('coaching_id', supportActiveTicketId)
+          .neq('author_id', userId)
+          .is('read_at', null)
+          .then(({ error }) => { if (error || !mounted) return; setStore(s => {
+            const ticket = (s.supportTickets || []).find(t => t.coachingId === supportActiveTicketId);
+            const delta = ticket ? ticket.unreadCount : 0;
+            return {
+              ...s,
+              supportUnread: Math.max(0, (s.supportUnread || 0) - delta),
+              supportTickets: (s.supportTickets || []).map(t =>
+                t.coachingId === supportActiveTicketId ? { ...t, unreadCount: 0 } : t
+              ),
+            };
+          }); });
+        first = false;
+      } catch (error) {
+        if (!mounted) return;
+        if (first) setSupportActiveLoading(false);
+        first = false;
+        console.error('support ticket messages load failed:', error);
+      }
     };
     load();
     const onInvalidate = event => {
@@ -1499,30 +1566,37 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     if (!supportTicket) { setSupportTicketNotes([]); return; }
     let mounted = true;
     let first = true;
-    const load = () => {
+    const load = async () => {
       if (first) setSupportTicketLoading(true);
-      LB.supabase.from('zane_coaching_notes')
-        .select('id, author_id, body, created_at, read_at, edited_at, attachments')
-        .eq('coaching_id', supportTicket.coachingId)
-        .order('created_at', { ascending: true })
-        .then(({ data }) => {
-          if (!mounted) return;
-          setSupportTicketNotes(data || []);
-          if (first) setSupportTicketLoading(false);
-          first = false;
-          // Gated on the just-fetched rows actually containing an unread
-          // message from the other party, same reasoning as the client-side
-          // poll above: without this, every 12s tick fired an UPDATE that
-          // matched zero rows for as long as the sheet stayed open and idle.
-          const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
-          if (!hasUnread) return;
-          LB.supabase.from('zane_coaching_notes')
-            .update({ read_at: new Date().toISOString() })
-            .eq('coaching_id', supportTicket.coachingId)
-            .neq('author_id', userId)
-            .is('read_at', null)
-            .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
-        });
+      try {
+        const { data, error } = await LB.supabase.from('zane_coaching_notes')
+          .select('id, author_id, body, created_at, read_at, edited_at, attachments')
+          .eq('coaching_id', supportTicket.coachingId)
+          .order('created_at', { ascending: true });
+        if (error) throw error;
+        const hydratedRows = await supportHydrateNoteRows(data || []);
+        if (!mounted) return;
+        setSupportTicketNotes(hydratedRows);
+        if (first) setSupportTicketLoading(false);
+        first = false;
+        // Gated on the just-fetched rows actually containing an unread
+        // message from the other party, same reasoning as the client-side
+        // poll above: without this, every 12s tick fired an UPDATE that
+        // matched zero rows for as long as the sheet stayed open and idle.
+        const hasUnread = (data || []).some(n => n.author_id !== userId && n.read_at == null);
+        if (!hasUnread) return;
+        LB.supabase.from('zane_coaching_notes')
+          .update({ read_at: new Date().toISOString() })
+          .eq('coaching_id', supportTicket.coachingId)
+          .neq('author_id', userId)
+          .is('read_at', null)
+          .then(({ error }) => { if (error || !mounted) return; setSupportInbox(prev => prev.map(t => t.coaching_id === supportTicket.coachingId ? { ...t, unread_count: 0 } : t)); });
+      } catch (error) {
+        if (!mounted) return;
+        if (first) setSupportTicketLoading(false);
+        first = false;
+        console.error('admin support messages load failed:', error);
+      }
     };
     load();
     const onInvalidate = event => {
@@ -2066,6 +2140,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     }
   };
   const runImport = () => {
+    if (!LB.BACKUP_RESTORE_AVAILABLE) {
+      confirm(LB.BACKUP_RESTORE_UNAVAILABLE_MESSAGE, { title: 'Restore unavailable', ok: 'OK' });
+      return;
+    }
     // input.click() must be synchronous in the user-gesture handler (iOS Safari).
     const input = document.createElement('input'); input.type = 'file'; input.accept = '.json,.gz,application/json,application/gzip';
     input.onchange = async (e) => {
@@ -2327,18 +2405,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     // / RLS) can't silently drop the user's message while looking sent (audit B2).
     const restore = () => { setSupportDraft(body); setSupportImageFile(imgFile); setSupportImagePreview(imgPreview); };
     try {
-      let attachments = null;
-      if (imgFile) {
-        const url = await LB.uploadChatImage(imgFile, userId);
-        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
-      }
-      const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportActiveTicketId, author_id: userId, type: 'general',
-        body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
-      if (error || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
+      const note = await supportCreateChatNote({ coachingId: supportActiveTicketId, userId, body, imageFile: imgFile, imagePreview: imgPreview });
       setSupportActiveNotes(prev => [...prev, note]);
-      const preview = attachments ? (body || '📷 Image') : body;
+      const preview = imgFile ? (body || '📷 Image') : body;
       setStore(s => ({ ...s, supportTickets: (s.supportTickets || []).map(t =>
         t.coachingId === supportActiveTicketId
           ? { ...t, lastMessageAt: note.created_at, lastMessageBody: preview }
@@ -2365,18 +2434,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     try {
       const { data: coachingId, error: ticketErr } = await LB.supabase.rpc('open_support_chat', { p_category: supportCategoryDraft });
       if (ticketErr || !coachingId) { restore(); UI.alert('Could not open the ticket. Please try again.'); return; }
-      let attachments = null;
-      if (imgFile) {
-        const url = await LB.uploadChatImage(imgFile, userId);
-        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
-      }
-      const { data: note, error: noteErr } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: coachingId, author_id: userId, type: 'general',
-        body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
-      if (noteErr || !note) { restore(); UI.alert('Message failed to send. Please try again.'); return; }
+      const note = await supportCreateChatNote({ coachingId, userId, body, imageFile: imgFile, imagePreview: imgPreview });
       {
-        const preview = attachments ? (body || '📷 Image') : body;
+        const preview = imgFile ? (body || '📷 Image') : body;
         const newTicket = {
           coachingId, status: 'open', category: supportCategoryDraft,
           createdAt: new Date().toISOString(), lastMessageAt: note.created_at,
@@ -2406,18 +2466,9 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
     // admin's message while looking sent (audit B5).
     const restore = () => { setSupportAdminDraft(body); setAdminImageFile(imgFile); setAdminImagePreview(imgPreview); };
     try {
-      let attachments = null;
-      if (imgFile) {
-        const url = await LB.uploadChatImage(imgFile, userId);
-        attachments = [{ url, name: imgFile.name, type: imgFile.type }];
-      }
-      const { data: note, error } = await LB.supabase.from('zane_coaching_notes').insert({
-        id: LB.uid(), coaching_id: supportTicket.coachingId, author_id: userId, type: 'general',
-        body: body || '', ...(attachments ? { attachments } : {}),
-      }).select('id, author_id, body, created_at, read_at, edited_at, attachments').single();
-      if (error || !note) { restore(); UI.alert('Reply failed to send. Please try again.'); return; }
+      const note = await supportCreateChatNote({ coachingId: supportTicket.coachingId, userId, body, imageFile: imgFile, imagePreview: imgPreview });
       setSupportTicketNotes(prev => [...prev, note]);
-      const preview = attachments ? (body || '📷 Image') : body;
+      const preview = imgFile ? (body || '📷 Image') : body;
       LB.fnFetch(`${LB.SUPABASE_URL}/functions/v1/zane_coaching-notify`, { coachingId: supportTicket.coachingId, preview });
     } catch (e) { restore(); UI.alert(e.message || 'Reply failed to send. Please try again.'); }
     finally { setSupportAdminSending(false); }
@@ -2627,24 +2678,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
           body: JSON.stringify({ coachingId, preview: 'Your support ticket has been removed by support.' }),
         }).catch(() => {});
       }
-      // Delete storage attachments for all notes in this ticket
-      const { data: notesWithAttachments } = await LB.supabase
-        .from('zane_coaching_notes')
-        .select('attachments')
-        .eq('coaching_id', coachingId)
-        .not('attachments', 'is', null);
-      const storagePrefix = `${LB.SUPABASE_URL}/storage/v1/object/public/chat-attachments/`;
-      const paths = (notesWithAttachments || []).flatMap(n =>
-        (n.attachments || []).map(a => a.url?.startsWith(storagePrefix) ? a.url.slice(storagePrefix.length) : null).filter(Boolean)
-      );
-      // Delete the ticket rows first and only purge storage attachments once
-      // that succeeded, so a failed delete can't orphan a ticket whose
-      // attachments are already gone.
-      const { error: delErr } = await LB.supabase.rpc('delete_support_ticket', { p_coaching_id: coachingId });
-      if (delErr) { UI.alert('Could not delete the ticket: ' + delErr.message); return; }
-      if (paths.length > 0) {
-        await LB.supabase.storage.from('chat-attachments').remove(paths).catch(() => {});
-      }
+      // The Edge action deletes the ticket transactionally, validates admin
+      // access and queues private attachment cleanup durably. A browser cannot
+      // safely delete objects uploaded by several different message authors.
+      await LB.deleteSupportTicketChat(coachingId);
       setSupportInbox(prev => prev.filter(t => t.coaching_id !== coachingId));
       setSupportTicket(null);
       setSupportAdminDraft('');
@@ -4322,10 +4359,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             </div>
             {!backupOk && (
               <div style={{ fontSize: 12, color: UI.gold, lineHeight: 1.5, padding: '0 2px' }}>
-                No backup downloaded yet in this session. The restore replaces your data permanently, so do step 1 first.
+                No backup downloaded yet in this session. Keep a current export before any future restore.
               </div>
             )}
-            <Btn kind="ghost" onClick={runImport}>2 · Select file and import</Btn>
+            {!LB.BACKUP_RESTORE_AVAILABLE && (
+              <div style={{ fontSize: 12, color: UI.gold, lineHeight: 1.5, padding: '0 2px' }}>
+                Restore is temporarily unavailable while its atomic server-side replacement is completed. Existing account data will not be changed.
+              </div>
+            )}
+            <Btn kind="ghost" onClick={runImport} disabled={!LB.BACKUP_RESTORE_AVAILABLE}>2 · Select file and import</Btn>
           </div>
         )}
       </SettingsSheet>
@@ -5091,7 +5133,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       const isMe = n.author_id === userId;
                       const editing = supportEditingNoteId === n.id;
                       const modifiable = isMe && canModifySupportNote(n);
-                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      const imageAttachments = (Array.isArray(n.attachments) ? n.attachments : [])
+                        .map(attachment => ({ attachment, url: supportAttachmentDisplayUrl(attachment) }))
+                        .filter(item => item.url);
+                      const hasImg = imageAttachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isMe ? 'flex-end' : 'flex-start' }}>
                           <div style={{ maxWidth: '80%', padding: hasImg ? '6px' : '9px 13px', borderRadius: isMe ? '8px 8px 4px 8px' : '8px 8px 8px 4px', background: isMe ? 'rgba(var(--accent-rgb),0.15)' : UI.bgRaised, border: `var(--hair-width) solid ${isMe ? 'rgba(var(--accent-rgb),0.25)' : UI.hair}`, overflow: 'hidden' }}>
@@ -5106,8 +5151,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                                 </div>
                               </div>
                             ) : <>
-                              {hasImg && n.attachments.map((a, i) => (
-                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              {imageAttachments.map(({ url }, i) => (
+                                <img key={i} src={url} alt="" onClick={() => setLightboxSrc(url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                               ))}
                               {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                             </>}
@@ -5270,7 +5315,10 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                       const isAdminMsg = n.author_id === userId;
                       const editing = supportEditingNoteId === n.id;
                       const modifiable = isAdminMsg && canModifySupportNote(n);
-                      const hasImg = Array.isArray(n.attachments) && n.attachments.length > 0;
+                      const imageAttachments = (Array.isArray(n.attachments) ? n.attachments : [])
+                        .map(attachment => ({ attachment, url: supportAttachmentDisplayUrl(attachment) }))
+                        .filter(item => item.url);
+                      const hasImg = imageAttachments.length > 0;
                       return (
                         <div key={n.id} style={{ display: 'flex', flexDirection: 'column', alignItems: isAdminMsg ? 'flex-end' : 'flex-start' }}>
                           <div style={{
@@ -5290,8 +5338,8 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                                 </div>
                               </div>
                             ) : <>
-                              {hasImg && n.attachments.map((a, i) => (
-                                <img key={i} src={a.url} alt="" onClick={() => setLightboxSrc(a.url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
+                              {imageAttachments.map(({ url }, i) => (
+                                <img key={i} src={url} alt="" onClick={() => setLightboxSrc(url)} style={{ display: 'block', maxWidth: '100%', maxHeight: 300, objectFit: 'contain', borderRadius: 4, marginBottom: n.body ? 4 : 0, cursor: 'pointer' }} />
                               ))}
                               {n.body ? <div style={{ fontSize: 13, color: UI.ink, fontFamily: UI.fontUi, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', padding: hasImg ? '0 6px 4px' : 0 }}>{n.body}</div> : null}
                             </>}

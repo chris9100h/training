@@ -251,7 +251,7 @@ function PlanScreen({ store, setStore, go, userId, openNewPlan }) {
             // Behavior flags must survive the import: log_mode 'time' drives the
             // countdown UI, no_weight_reps/movement_type/pull_bodyweight drive
             // row layout and bodyweight prefill.
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null });
+            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: LB.sanitizeYoutubeUrl(ex.youtube_url) });
           }
         });
         const remapDays = (days) => (days || []).map(d => ({
@@ -1068,7 +1068,7 @@ function PlanViewerScreen({ store, setStore, go, scheduleId, fromPlan, userId, p
         if (existing) { idMap[ex.id] = existing.id; return; }
         const newId = LB.uid();
         idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
+        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: LB.sanitizeYoutubeUrl(ex.youtube_url) });
       });
       copy.id = LB.uid();
       copy.days = copy.days.map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));

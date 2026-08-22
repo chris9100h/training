@@ -21,16 +21,23 @@ const CARDIO_SYSTEM_MSG = "System exercises can't be deleted. Cardio is here to 
 const SHOT_TWO_COL_THRESHOLD = 8;
 const SHOT_TWO_COL_WIDTH = 840;
 
-// Accept only http(s) YouTube URLs. React does NOT block javascript: hrefs in
-// production, so we validate on save (strip otherwise) and guard again at render.
-// Returns the normalized URL string, or null if it is not a valid YouTube link.
-function sanitizeYoutubeUrl(raw) {
-  if (!raw) return null;
-  let u;
-  try { u = new URL(String(raw).trim()); } catch (_) { return null; }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-  const ok = ['youtube.com', 'www.youtube.com', 'm.youtube.com', 'youtu.be'];
-  return ok.includes(u.hostname.toLowerCase()) ? u.href : null;
+// Imported plan labels can come from shared JSON rather than a local input.
+// Keep visible text while removing markup delimiters, control characters and
+// invisible direction controls before the value is stored in local state.
+function sanitizeImportedLabel(raw, maxLength = 120) {
+  if (typeof raw !== 'string') return '';
+  const max = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 120;
+  return raw
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+function libraryBulkSelectable(exercises) {
+  return (Array.isArray(exercises) ? exercises : []).filter(exercise => exercise?.movement_type !== 'cardio');
 }
 
 // Post-hoc meso feedback editing (SessionDetailScreen) renders its own pickers
@@ -346,10 +353,11 @@ function LibraryScreen({ store, setStore, go, userId }) {
     }).sort((a, b) => a.name.localeCompare(b.name));
   }, [systemDisplay, q, filterTags, filterUnilateral, filterEquipment, filterRestCats, filterPlan, planExNamesLower]);
 
-  const allFilteredSelected = filtered.length > 0 && filtered.every(e => selected.has(e.id));
+  const bulkSelectable = libraryBulkSelectable(filtered);
+  const allFilteredSelected = bulkSelectable.length > 0 && bulkSelectable.every(e => selected.has(e.id));
   // System cardio can't be deleted/edited (matches the individual-tap guard), so
   // never select it in bulk.
-  const selectAll = () => setSelected(new Set(filtered.filter(e => e.movement_type !== 'cardio').map(e => e.id)));
+  const selectAll = () => setSelected(new Set(bulkSelectable.map(e => e.id)));
   const deselectAll = () => setSelected(new Set());
 
   const topBarRight = selecting ? (
@@ -1587,7 +1595,7 @@ function ExerciseCreator({ onClose, store, setStore, onCreated, initialName = ''
     const ex = { id: LB.uid(), name: name.trim(), tags: selectedTags, category: category || null, unilateral: movementType === 'unilateral', movement_type: movementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (equipment === 'bodyweight' && effLogMode === 'weight' ? bwMode : null), horn_labels: cleanHornLabels(hornLabels, equipment, effLogMode),
       // Written in lockstep so a client still running an older cached build,
       // which only knows the boolean, keeps pre-filling bodyweight.
-      pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
+      pull_bodyweight: (equipment === 'bodyweight' && effLogMode === 'weight' && bwMode === 'pull'), equipment: equipment || null, note: note.trim(), note_pinned: note.trim() ? notePinned : false, youtube_url: LB.sanitizeYoutubeUrl(youtubeUrl), progression_reps: null };
     setStore(s => ({ ...s, exercises: [...s.exercises, ex] }));
     onCreated?.(ex.id);
     onClose();
@@ -1757,7 +1765,7 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
     setStore(s => {
       const effLogMode = loggingPickerVisible(editEquipment, editMovementType) ? editLogMode : 'weight';
       const exercises = s.exercises.map(e => e.id === exId
-        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), horn_labels: cleanHornLabels(editHornLabels, editEquipment, effLogMode), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
+        ? { ...e, name: editName.trim(), tags: editTags, category: editCategory || null, unilateral: editMovementType === 'unilateral', movement_type: editMovementType, no_weight_reps: effLogMode !== 'weight', log_mode: effLogMode, bodyweight_mode: (editEquipment === 'bodyweight' && effLogMode === 'weight' ? editBwMode : null), horn_labels: cleanHornLabels(editHornLabels, editEquipment, effLogMode), pull_bodyweight: (editEquipment === 'bodyweight' && effLogMode === 'weight' && editBwMode === 'pull'), equipment: editEquipment || null, note: noteVal.trim(), note_pinned: noteVal.trim() ? editNotePinned : false, youtube_url: LB.sanitizeYoutubeUrl(editYoutubeUrl), progression_increment: editProgressionIncrement }
         : e);
       return { ...s, exercises };
     });
@@ -2028,8 +2036,8 @@ function ExerciseDetailScreenInner({ store, setStore, go, exId, back, editQueue 
       {!editMode && <div style={{ padding: '18px 22px 28px', display: 'flex', flexDirection: 'column', gap: 20 }}>
 
         {/* Form video link */}
-        {sanitizeYoutubeUrl(ex.youtube_url) && (
-          <a href={sanitizeYoutubeUrl(ex.youtube_url)} target="_blank" rel="noopener noreferrer"
+        {LB.sanitizeYoutubeUrl(ex.youtube_url) && (
+          <a href={LB.sanitizeYoutubeUrl(ex.youtube_url)} target="_blank" rel="noopener noreferrer"
             style={{
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
               padding: '11px 12px', borderRadius: 6, textDecoration: 'none',
@@ -7133,6 +7141,6 @@ function ExerciseHistoryScreen({ store, go, exId, dayId, exName, back, userId })
 }
 
 
-Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SessionCompareScreen, SpectatorScreen, ExerciseHistoryScreen });
+Object.assign(window.Screens, { LibraryScreen, ExerciseCreator, ExerciseDetailScreen, HistoryScreen, SessionDetailScreen, SessionCompareScreen, SpectatorScreen, ExerciseHistoryScreen, sanitizeImportedLabel });
 
 window.EQUIPMENT_TYPES = EQUIPMENT_TYPES;

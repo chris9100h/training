@@ -15,11 +15,16 @@
 // first. Requires SUPABASE_SERVICE_ROLE_KEY (+ optional SUPABASE_URL).
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const vm = require('vm');
 
 const root = path.join(__dirname, '..');
 const SUPABASE_URL = process.env.SUPABASE_URL || 'https://ebbuvdzgstrhrcsbrlez.supabase.co';
+const parsedRequestTimeoutMs = Number(process.env.ZANE_TOOL_REQUEST_TIMEOUT_MS);
+const REQUEST_TIMEOUT_MS = Number.isFinite(parsedRequestTimeoutMs) && parsedRequestTimeoutMs >= 1000 && parsedRequestTimeoutMs <= 300000
+  ? parsedRequestTimeoutMs
+  : 30000;
 
 const HEADER = `/* Feature Map: the versioned master catalog of what the app can do.
    This is the single source of truth (base layer) for the feature map. Everyone
@@ -46,22 +51,65 @@ function headers() {
   return { apikey: key, Authorization: 'Bearer ' + key, 'Content-Type': 'application/json' };
 }
 async function rest(pathq, opts = {}) {
-  const res = await fetch(SUPABASE_URL + '/rest/v1/' + pathq, { headers: headers(), ...opts });
-  if (!res.ok) throw new Error(`REST ${pathq} -> ${res.status} ${await res.text()}`);
-  return res;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  let detachAbort = null;
+  if (opts.signal) {
+    const abort = () => controller.abort();
+    if (opts.signal.aborted) abort();
+    else {
+      opts.signal.addEventListener('abort', abort, { once: true });
+      detachAbort = () => opts.signal.removeEventListener('abort', abort);
+    }
+  }
+  let res;
+  try {
+    res = await fetch(SUPABASE_URL + '/rest/v1/' + pathq, { headers: headers(), ...opts, signal: controller.signal });
+    const body = Buffer.from(await res.arrayBuffer()).toString('utf8');
+    if (!res.ok) throw new Error(`REST ${pathq} -> ${res.status} ${body}`);
+    return {
+      ok: true,
+      status: res.status,
+      text: async () => body,
+      json: async () => JSON.parse(body),
+    };
+  } finally {
+    clearTimeout(timer);
+    if (detachAbort) detachAbort();
+  }
 }
 const selectAll = (table) => rest(table + '?select=*').then(r => r.json());
-const clearTable = (table) => rest(table + '?card_id=neq.__none__', { method: 'DELETE' });
+const getArg = name => {
+  const i = process.argv.indexOf(name);
+  return i >= 0 ? process.argv[i + 1] : null;
+};
+const snapshotFile = () => getArg('--snapshot-file') || path.join(os.tmpdir(), 'zane-feature-map-bake-snapshot.json');
 
 // ── Pure logic (unit-tested) ────────────────────────────────────────────────
 
 // Order-independent equality of two override row-sets (draft vs published).
+function semanticRow(r) {
+  return {
+    card_id: r.card_id,
+    hidden: !!r.hidden,
+    is_custom: !!r.is_custom,
+    cat: r.cat ?? null,
+    name: r.name ?? null,
+    role: r.role ?? null,
+    summary: r.summary ?? null,
+    actions: r.actions ?? null,
+    sort: r.sort ?? null,
+  };
+}
 function rowKey(r) {
+  const x = semanticRow(r);
   return JSON.stringify([
-    r.card_id, !!r.hidden, !!r.is_custom,
-    r.cat ?? null, r.name ?? null, r.role ?? null,
-    r.summary ?? null, r.actions ?? null, r.sort ?? null,
+    x.card_id, x.hidden, x.is_custom, x.cat, x.name, x.role,
+    x.summary, x.actions, x.sort,
   ]);
+}
+function canonicalRows(rows) {
+  return (rows || []).map(semanticRow).sort((a, b) => rowKey(a).localeCompare(rowKey(b)));
 }
 function sameRowsets(a, b) {
   if (a.length !== b.length) return false;
@@ -137,8 +185,24 @@ function bumpVersion(oldVersion) {
 // ── Entry point ─────────────────────────────────────────────────────────────
 async function main() {
   if (process.argv.includes('--clear')) {
-    await clearTable('zane_feature_map_published');
-    await clearTable('zane_feature_map');
+    const file = snapshotFile();
+    if (!fs.existsSync(file)) throw new Error(`Bake snapshot is missing: ${file}`);
+    const snapshot = JSON.parse(fs.readFileSync(file, 'utf8'));
+    if (!Array.isArray(snapshot?.draft) || !Array.isArray(snapshot?.published)) {
+      throw new Error('Bake snapshot is malformed. Refusing to clear the database layers.');
+    }
+    const response = await rest('rpc/clear_feature_map_layers_if_unchanged', {
+      method: 'POST',
+      body: JSON.stringify({
+        p_expected_draft: snapshot.draft,
+        p_expected_published: snapshot.published,
+      }),
+    });
+    const cleared = await response.json().catch(() => null);
+    if (cleared !== true) {
+      throw new Error('Feature-map layers changed after the bake. Refusing to clear them.');
+    }
+    fs.unlinkSync(file);
     console.log('Cleared the draft + published feature-map layers.');
     return;
   }
@@ -157,6 +221,14 @@ async function main() {
     console.log('Nothing to bake: the published layer is empty (the catalog already reflects it).');
     return;
   }
+
+  // The clear step runs only after the generated catalog was pushed. Persist
+  // the exact semantic rows used for this bake so the database can clear them
+  // atomically only if neither layer changed in the meantime.
+  fs.writeFileSync(snapshotFile(), JSON.stringify({
+    draft: canonicalRows(draft),
+    published: canonicalRows(published),
+  }));
 
   const catalog = loadCatalog();
   const version = bumpVersion(catalog.version);
@@ -189,4 +261,4 @@ async function main() {
 }
 
 if (require.main === module) main().catch(e => { console.error(e.message || e); process.exit(1); });
-module.exports = { rowKey, sameRowsets, loadCatalog, fold, serialize, bumpVersion };
+module.exports = { semanticRow, canonicalRows, rowKey, sameRowsets, loadCatalog, fold, serialize, bumpVersion };

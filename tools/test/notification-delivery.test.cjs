@@ -22,6 +22,8 @@ const { sendNotification } = loadTypeScriptModule(
     Promise,
     JSON,
     AbortController,
+    Response,
+    Headers,
     setTimeout,
     clearTimeout,
     Deno: { env: { get: key => env.get(key) ?? '' } },
@@ -38,13 +40,51 @@ const { isAllowedWebPushEndpoint } = loadTypeScriptModule(
   path.join(root, 'supabase', 'functions', '_shared', 'web-push-security.ts'),
   { URL },
 );
+let bodyFetchImpl = async () => new Response('ok');
+const { fetchWithTimeout } = loadTypeScriptModule(
+  path.join(root, 'supabase', 'functions', '_shared', 'fetch.ts'),
+  {
+    AbortController,
+    Response,
+    Headers,
+    setTimeout,
+    clearTimeout,
+    fetch: (...args) => bodyFetchImpl(...args),
+  },
+);
 
 function fakeResponse(status, body) {
-  return { ok: status >= 200 && status < 300, status, text: async () => String(body), json: async () => body };
+  return new Response(typeof body === 'string' ? body : JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': typeof body === 'string' ? 'text/plain' : 'application/json' },
+  });
 }
 function assert(condition, message) { if (!condition) throw new Error(message); }
 
 (async () => {
+  bodyFetchImpl = async (_url, options) => ({
+    status: 200,
+    statusText: 'OK',
+    headers: new Headers(),
+    arrayBuffer: () => new Promise((resolve, reject) => {
+      options.signal.addEventListener('abort', () => {
+        const error = new Error('aborted');
+        error.name = 'AbortError';
+        reject(error);
+      }, { once: true });
+    }),
+  });
+  const timeoutStartedAt = Date.now();
+  await fetchWithTimeout('https://provider.test/slow-body', {}, 25).then(
+    () => { throw new Error('a stalled response body escaped the timeout'); },
+    error => assert(error?.name === 'AbortError', 'stalled body did not abort through the shared timeout'),
+  );
+  assert(Date.now() - timeoutStartedAt < 1000, 'stalled body timeout took too long');
+
+  bodyFetchImpl = async () => new Response(null, { status: 204 });
+  const noContent = await fetchWithTimeout('https://provider.test/no-content', {}, 100);
+  assert(noContent.status === 204 && await noContent.text() === '', 'null-body responses were not preserved');
+
   assert(isAllowedWebPushEndpoint('https://web.push.apple.com/QE-valid-token'), 'Apple Web Push endpoint was rejected');
   assert(isAllowedWebPushEndpoint('https://fcm.googleapis.com/fcm/send/valid-token'), 'FCM endpoint was rejected');
   for (const endpoint of [

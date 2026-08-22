@@ -1,3 +1,5 @@
+import { fetchWithTimeout } from './fetch.ts';
+
 type NotificationArgs = {
   userId: string;
   title: string;
@@ -7,30 +9,6 @@ type NotificationArgs = {
   logPrefix: string;
   ttl?: number;
 };
-
-async function fetchWithTimeout(input: string, options: RequestInit = {}, timeoutMs = 12_000) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(input, { ...options, signal: controller.signal });
-  } finally {
-    clearTimeout(timer);
-  }
-}
-
-function dbFetch(path: string, options: RequestInit = {}) {
-  const base = Deno.env.get('SUPABASE_URL') ?? '';
-  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
-    ...options,
-    headers: {
-      Authorization: `Bearer ${key}`,
-      apikey: key,
-      'Content-Type': 'application/json',
-      ...(options.headers ?? {}),
-    },
-  });
-}
 
 // "true" means the provider accepted the handoff. Web Push itself can only
 // promise that the web-push function accepted the request, not that a phone

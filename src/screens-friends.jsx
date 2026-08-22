@@ -124,6 +124,19 @@ function socialBoundText(value, max) {
   return typeof value === 'string' ? value.slice(0, max) : '';
 }
 
+function socialSanitizeImportedLabel(value, maxLength = 120) {
+  if (window.Screens?.sanitizeImportedLabel) return window.Screens.sanitizeImportedLabel(value, maxLength);
+  if (typeof value !== 'string') return '';
+  const max = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 120;
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
 function socialFiniteNumber(value, min = -1000000, max = 1000000) {
   if (value == null || value === '') return null;
   const number = Number(value);
@@ -132,7 +145,53 @@ function socialFiniteNumber(value, min = -1000000, max = 1000000) {
 
 function socialBoundStringArray(value, maxItems, maxLength) {
   if (!Array.isArray(value)) return [];
-  return value.filter(item => typeof item === 'string').slice(0, maxItems).map(item => item.slice(0, maxLength));
+  return value
+    .filter(item => typeof item === 'string')
+    .slice(0, maxItems)
+    .map(item => socialSanitizeImportedLabel(item, maxLength))
+    .filter(Boolean);
+}
+
+const SOCIAL_IMPORTED_PLAN_RECEIPTS_KEY = 'zane.social.imported-plans.v1';
+
+function socialBrowserStorage() {
+  try { return window.localStorage; } catch (_) { return null; }
+}
+
+function socialReadImportedPlanReceipts(storage, userId) {
+  if (!storage || !userId) return new Set();
+  try {
+    const parsed = JSON.parse(storage.getItem(`${SOCIAL_IMPORTED_PLAN_RECEIPTS_KEY}.${userId}`) || '[]');
+    return new Set((Array.isArray(parsed) ? parsed : []).filter(id => typeof id === 'string' && id.length > 0 && id.length <= 200).slice(-500));
+  } catch (_) {
+    return new Set();
+  }
+}
+
+function socialRememberImportedPlanReceipt(storage, userId, shareId, receipts) {
+  if (!shareId || !receipts) return;
+  receipts.add(String(shareId).slice(0, 200));
+  if (!storage || !userId) return;
+  try {
+    storage.setItem(`${SOCIAL_IMPORTED_PLAN_RECEIPTS_KEY}.${userId}`, JSON.stringify([...receipts].slice(-500)));
+  } catch (_) {}
+}
+
+function socialPlanAlreadyImported(share, receipts) {
+  // Server importedAt means another device may already have written the plan;
+  // only this device's receipt proves its in-memory store has hydrated it.
+  return !!share?.id && !!receipts?.has(share.id);
+}
+
+function socialMergeImportedPlan(store, schedule, exercises) {
+  if (!store || !schedule?.id) return store;
+  const incomingExercises = Array.isArray(exercises) ? exercises.filter(exercise => exercise?.id) : [];
+  const incomingExerciseIds = new Set(incomingExercises.map(exercise => exercise.id));
+  return {
+    ...store,
+    exercises: [...(store.exercises || []).filter(exercise => !incomingExerciseIds.has(exercise.id)), ...incomingExercises],
+    schedules: [...(store.schedules || []).filter(existing => existing.id !== schedule.id), schedule],
+  };
 }
 
 function socialSanitizeProgramData(value, idMap) {
@@ -142,13 +201,13 @@ function socialSanitizeProgramData(value, idMap) {
   if (typeof value.includeDeload === 'boolean') result.includeDeload = value.includeDeload;
   const remapLifts = source => Object.fromEntries(Object.entries(source || {}).slice(0, 500).filter(([key]) => Object.prototype.hasOwnProperty.call(idMap, key) && idMap[key] && source[key] && typeof source[key] === 'object' && !Array.isArray(source[key])).map(([key, raw]) => [idMap[key], {
     ...(socialFiniteNumber(raw.tm, 0, 100000) != null ? { tm: socialFiniteNumber(raw.tm, 0, 100000) } : {}),
-    ...(typeof raw.kind === 'string' ? { kind: raw.kind.slice(0, 24) } : {}),
+    ...(typeof raw.kind === 'string' ? { kind: socialSanitizeImportedLabel(raw.kind, 24) } : {}),
     ...(socialFiniteNumber(raw.stall, 0, 100) != null ? { stall: Math.round(socialFiniteNumber(raw.stall, 0, 100)) } : {}),
   }]));
   const remapHistory = source => Object.fromEntries(Object.entries(source || {}).slice(0, 500).filter(([key]) => Object.prototype.hasOwnProperty.call(idMap, key) && idMap[key] && Array.isArray(source[key])).map(([key, rows]) => [idMap[key], rows.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.historyPerLift).filter(row => row && typeof row === 'object').map(row => ({
     ...(socialFiniteNumber(row.cycle, 0, 100000) != null ? { cycle: Math.round(socialFiniteNumber(row.cycle, 0, 100000)) } : {}),
     ...(socialFiniteNumber(row.tm, 0, 100000) != null ? { tm: socialFiniteNumber(row.tm, 0, 100000) } : {}),
-    ...(typeof row.reason === 'string' ? { reason: row.reason.slice(0, 32) } : {}),
+    ...(typeof row.reason === 'string' ? { reason: socialSanitizeImportedLabel(row.reason, 32) } : {}),
   }))]));
   if (value.mainLifts && typeof value.mainLifts === 'object' && !Array.isArray(value.mainLifts)) result.mainLifts = remapLifts(value.mainLifts);
   if (value.tmHistory && typeof value.tmHistory === 'object' && !Array.isArray(value.tmHistory)) result.tmHistory = remapHistory(value.tmHistory);
@@ -168,19 +227,19 @@ function socialSanitizePlanItem(item, idMap) {
   if (repsMax != null) result.repsMax = Math.round(repsMax);
   const progressionOffset = socialFiniteNumber(item.progressionOffset, -1000, 1000);
   if (progressionOffset != null) result.progressionOffset = Math.round(progressionOffset);
-  if (Array.isArray(item.plannedTechniques)) result.plannedTechniques = item.plannedTechniques.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => typeof value === 'string' ? value.slice(0, 80) : null);
+  if (Array.isArray(item.plannedTechniques)) result.plannedTechniques = item.plannedTechniques.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => typeof value === 'string' ? socialSanitizeImportedLabel(value, 80) : null);
   if (Array.isArray(item.timeSecPerSet)) result.timeSecPerSet = item.timeSecPerSet.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.setsPerItem).map(value => socialFiniteNumber(value, 0, 86400)).filter(value => value != null).map(value => Math.round(value));
-  if (typeof item.supersetGroup === 'string') result.supersetGroup = item.supersetGroup.slice(0, 80);
+  if (typeof item.supersetGroup === 'string') result.supersetGroup = socialSanitizeImportedLabel(item.supersetGroup, 80);
   return result;
 }
 
 function socialSanitizePlanSchedule(raw, idMap) {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const result = {
-    name: socialBoundText(raw.name, 120) || 'Shared plan',
+    name: socialSanitizeImportedLabel(raw.name, 120) || 'Shared plan',
     days: Array.isArray(raw.days) ? raw.days.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.days).filter(day => day && typeof day === 'object' && !Array.isArray(day)).map(day => ({
       id: LB.uid(),
-      name: socialBoundText(day.name, 80) || 'Training day',
+      name: socialSanitizeImportedLabel(day.name, 80) || 'Training day',
       ...(Number.isInteger(day.weekday) && day.weekday >= 0 && day.weekday <= 6 ? { weekday: day.weekday } : {}),
       items: Array.isArray(day.items) ? day.items.slice(0, SOCIAL_PLAN_IMPORT_LIMITS.itemsPerDay).map(item => socialSanitizePlanItem(item, idMap)).filter(Boolean) : [],
     })) : [],
@@ -450,6 +509,15 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
   const planShares = data?.planShares || [];
   const liveWorkouts = data?.liveWorkouts || [];
   const workoutHistory = data?.workoutHistory || [];
+  const importedPlanReceiptsRef = useRefF({ userId: null, ids: new Set() });
+  if (importedPlanReceiptsRef.current.userId !== userId) {
+    importedPlanReceiptsRef.current = {
+      userId,
+      ids: socialReadImportedPlanReceipts(socialBrowserStorage(), userId),
+    };
+  }
+  const importedPlanReceipts = importedPlanReceiptsRef.current.ids;
+  const importingPlanIdsRef = useRefF(new Set());
 
   const socialMetricCatalog = LB.socialMetricCatalog || window.SocialMetricCatalog || [];
   const defaultMetricSlots = LB.socialDefaultMetricSlots || ['steps', 'workouts', 'adherence'];
@@ -571,6 +639,33 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     const next = typeof patch === 'function' ? patch(current) : { ...current, ...patch };
     return { ...s, friends: next };
   });
+
+  // If the local import succeeded but marking the server receipt did not,
+  // keep the import idempotent and retry only the lightweight receipt write
+  // on a later data refresh or mount.
+  const pendingPlanReceiptIds = planShares
+    .filter(share => !share.importedAt && importedPlanReceipts.has(share.id))
+    .map(share => share.id)
+    .sort();
+  useEffectF(() => {
+    if (!pendingPlanReceiptIds.length) return undefined;
+    let live = true;
+    Promise.all(pendingPlanReceiptIds.map(async id => {
+      try {
+        await LB.markSocialPlanImported(id);
+        return id;
+      } catch (_) {
+        return null;
+      }
+    })).then(markedIds => {
+      if (!live) return;
+      const marked = new Set(markedIds.filter(Boolean));
+      if (!marked.size) return;
+      const importedAt = new Date().toISOString();
+      patchSocial(s => ({ ...s, planShares: (s.planShares || []).map(share => marked.has(share.id) ? { ...share, importedAt } : share) }));
+    });
+    return () => { live = false; };
+  }, [userId, data?.loadedAt, pendingPlanReceiptIds.join('|')]);
 
   const openMetricPicker = () => {
     setMetricSlotsDraft([...metricSlots]);
@@ -912,10 +1007,11 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
       }));
       const exercises = (store.exercises || []).filter(ex => exerciseIds.has(ex.id));
       const snapshot = { type: 'zane-plan', version: 1, schedule, exercises };
+      const sharedPlanName = socialSanitizeImportedLabel(activeSchedule.name, 120) || 'Shared plan';
       if (planRecipientType === 'group') {
-        await LB.createSocialGroupPlanShare(planRecipientId, activeSchedule.name || 'Shared plan', snapshot);
+        await LB.createSocialGroupPlanShare(planRecipientId, sharedPlanName, snapshot);
       } else {
-        await LB.createSocialPlanShare(planRecipientId, activeSchedule.name || 'Shared plan', snapshot);
+        await LB.createSocialPlanShare(planRecipientId, sharedPlanName, snapshot);
       }
       await reload();
       setPlanRecipientId('');
@@ -926,7 +1022,12 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     }
   };
 
-  const importPlan = async share => {
+  const importPlanOnce = async share => {
+    if (!share?.id) {
+      setError('This shared plan is missing its receipt id.');
+      return;
+    }
+    if (socialPlanAlreadyImported(share, importedPlanReceipts)) return;
     const source = share.snapshot && typeof share.snapshot === 'object' ? share.snapshot : null;
     if (!source) return;
     let sourceBytes = 0;
@@ -942,33 +1043,38 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     const newExercises = [];
     sourceExercises.forEach(ex => {
       if (!ex || typeof ex !== 'object' || Array.isArray(ex) || !ex.id || !String(ex.name || '').trim()) return;
-      const name = socialBoundText(String(ex.name).trim(), 120);
+      const sourceId = String(ex.id);
+      if (sourceId.length > 200 || Object.prototype.hasOwnProperty.call(idMap, sourceId)) return;
+      const name = socialSanitizeImportedLabel(String(ex.name), 120);
       if (!name) return;
-      const existing = existingByName.get(name.toLowerCase());
+      const nameKey = name.toLowerCase();
+      const existing = existingByName.get(nameKey);
       if (existing) {
-        idMap[ex.id] = existing.id;
+        idMap[sourceId] = existing.id;
         return;
       }
       const id = LB.uid();
-      idMap[ex.id] = id;
-      newExercises.push({
+      idMap[sourceId] = id;
+      const importedExercise = {
         id, name,
         tags: socialBoundStringArray(ex.tags, 20, 40),
         note: socialBoundText(ex.note, 2000),
-        category: socialBoundText(ex.category, 80) || null,
+        category: socialSanitizeImportedLabel(ex.category, 80) || null,
         unilateral: !!ex.unilateral,
-        equipment: socialBoundText(ex.equipment, 80) || null,
+        equipment: socialSanitizeImportedLabel(ex.equipment, 80) || null,
         progression_reps: socialFiniteNumber(ex.progression_reps, 0, 1000),
-        movement_type: socialBoundText(ex.movement_type, 40) || null,
-        log_mode: socialBoundText(ex.log_mode, 40) || null,
+        movement_type: socialSanitizeImportedLabel(ex.movement_type, 40) || null,
+        log_mode: socialSanitizeImportedLabel(ex.log_mode, 40) || null,
         no_weight_reps: !!ex.no_weight_reps,
         pull_bodyweight: !!ex.pull_bodyweight,
-        bodyweight_mode: socialBoundText(ex.bodyweight_mode, 40) || null,
-        youtube_url: socialBoundText(ex.youtube_url, 500) || null,
+        bodyweight_mode: socialSanitizeImportedLabel(ex.bodyweight_mode, 40) || null,
+        youtube_url: LB.sanitizeYoutubeUrl(ex.youtube_url),
         note_pinned: !!ex.note_pinned,
         progression_increment: socialFiniteNumber(ex.progression_increment, 0, 1000),
         horn_labels: socialBoundStringArray(ex.horn_labels, 12, 80),
-      });
+      };
+      newExercises.push(importedExercise);
+      existingByName.set(nameKey, importedExercise);
     });
     const safeSchedule = socialSanitizePlanSchedule(sourceSchedule, idMap);
     if (!safeSchedule) {
@@ -978,7 +1084,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     const imported = {
       ...safeSchedule,
       id: LB.uid(),
-      name: `${socialBoundText(share.planName, 120) || safeSchedule.name || 'Shared plan'} (shared)`.slice(0, 140),
+      name: `${socialSanitizeImportedLabel(share.planName, 120) || safeSchedule.name || 'Shared plan'} (shared)`.slice(0, 140),
       archived: false,
       is_template: false,
     };
@@ -986,16 +1092,43 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
     delete imported.versions;
     delete imported.user_id;
     delete imported.userId;
-    setStore(s => s ? {
-      ...s,
-      exercises: [...(s.exercises || []), ...newExercises],
-      schedules: [...(s.schedules || []), imported],
-    } : s);
+    let importResult;
     try {
-      await LB.markSocialPlanImported(share.id);
-      patchSocial(s => ({ ...s, planShares: (s.planShares || []).map(p => p.id === share.id ? { ...p, importedAt: new Date().toISOString() } : p) }));
+      // The server claim and every plan row land in one transaction before the
+      // local store changes. A concurrent device therefore either owns the
+      // import or receives the exact schedule id that already won.
+      importResult = await LB.importSocialPlanShareAtomically(share.id, imported, newExercises);
     } catch (e) {
-      setError(e.message || 'Plan imported locally, but receipt could not be marked');
+      setError('Plan could not be imported. Please try again.');
+      return;
+    }
+    let scheduleToStore = imported;
+    let exercisesToStore = newExercises;
+    if (!importResult.imported) {
+      try {
+        const persisted = await LB.loadImportedSocialPlan(importResult.scheduleId);
+        if (!persisted?.schedule) throw new Error('Imported plan was not found');
+        scheduleToStore = persisted.schedule;
+        exercisesToStore = persisted.exercises || [];
+      } catch (_) {
+        setError('This plan was imported on another device. Reload plans to see it here.');
+        return;
+      }
+    }
+    const importedAt = new Date().toISOString();
+    socialRememberImportedPlanReceipt(socialBrowserStorage(), userId, share.id, importedPlanReceipts);
+    patchSocial(s => ({ ...s, planShares: (s.planShares || []).map(planShare => planShare.id === share.id ? { ...planShare, importedAt } : planShare) }));
+    setStore(s => socialMergeImportedPlan(s, scheduleToStore, exercisesToStore));
+  };
+
+  const importPlan = async share => {
+    const shareId = share?.id ? String(share.id) : '';
+    if (shareId && importingPlanIdsRef.current.has(shareId)) return;
+    if (shareId) importingPlanIdsRef.current.add(shareId);
+    try {
+      await importPlanOnce(share);
+    } finally {
+      if (shareId) importingPlanIdsRef.current.delete(shareId);
     }
   };
 
@@ -1464,7 +1597,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
         <div className="micro" style={{ color: UI.gold, margin: '8px 0' }}>RECEIVED SNAPSHOTS</div>
         {receivedShares.length === 0 ? <Empty title="No shared plans" sub="Plans your friends or groups send will appear here." /> : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>{receivedShares.map(share => {
           const group = share.groupId && groupById(share.groupId);
-          return <Card key={share.id} style={{ padding: 13 }}><div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><div style={{ flex: 1 }}><div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>{share.planName}</div><div className="micro" style={{ marginTop: 3 }}>{group ? `From ${shareSenderName(share)} in ${group.name}` : `From ${shareSenderName(share)}`} · {socialDate(share.createdAt)}</div></div>{share.importedAt ? <span className="micro" style={{ color: UI.gold }}>Imported</span> : <Btn onClick={() => importPlan(share)} style={{ padding: '8px 10px', minHeight: 0, fontSize: 10 }}>Import</Btn>}</div></Card>;
+          return <Card key={share.id} style={{ padding: 13 }}><div style={{ display: 'flex', alignItems: 'center', gap: 9 }}><div style={{ flex: 1 }}><div style={{ color: UI.ink, fontFamily: UI.fontUi, fontSize: 13, fontWeight: 600 }}>{socialSanitizeImportedLabel(share.planName, 120) || 'Shared plan'}</div><div className="micro" style={{ marginTop: 3 }}>{group ? `From ${shareSenderName(share)} in ${group.name}` : `From ${shareSenderName(share)}`} · {socialDate(share.createdAt)}</div></div>{socialPlanAlreadyImported(share, importedPlanReceipts) ? <span className="micro" style={{ color: UI.gold }}>Imported</span> : <Btn onClick={() => importPlan(share)} style={{ padding: '8px 10px', minHeight: 0, fontSize: 10 }}>{share.importedAt ? 'Sync' : 'Import'}</Btn>}</div></Card>;
         })}</div>}
         {sentShares.length > 0 && <div className="micro" style={{ color: UI.inkFaint, marginTop: 14 }}>Sent snapshots remain immutable and are shown here for your record.</div>}
         {planShares.length > 0 && <>
@@ -1472,7 +1605,7 @@ function FriendsScreen({ store, setStore, userId, initialTab = 'circle' }) {
           <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>{planShares.map(share => {
             const own = share.senderId === userId;
             const canDelete = own || !share.groupId;
-            return <div key={`manage-${share.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{share.planName}</div><div className="micro" style={{ marginTop: 2 }}>{own ? 'To' : 'From'} {shareTargetLabel(share)} · {socialDate(share.createdAt)}</div></div>{canDelete && <button onClick={() => deletePlanShare(share)} style={{ padding: '6px 8px', borderRadius: 4, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, background: own ? UI.goldFaint : 'transparent', color: own ? UI.gold : UI.danger, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>{own ? 'Take back' : 'Delete'}</button>}</div>;
+            return <div key={`manage-${share.id}`} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 9px', border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 4 }}><div style={{ flex: 1, minWidth: 0 }}><div style={{ color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{socialSanitizeImportedLabel(share.planName, 120) || 'Shared plan'}</div><div className="micro" style={{ marginTop: 2 }}>{own ? 'To' : 'From'} {shareTargetLabel(share)} · {socialDate(share.createdAt)}</div></div>{canDelete && <button onClick={() => deletePlanShare(share)} style={{ padding: '6px 8px', borderRadius: 4, border: `var(--hair-width) solid ${own ? UI.goldSoft : UI.hairStrong}`, background: own ? UI.goldFaint : 'transparent', color: own ? UI.gold : UI.danger, fontFamily: UI.fontUi, fontSize: 9, cursor: 'pointer' }}>{own ? 'Take back' : 'Delete'}</button>}</div>;
           })}</div>
         </>}
       </>

@@ -237,20 +237,63 @@ const MD_WEEKDAYS_EVERY_DAY = [0, 1, 2, 3, 4, 5, 6];
 function mdCategoryLabel(id) {
   return MED_CATEGORIES.find(c => c.id === id)?.label || id || null;
 }
-function mdNum(v) { return (v === '' || v == null || isNaN(parseFloat(v))) ? null : parseFloat(v); }
+function mdNum(value) {
+  if (value === '' || value == null) return null;
+  const raw = String(value).trim();
+  if (!/^(?:\d+|\d*[.,]\d+)$/.test(raw)) return null;
+  const number = Number(raw.replace(',', '.'));
+  return Number.isFinite(number) && number >= 0 && number <= 1000000000 ? number : null;
+}
 function mdDecimalFilter(raw) {
-  let v = raw.replace(/,/g, '.').replace(/[^0-9.]/g, '');
-  const dot = v.indexOf('.');
-  if (dot !== -1) v = v.slice(0, dot + 1) + v.slice(dot + 1).replace(/\./g, '').slice(0, 1);
-  return v;
+  // Preserve malformed pasted text so strict save validation can reject it.
+  // Stripping a leading minus from "-5" would silently turn invalid stock
+  // into positive stock. Commas remain supported as the locale decimal key.
+  return String(raw || '').replace(/,/g, '.').slice(0, 32);
 }
 // Never rounds (a dose/stock count is an exact fact, not an estimate, same
 // reasoning as fdExactShoppingQty in screens-food.jsx): trims to at most 2
 // decimals and drops trailing zeros so a whole number still reads as one.
 function mdFmtQty(n, unitLabel) {
-  if (n == null) return '';
+  if (n == null || !Number.isFinite(Number(n))) return '';
   const trimmed = parseFloat(Number(n).toFixed(2));
   return `${trimmed} ${unitLabel || 'pills'}`;
+}
+
+function mdStockSheetTotal(sheet) {
+  if (!sheet) return null;
+  const packageSize = mdNum(sheet.packageSize);
+  const packsRaw = String(sheet.stockPacksStr || '').trim();
+  const extraRaw = String(sheet.stockExtraStr || '').trim();
+  if (packageSize > 0 && (packsRaw || extraRaw)) {
+    const packs = packsRaw ? mdNum(packsRaw) : 0;
+    const extra = extraRaw ? mdNum(extraRaw) : 0;
+    if (packs == null || extra == null) return null;
+    const total = packs * packageSize + extra;
+    return Number.isFinite(total) && total <= 1000000000 ? total : null;
+  }
+  const stockRaw = String(sheet.stockStr || '').trim();
+  return stockRaw ? mdNum(stockRaw) : null;
+}
+
+function mdStockSheetValidationError(sheet) {
+  if (!sheet) return 'Stock form is unavailable.';
+  const packageSize = mdNum(sheet.packageSize);
+  const packsRaw = String(sheet.stockPacksStr || '').trim();
+  const extraRaw = String(sheet.stockExtraStr || '').trim();
+  const stockRaw = String(sheet.stockStr || '').trim();
+  if (packageSize > 0 && (packsRaw || extraRaw)) {
+    if ((packsRaw && mdNum(packsRaw) == null) || (extraRaw && mdNum(extraRaw) == null) || mdStockSheetTotal(sheet) == null) {
+      return 'Enter valid package and extra stock amounts.';
+    }
+  } else if (stockRaw && mdNum(stockRaw) == null) {
+    return 'Enter a valid stock amount.';
+  }
+  const thresholdRaw = String(sheet.lowStockThresholdStr || '').trim();
+  if (thresholdRaw) {
+    const threshold = mdNum(thresholdRaw);
+    if (threshold == null || threshold <= 0) return 'Enter a valid low-stock threshold above 0.';
+  }
+  return null;
 }
 
 
@@ -1045,7 +1088,12 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   }
   function saveMedSheet() {
     if (!medSheet || !medSheet.name.trim()) return;
+    const packageSizeRaw = String(medSheet.packageSizeStr || '').trim();
     const packageSize = mdNum(medSheet.packageSizeStr);
+    if (packageSizeRaw && (packageSize == null || packageSize <= 0)) {
+      UI.alert('Enter a valid package size above 0.');
+      return;
+    }
     const nowISO = new Date().toISOString();
     if (medSheet.id) {
       // lowStockThreshold/excludeFromLowStock are deliberately absent from
@@ -1592,15 +1640,13 @@ function MedicationsScreen({ store, setStore, go, userId }) {
   // been typed at all (leave-unchanged on save). Shared by saveStockSheet
   // below and the live total preview in the JSX further down, so what's
   // shown while typing and what actually gets saved can never drift apart.
-  function mdStockSheetTotal(sheet) {
-    if (!sheet) return null;
-    if (sheet.packageSize > 0 && (sheet.stockPacksStr.trim() || sheet.stockExtraStr.trim())) {
-      return (mdNum(sheet.stockPacksStr) || 0) * sheet.packageSize + (mdNum(sheet.stockExtraStr) || 0);
-    }
-    return sheet.stockStr.trim() ? mdNum(sheet.stockStr) : null;
-  }
   function saveStockSheet() {
     if (!stockSheet) return;
+    const validationError = mdStockSheetValidationError(stockSheet);
+    if (validationError) {
+      UI.alert(validationError);
+      return;
+    }
     const stockTyped = mdStockSheetTotal(stockSheet);
     // lowStockThreshold/excludeFromLowStock always commit, same "always
     // overwrite with whatever's in the field" semantics medSheet used for

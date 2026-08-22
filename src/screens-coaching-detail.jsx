@@ -612,6 +612,23 @@ function buildFieldView(fields) {
   return view;
 }
 
+function checkinRequiredChoiceValidationError(schema) {
+  for (const section of (Array.isArray(schema) ? schema : [])) {
+    for (const field of (Array.isArray(section?.fields) ? section.fields : [])) {
+      if (!field?.required || field.type !== 'choice') continue;
+      const usable = (Array.isArray(field.options) ? field.options : []).filter(option => {
+        if (!option || typeof option !== 'object') return false;
+        const valueType = typeof option.value;
+        return String(option.label ?? '').trim()
+          && ['string', 'number', 'boolean'].includes(valueType)
+          && String(option.value).trim() !== '';
+      });
+      if (!usable.length) return `Required choice field "${field.label || 'Untitled'}" needs at least one usable option.`;
+    }
+  }
+  return null;
+}
+
 function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSaveForAll, onClose, templates, onSaveTemplate, onDeleteTemplate }) {
   const [draft, setDraft] = useStateC(() => JSON.parse(JSON.stringify(initial || CHECKIN_DEFAULT_SCHEMA)));
   const [view, setView] = useStateC('list');
@@ -758,7 +775,10 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
       // responses keyed to the old text (only the display label changes). Empty
       // options are dropped.
       f.options = fd.options.filter(o => String(o.label ?? '').trim())
-        .map(o => ({ ...o, label: o.label.trim(), value: (o.value ?? '') !== '' ? o.value : o.label.trim() }));
+        .map(o => {
+          const label = String(o.label).trim();
+          return { ...o, label, value: (o.value ?? '') !== '' ? o.value : label };
+        });
       if (fd.labeled) f.labeled = true;
     }
     setDraft(d => {
@@ -821,12 +841,16 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   };
 
   const handleSave = async () => {
+    const validationError = checkinRequiredChoiceValidationError(draft);
+    if (validationError) { UI.alert(validationError); return; }
     setSaving(true);
     try { await LB.saveCheckinSchema(coachingId, draft); onSave(draft); }
     catch (e) { UI.alert(e.message); setSaving(false); }
   };
 
   const handleSaveForAll = async () => {
+    const validationError = checkinRequiredChoiceValidationError(draft);
+    if (validationError) { UI.alert(validationError); return; }
     setSaving(true);
     try { await onSaveForAll(draft); }
     catch (e) { UI.alert(e.message); setSaving(false); }
@@ -838,6 +862,8 @@ function CheckInSchemaBuilder({ coachingId, initial, coachDefault, onSave, onSav
   const submitTemplateName = () => {
     if (!templateNameDraft.trim() || !onSaveTemplate || templateCapReached) return;
     const wasPrevious = namingTemplate === 'previous';
+    const validationError = !wasPrevious ? checkinRequiredChoiceValidationError(draft) : null;
+    if (validationError) { UI.alert(validationError); return; }
     // The "previous form" snapshot must be the coach's actual outgoing default
     // (coachDefault), never `initial`: initial prefers THIS client's own per-row
     // override when one exists, which would silently mislabel a single client's
@@ -1515,7 +1541,10 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
   // identity, looking at a client's check-ins); server-side (ai-checkin-opinion)
   // independently enforces the same bypass by caller email either way.
   const isAdmin = store?.user?.email === 'office@btc-prime.biz';
-  const { checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory, load } = useCoachingCheckins(coachingId);
+  const {
+    checkins, loadErr, setLoadErr, schema, setSchema, coachingMacrosHistory,
+    hasOlder, loadingOlder, loadOlder, load,
+  } = useCoachingCheckins(coachingId);
   const [builderOpen, setBuilderOpen] = useStateC(false);
 
   // What the client actually submitted with: when the coaching row has no saved
@@ -1645,6 +1674,12 @@ function ClientCheckInsTab({ coachingId, checkinEnabled = true, onToggle, toggli
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <div className="micro" style={{ color: UI.inkFaint }}>ALL CHECK-INS</div>
               {checkins.map((ci, i) => <CheckInCard key={ci.id} ci={ci} prevCi={checkins[i + 1]} schema={resolvedSchema} coachingMacrosHistory={coachingMacrosHistory} clientUnit={clientUnit} onGenerated={load} isAdmin={isAdmin} />)}
+              {hasOlder && (
+                <button onClick={loadOlder} disabled={loadingOlder}
+                  style={{ alignSelf: 'center', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', cursor: loadingOlder ? 'default' : 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+                  {loadingOlder ? 'Loading…' : 'Load older check-ins'}
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -1666,13 +1701,48 @@ function ClientNotesTab({ coachingId, userId, clientName, store, setStore }) {
 
 // ─── Tab: Nutrition ───────────────────────────────────────────────────────────
 
+const COACHING_MACRO_MAX_GRAMS = 2000;
+const COACHING_MACRO_FIELDS = [
+  ['proteinTraining', 'Training-day protein'],
+  ['carbsTraining', 'Training-day carbs'],
+  ['fatTraining', 'Training-day fat'],
+  ['proteinRest', 'Rest-day protein'],
+  ['carbsRest', 'Rest-day carbs'],
+  ['fatRest', 'Rest-day fat'],
+];
+
+function coachingMacroValue(rawValue) {
+  const value = String(rawValue ?? '').trim();
+  if (!value) return null;
+  if (!/^\d+$/.test(value)) return undefined;
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed <= COACHING_MACRO_MAX_GRAMS ? parsed : undefined;
+}
+
+function coachingMacroValidationError(form) {
+  for (const [field, label] of COACHING_MACRO_FIELDS) {
+    if (coachingMacroValue(form?.[field]) === undefined) {
+      return `${label} must be a whole number from 0 to ${COACHING_MACRO_MAX_GRAMS} g.`;
+    }
+  }
+  return '';
+}
+
 function ClientNutritionTab({ coachingId, userId, clientId, clientName, store }) {
   const [macros, setMacros] = useStateC([]);
   const [loading, setLoading] = useStateC(true);
+  const [loadErr, setLoadErr] = useStateC(false);
+  const [hasOlder, setHasOlder] = useStateC(false);
+  const [olderCursor, setOlderCursor] = useStateC(null);
+  const [loadingOlder, setLoadingOlder] = useStateC(false);
   const [saving, setSaving] = useStateC(false);
   const [historyOpen, setHistoryOpen] = useStateC(false);
   const emptyForm = { proteinTraining: '', carbsTraining: '', fatTraining: '', proteinRest: '', carbsRest: '', fatRest: '' };
   const [form, setForm] = useStateC(emptyForm);
+  const coachingIdRef = useRefC(coachingId);
+  const requestVersionRef = useRefC(0);
+  const macrosRef = useRefC([]);
+  const olderRequestRef = useRefC(null);
 
   // Meal plans (Plan Mode): the coach can push one of their OWN meal plans to
   // this client, mirroring the training plan push. store here is the coach's
@@ -1724,18 +1794,28 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
   // Calories auto-computed via the shared formula (no fiber, this form has
   // no net-carb concept); 0 is treated as "nothing entered yet", not a real value.
   const calcCals = (pro, car, fat) => {
-    const total = LB.caloriesFromMacros(parseInt(pro) || 0, parseInt(car) || 0, parseInt(fat) || 0);
+    const total = LB.caloriesFromMacros(coachingMacroValue(pro) ?? 0, coachingMacroValue(car) ?? 0, coachingMacroValue(fat) ?? 0);
     return total > 0 ? total : null;
   };
   const calsTraining = calcCals(form.proteinTraining, form.carbsTraining, form.fatTraining);
   const calsRest     = calcCals(form.proteinRest,     form.carbsRest,     form.fatRest);
 
   const reload = () => {
+    const key = coachingId;
+    const version = ++requestVersionRef.current;
+    coachingIdRef.current = key;
+    olderRequestRef.current = null;
     setLoading(true);
-    LB.loadCoachingMacros(coachingId).then(data => {
-      setMacros(data);
-      if (data.length > 0) {
-        const l = data[0];
+    setLoadingOlder(false);
+    setLoadErr(false);
+    return LB.loadCoachingMacros(key, { limit: 25 }).then(page => {
+      if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+      macrosRef.current = page.macros;
+      setMacros(page.macros);
+      setHasOlder(page.hasMore);
+      setOlderCursor(page.nextCursor);
+      if (page.macros.length > 0) {
+        const l = page.macros[0];
         setForm({
           proteinTraining: l.proteinTraining?.toString() ?? '',
           carbsTraining:   l.carbsTraining?.toString()   ?? '',
@@ -1744,22 +1824,84 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
           carbsRest:       l.carbsRest?.toString()       ?? '',
           fatRest:         l.fatRest?.toString()         ?? '',
         });
-      }
-    }).finally(() => setLoading(false));
+      } else setForm(emptyForm);
+      return page;
+    }).catch(error => {
+      if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+      console.error('coaching macro history reload failed:', error);
+      return null;
+    }).finally(() => {
+      if (coachingIdRef.current === key && requestVersionRef.current === version) setLoading(false);
+    });
   };
 
-  useEffectC(() => { reload(); }, [coachingId]);
+  const loadOlder = () => {
+    const key = coachingId;
+    const version = requestVersionRef.current;
+    if (!hasOlder || !olderCursor || loadingOlder) return;
+    if (olderRequestRef.current?.key === key && olderRequestRef.current?.version === version) {
+      return olderRequestRef.current.promise;
+    }
+    setLoadingOlder(true);
+    const cursor = olderCursor;
+    const promise = LB.loadCoachingMacros(key, { limit: 25, cursor })
+      .then(page => {
+        if (coachingIdRef.current !== key || requestVersionRef.current !== version) return page;
+        const merged = LB.mergeCoachingMacroPage(macrosRef.current, page);
+        macrosRef.current = merged;
+        setMacros(merged);
+        setHasOlder(page.hasMore);
+        setOlderCursor(page.nextCursor);
+        setLoadErr(false);
+        return page;
+      })
+      .catch(error => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadErr(true);
+        console.error('older coaching macro history load failed:', error);
+        return null;
+      })
+      .finally(() => {
+        if (coachingIdRef.current === key && requestVersionRef.current === version) setLoadingOlder(false);
+        if (olderRequestRef.current?.promise === promise) olderRequestRef.current = null;
+      });
+    olderRequestRef.current = { key, version, promise };
+    return promise;
+  };
+
+  useEffectC(() => {
+    const key = coachingId;
+    coachingIdRef.current = key;
+    requestVersionRef.current += 1;
+    macrosRef.current = [];
+    olderRequestRef.current = null;
+    setMacros([]);
+    setForm(emptyForm);
+    setHasOlder(false);
+    setOlderCursor(null);
+    setLoadingOlder(false);
+    setLoadErr(false);
+    reload();
+    return () => {
+      if (coachingIdRef.current === key) coachingIdRef.current = null;
+      requestVersionRef.current += 1;
+    };
+  }, [coachingId]);
 
   const save = async () => {
+    const validationError = coachingMacroValidationError(form);
+    if (validationError) {
+      UI.alert(validationError);
+      return;
+    }
     const macro = {
       caloriesTraining: calsTraining,
-      proteinTraining:  form.proteinTraining ? parseInt(form.proteinTraining) : null,
-      carbsTraining:    form.carbsTraining   ? parseInt(form.carbsTraining)   : null,
-      fatTraining:      form.fatTraining     ? parseInt(form.fatTraining)     : null,
+      proteinTraining:  coachingMacroValue(form.proteinTraining),
+      carbsTraining:    coachingMacroValue(form.carbsTraining),
+      fatTraining:      coachingMacroValue(form.fatTraining),
       caloriesRest:     calsRest,
-      proteinRest:      form.proteinRest     ? parseInt(form.proteinRest)     : null,
-      carbsRest:        form.carbsRest       ? parseInt(form.carbsRest)       : null,
-      fatRest:          form.fatRest         ? parseInt(form.fatRest)         : null,
+      proteinRest:      coachingMacroValue(form.proteinRest),
+      carbsRest:        coachingMacroValue(form.carbsRest),
+      fatRest:          coachingMacroValue(form.fatRest),
     };
     setSaving(true);
     try {
@@ -1786,7 +1928,7 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
     <div style={{ flex: 1 }}>
       <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>{label}</div>
       <div style={{ position: 'relative' }}>
-        <input type="text" inputMode="numeric" value={form[fieldKey]}
+        <input type="text" inputMode="numeric" pattern="[0-9]*" maxLength={4} value={form[fieldKey]}
           onChange={e => setForm(f => ({ ...f, [fieldKey]: e.target.value }))}
           placeholder="—" style={inputStyle} />
         <span style={unitStyle}>{unit}</span>
@@ -1823,6 +1965,14 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
   );
 
   if (loading) return <div style={{ padding: 32, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 13 }}>Loading…</div>;
+  if (loadErr && macros.length === 0) {
+    return (
+      <div style={{ padding: 32, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12 }}>
+        <div style={{ color: 'rgba(var(--danger-rgb),0.8)', fontFamily: UI.fontUi, fontSize: 13 }}>Couldn't load macro targets.</div>
+        <button onClick={reload} style={{ background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 16px', cursor: 'pointer', color: UI.ink, fontFamily: UI.fontUi, fontSize: 12 }}>Retry</button>
+      </div>
+    );
+  }
 
   return (
     <div style={{ overflowY: 'auto', flex: 1, padding: '16px 12px 32px' }}>
@@ -1837,22 +1987,31 @@ function ClientNutritionTab({ coachingId, userId, clientId, clientName, store })
         <>
           <button onClick={() => setHistoryOpen(o => !o)}
             style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'transparent', border: 'none', cursor: 'pointer', padding: '4px 0', marginBottom: 8 }}>
-            <span className="micro" style={{ color: UI.inkFaint }}>HISTORY ({macros.length})</span>
+            <span className="micro" style={{ color: UI.inkFaint }}>HISTORY ({macros.length}{hasOlder ? '+' : ''})</span>
             <i className={`fa-solid fa-chevron-${historyOpen ? 'up' : 'down'}`} style={{ fontSize: 8, color: UI.inkGhost }} />
           </button>
-          {historyOpen && macros.map(m => {
-            const td = [m.caloriesTraining && `${m.caloriesTraining} kcal`, m.proteinTraining && `${m.proteinTraining}g P`, m.carbsTraining && `${m.carbsTraining}g C`, m.fatTraining && `${m.fatTraining}g F`].filter(Boolean).join(' · ');
-            const rd = [m.caloriesRest && `${m.caloriesRest} kcal`, m.proteinRest && `${m.proteinRest}g P`, m.carbsRest && `${m.carbsRest}g C`, m.fatRest && `${m.fatRest}g F`].filter(Boolean).join(' · ');
-            return (
-              <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 8 }}>
-                <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
-                  {fmtDate(m.setAt)} · {new Date(m.setAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+          {historyOpen && <>
+            {macros.map(m => {
+              const td = [m.caloriesTraining && `${m.caloriesTraining} kcal`, m.proteinTraining && `${m.proteinTraining}g P`, m.carbsTraining && `${m.carbsTraining}g C`, m.fatTraining && `${m.fatTraining}g F`].filter(Boolean).join(' · ');
+              const rd = [m.caloriesRest && `${m.caloriesRest} kcal`, m.proteinRest && `${m.proteinRest}g P`, m.carbsRest && `${m.carbsRest}g C`, m.fatRest && `${m.fatRest}g F`].filter(Boolean).join(' · ');
+              return (
+                <div key={m.id} style={{ padding: '10px 14px', background: UI.bgInset, borderRadius: 6, border: `var(--hair-width) solid ${UI.hair}`, marginBottom: 8 }}>
+                  <div className="micro" style={{ color: UI.inkFaint, marginBottom: 4 }}>
+                    {fmtDate(m.setAt)} · {new Date(m.setAt).toLocaleTimeString('de-DE', { hour: '2-digit', minute: '2-digit' })}
+                  </div>
+                  {td && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 2 }}>Train: {td}</div>}
+                  {rd && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Rest: {rd}</div>}
                 </div>
-                {td && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 2 }}>Train: {td}</div>}
-                {rd && <div style={{ fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi }}>Rest: {rd}</div>}
-              </div>
-            );
-          })}
+              );
+            })}
+            {hasOlder && (
+              <button onClick={loadOlder} disabled={loadingOlder}
+                style={{ display: 'block', margin: '10px auto 0', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hairStrong}`, borderRadius: 6, padding: '8px 14px', cursor: loadingOlder ? 'default' : 'pointer', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+                {loadingOlder ? 'Loading…' : 'Load older macro targets'}
+              </button>
+            )}
+            {loadErr && <div style={{ marginTop: 8, textAlign: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10 }}>Couldn't load older targets. Try again.</div>}
+          </>}
         </>
       )}
 

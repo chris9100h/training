@@ -25,6 +25,8 @@
 // entry states its setting explicitly rather than inheriting one. Callers say
 // what they want; the entries know how to ask for it.
 
+import { fetchWithTimeout } from './fetch.ts';
+
 export type ProviderId = 'claude' | 'grok' | 'qwen';
 
 export interface ModelImage {
@@ -252,11 +254,11 @@ export async function callModel(id: ProviderId, call: ModelCall, labels: CallLab
 
   let resp: Response;
   try {
-    resp = await fetch(url, {
+    resp = await fetchWithTimeout(url, {
       method: 'POST',
       headers: provider.headers(apiKey),
       body: JSON.stringify(provider.body(call, model)),
-    });
+    }, 60_000);
   } catch (e) {
     console.error(`[${labels.tag}] ${id} fetch error:`, e);
     return { ok: false, status: 502, error: `Could not reach the ${labels.subject}. Try again.` };

@@ -24,6 +24,16 @@ function json(value: unknown, status = 200) {
   return new Response(JSON.stringify(value), { status, headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
 }
 
+function rpcScalar(value: unknown, functionName: string): unknown {
+  if (Array.isArray(value) && value.length === 1) {
+    const row = value[0];
+    if (row && typeof row === 'object' && functionName in row) return (row as Record<string, unknown>)[functionName];
+    return row;
+  }
+  if (value && typeof value === 'object' && functionName in value) return (value as Record<string, unknown>)[functionName];
+  return value;
+}
+
 function redirect(url: string) {
   return new Response(null, { status: 302, headers: { ...corsHeaders, Location: url } });
 }
@@ -374,12 +384,20 @@ async function uploadDrivePhoto(access: string, folderId: string, photo: any) {
   return await res.json();
 }
 
+async function findProgressDrivePhoto(access: string, photoId: string, folderId: string | null = null) {
+  const parent = folderId ? ` and ${q(folderId)} in parents` : '';
+  const params = new URLSearchParams({
+    q: `appProperties has { key = 'zaneProgressPhotoId' and value = '${String(photoId).replaceAll("'", "\\'")}' } and trashed = false${parent}`,
+    spaces: 'drive', fields: 'files(id,name,mimeType)', pageSize: '1',
+  });
+  const body = await (await drive(`files?${params}`, access)).json().catch(() => ({}));
+  return body?.files?.[0] || null;
+}
+
 async function uploadProgressDrivePhoto(access: string, folderId: string, photo: any) {
   let fileId = photo.drive_file_id || null;
   if (!fileId) {
-    const params = new URLSearchParams({ q: `appProperties has { key = 'zaneProgressPhotoId' and value = '${String(photo.id).replaceAll("'", "\\'")}' } and trashed = false and ${q(folderId)} in parents`, spaces: 'drive', fields: 'files(id,name,mimeType)', pageSize: '1' });
-    const existingBody = await (await drive(`files?${params}`, access)).json().catch(() => ({}));
-    const existing = existingBody?.files?.[0] || null;
+    const existing = await findProgressDrivePhoto(access, photo.id, folderId);
     fileId = existing?.id || null;
   }
   // A worker may have uploaded to Drive and crashed before the DB acknowledgement.
@@ -482,12 +500,18 @@ async function runProgressSync(worker: string) {
     const deleted = await deleteClaim.json().catch(() => []);
     for (const photo of Array.isArray(deleted) ? deleted : []) {
       try {
-        if (photo.drive_file_id && photo.connection_id) {
+        if (photo.connection_id) {
           const connection = connections.get(photo.connection_id) || (await (await db(`zane_coaching_drive_connections?id=eq.${encodeURIComponent(photo.connection_id)}&select=*`)).json().catch(() => []))[0];
           if (connection) {
             const access = accesses.get(connection.id) || await accessToken(connection.id);
             if (access) {
-              try { await drive(`files/${encodeURIComponent(photo.drive_file_id)}`, access, { method: 'DELETE' }); }
+              // If Google accepted an upload but the DB acknowledgement was
+              // interrupted, deletion may own a row with no drive_file_id.
+              // The immutable appProperty still identifies that orphan.
+              const fileId = photo.drive_file_id
+                || (await findProgressDrivePhoto(access, photo.id))?.id
+                || null;
+              if (fileId) try { await drive(`files/${encodeURIComponent(fileId)}`, access, { method: 'DELETE' }); }
               catch (error) { if ((error as any)?.status !== 404) throw error; }
             }
           }
@@ -982,6 +1006,16 @@ Deno.serve(async (req) => {
     if (!res.ok) return json({ error: 'Drive status unavailable' }, 502);
     return json((await res.json().catch(() => []))[0] || null);
   }
+  if (body.action === 'delete-connection') {
+    const res = await db('rpc/delete_coaching_drive_connection', {
+      method: 'POST',
+      body: JSON.stringify({ p_coach_id: userId }),
+    });
+    if (!res.ok) return json({ error: 'Could not delete Google Drive connection' }, 502);
+    const deleted = rpcScalar(await res.json().catch(() => false), 'delete_coaching_drive_connection') === true;
+    if (!deleted) return json({ error: 'Could not delete Google Drive connection' }, 502);
+    return json({ ok: true });
+  }
   if (body.action === 'disconnect') {
     const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'paused', last_error: 'Disconnected by user', updated_at: new Date().toISOString() }) });
     if (!connectionRes.ok) return json({ error: 'Could not disconnect Google Drive' }, 502);
@@ -1028,11 +1062,15 @@ Deno.serve(async (req) => {
   if (body.action === 'progress-delete') {
     const photoId = String(body.photoId || '');
     if (!/^[0-9a-f-]{36}$/i.test(photoId)) return json({ error: 'invalid progress picture' }, 400);
-    const rowRes = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(photoId)}&user_id=eq.${encodeURIComponent(userId)}&select=id`);
-    if (!rowRes.ok || !(await rowRes.json().catch(() => []))[0]) return json({ error: 'Progress picture not found' }, 404);
-    const mark = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(photoId)}&user_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'deleting', next_attempt_at: new Date().toISOString(), locked_at: null, locked_by: null, last_error: null, updated_at: new Date().toISOString() }) });
+    const mark = await db('rpc/request_drive_progress_deletion', {
+      method: 'POST',
+      body: JSON.stringify({ p_photo_id: photoId, p_user_id: userId }),
+    });
     if (!mark.ok) return json({ error: 'Could not remove progress picture' }, 502);
-    return json({ ok: true });
+    const state = rpcScalar(await mark.json().catch(() => null), 'request_drive_progress_deletion');
+    if (state === 'not_found') return json({ error: 'Progress picture not found' }, 404);
+    if (state !== 'queued' && state !== 'deleting') return json({ error: 'Could not remove progress picture' }, 502);
+    return json({ ok: true, state });
   }
   if (body.action === 'configure') {
     if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);

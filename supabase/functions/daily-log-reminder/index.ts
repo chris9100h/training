@@ -1,5 +1,7 @@
 import { sendNotification } from '../_shared/notifications.ts';
 import { localClock } from '../_shared/time.ts';
+import { fetchWithTimeout } from '../_shared/fetch.ts';
+import { claimReminderDelivery, finishReminderDelivery, pruneReminderDeliveries } from '../_shared/reminder-delivery.ts';
 
 // Daily log reminder cron function. Nudges once per local day when the user
 // has NOT logged a weight for that day yet: after the user's chosen time
@@ -26,7 +28,7 @@ const DEFAULT_REMINDER_TIME = '19:00';
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -34,7 +36,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
       'Content-Type': 'application/json',
       ...(options.headers ?? {}),
     },
-  });
+  }, 12000);
 }
 
 // '19:00' -> milliseconds since local midnight. Malformed/empty falls back to
@@ -92,6 +94,21 @@ async function sendReminders() {
     const title = 'Zane · Daily Log Reminder';
     const message = "Don't forget to log your weight today. ⚖️";
 
+    let claim;
+    try {
+      claim = await claimReminderDelivery(dbFetch, {
+        kind: 'daily-log',
+        userId: row.user_id,
+        claimedAt: new Date(now).toISOString(),
+        expectedText: row.daily_log_reminder_last_date,
+        targetText: localDate,
+      });
+    } catch (e) {
+      console.error(`[daily-log-reminder] claim error for ${row.user_id}:`, e);
+      continue;
+    }
+    if (!claim) continue;
+
     // Respect the user's channel choice: when Pushover is enabled (use_pushover
     // and a key set) send only Pushover, otherwise send native Web Push. This
     // matches the use_pushover "instead of Web Push" semantics used elsewhere,
@@ -105,26 +122,13 @@ async function sendReminders() {
       logPrefix: 'daily-log-reminder',
       ttl: 43200,
     });
-    if (!delivered) continue;
-
-    // Stamp the daily throttle only after a successful handoff so provider
-    // failures remain retryable on the next tick. A failed write is logged loudly;
-    // the refire risk it leaves is bounded to the next tick, same posture as
-    // the water reminder's throttle write. "Logged loudly" has to include a
-    // 4xx/5xx response: fetch resolves on those, so without the status check
-    // a rejected write reads as a successful one and the nudge repeats every
-    // tick for the rest of the day with nothing in the logs to show for it.
     try {
-      const res = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ daily_log_reminder_last_date: localDate }),
+      const finalized = await finishReminderDelivery(dbFetch, {
+        kind: 'daily-log', userId: row.user_id, claim, delivered,
       });
-      if (!res.ok) {
-        console.error(`[daily-log-reminder] throttle write failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
-      }
+      if (!finalized) console.error(`[daily-log-reminder] claim finalization lost for ${row.user_id}`);
     } catch (e) {
-      console.error(`[daily-log-reminder] throttle write error for ${row.user_id}:`, e);
+      console.error(`[daily-log-reminder] claim finalization error for ${row.user_id}:`, e);
     }
   }
 }
@@ -149,6 +153,11 @@ Deno.serve(async (req) => {
 
   if (req.method === 'POST') {
     await sendReminders();
+    try {
+      await pruneReminderDeliveries(dbFetch);
+    } catch (error) {
+      console.error('[daily-log-reminder] retention failed:', error);
+    }
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
   return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

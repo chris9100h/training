@@ -2,6 +2,248 @@
    tabs + charts). Shares globals (React aliases, helpers, isImprovement/
    isDecline) with screens-coaching-core.jsx, loaded first. */
 
+function coachingSanitizeImportedLabel(value, maxLength = 120) {
+  if (window.Screens?.sanitizeImportedLabel) return window.Screens.sanitizeImportedLabel(value, maxLength);
+  if (typeof value !== 'string') return '';
+  const max = Number.isInteger(maxLength) && maxLength > 0 ? maxLength : 120;
+  return value
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/[<>]/g, ' ')
+    .replace(/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, max);
+}
+
+function coachingSanitizeImportedLabels(values, maxItems = 20, maxLength = 80) {
+  if (!Array.isArray(values)) return [];
+  return values
+    .filter(value => typeof value === 'string')
+    .slice(0, maxItems)
+    .map(value => coachingSanitizeImportedLabel(value, maxLength))
+    .filter(Boolean);
+}
+
+const COACH_PLAN_IMPORT_LIMITS = {
+  bytes: 250000,
+  nodes: 20000,
+  depth: 14,
+  exercises: 500,
+  days: 14,
+  versions: 52,
+  itemsPerDay: 100,
+  setsPerItem: 30,
+  historyPerLift: 64,
+};
+
+function coachingFiniteNumber(value, min, max) {
+  if (value == null || value === '') return null;
+  if (typeof value !== 'number' && (typeof value !== 'string' || !/^-?(?:\d+(?:\.\d+)?|\.\d+)$/.test(value.trim()))) return null;
+  const number = Number(value);
+  return Number.isFinite(number) && number >= min && number <= max ? number : null;
+}
+
+function coachingJsonWithinImportLimits(value) {
+  const stack = [{ value, depth: 0 }];
+  let nodes = 0;
+  while (stack.length) {
+    const current = stack.pop();
+    nodes += 1;
+    if (nodes > COACH_PLAN_IMPORT_LIMITS.nodes || current.depth > COACH_PLAN_IMPORT_LIMITS.depth) return false;
+    if (!current.value || typeof current.value !== 'object') continue;
+    const children = Array.isArray(current.value) ? current.value : Object.values(current.value);
+    for (const child of children) stack.push({ value: child, depth: current.depth + 1 });
+  }
+  return true;
+}
+
+function coachingPlanImportValidationError(data, sourceBytes = 0) {
+  if (sourceBytes > COACH_PLAN_IMPORT_LIMITS.bytes) return 'Plan file is too large.';
+  if (!data || typeof data !== 'object' || Array.isArray(data) || data.type !== 'zane-plan') return 'Invalid plan file.';
+  if (!data.schedule || typeof data.schedule !== 'object' || Array.isArray(data.schedule)) return 'Invalid plan file.';
+  if (!Array.isArray(data.exercises)) return 'Invalid exercise list.';
+  if (!coachingJsonWithinImportLimits(data)) return 'Plan file is too complex.';
+  if (data.exercises.length > COACH_PLAN_IMPORT_LIMITS.exercises) return `A plan can import at most ${COACH_PLAN_IMPORT_LIMITS.exercises} exercises.`;
+  const dayGroups = [data.schedule.days, ...(Array.isArray(data.schedule.versions) ? data.schedule.versions.map(version => version?.days) : [])];
+  if (!Array.isArray(data.schedule.days)) return 'Invalid training days.';
+  if (Array.isArray(data.schedule.versions) && data.schedule.versions.length > COACH_PLAN_IMPORT_LIMITS.versions) return `A plan can contain at most ${COACH_PLAN_IMPORT_LIMITS.versions} versions.`;
+  if (data.schedule.versions != null && !Array.isArray(data.schedule.versions)) return 'Invalid plan versions.';
+  for (const days of dayGroups) {
+    if (!Array.isArray(days) || days.length > COACH_PLAN_IMPORT_LIMITS.days) return `Each plan version can contain at most ${COACH_PLAN_IMPORT_LIMITS.days} days.`;
+    for (const day of days) {
+      if (!day || typeof day !== 'object' || Array.isArray(day) || !Array.isArray(day.items)) return 'Invalid training day.';
+      if (day.items.length > COACH_PLAN_IMPORT_LIMITS.itemsPerDay) return `Each day can contain at most ${COACH_PLAN_IMPORT_LIMITS.itemsPerDay} exercises.`;
+    }
+  }
+  return '';
+}
+
+function coachingSanitizeImportedExercise(exercise) {
+  if (!exercise || typeof exercise !== 'object' || Array.isArray(exercise)) return null;
+  const name = coachingSanitizeImportedLabel(exercise.name, 120);
+  if (!name) return null;
+  const progressionReps = coachingFiniteNumber(exercise.progression_reps, 0, 1000);
+  const progressionIncrement = coachingFiniteNumber(exercise.progression_increment, 0, 100000);
+  const movementType = ['bilateral', 'unilateral', 'assisted', 'mobility', 'cardio'].includes(exercise.movement_type) ? exercise.movement_type : null;
+  const logMode = ['checkbox', 'reps', 'time', 'weight', 'weight_reps'].includes(exercise.log_mode) ? exercise.log_mode : null;
+  const bodyweightMode = ['pull', 'plus_load'].includes(exercise.bodyweight_mode) ? exercise.bodyweight_mode : null;
+  return {
+    name,
+    tags: coachingSanitizeImportedLabels(exercise.tags, 20, 40),
+    note: typeof exercise.note === 'string' ? exercise.note.slice(0, 2000) : '',
+    category: coachingSanitizeImportedLabel(exercise.category, 80) || null,
+    unilateral: !!exercise.unilateral,
+    equipment: coachingSanitizeImportedLabel(exercise.equipment, 80) || null,
+    progression_reps: progressionReps == null ? null : Math.round(progressionReps),
+    movement_type: movementType,
+    log_mode: logMode,
+    no_weight_reps: !!exercise.no_weight_reps,
+    pull_bodyweight: !!exercise.pull_bodyweight,
+    bodyweight_mode: bodyweightMode,
+    youtube_url: LB.sanitizeYoutubeUrl(exercise.youtube_url),
+    horn_labels: coachingSanitizeImportedLabels(exercise.horn_labels, 12, 80),
+    note_pinned: !!exercise.note_pinned,
+    progression_increment: progressionIncrement,
+  };
+}
+
+function coachingPrepareImportedExercises(rawExercises, clientExercises) {
+  const idMap = Object.create(null);
+  const newExercises = [];
+  const exerciseIdByName = new Map((clientExercises || []).map(exercise => [String(exercise.name || '').trim().toLowerCase(), exercise.id]));
+  for (const rawExercise of (rawExercises || [])) {
+    const rawId = typeof rawExercise?.id === 'string' || typeof rawExercise?.id === 'number' ? String(rawExercise.id) : '';
+    if (!rawId || rawId.length > 200 || Object.prototype.hasOwnProperty.call(idMap, rawId)) continue;
+    const exercise = coachingSanitizeImportedExercise(rawExercise);
+    if (!exercise) continue;
+    const nameKey = exercise.name.toLowerCase();
+    let exerciseId = exerciseIdByName.get(nameKey);
+    if (!exerciseId) {
+      exerciseId = LB.uid();
+      exerciseIdByName.set(nameKey, exerciseId);
+      newExercises.push({ id: exerciseId, ...exercise });
+    }
+    idMap[rawId] = exerciseId;
+  }
+  return { idMap, newExercises };
+}
+
+function coachingSanitizeImportedPlanItem(item, idMap) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return null;
+  const mappedExerciseId = idMap[String(item.exId || '')];
+  if (!mappedExerciseId) return null;
+  const result = { exId: mappedExerciseId };
+  const sets = coachingFiniteNumber(item.sets, 0, COACH_PLAN_IMPORT_LIMITS.setsPerItem);
+  const reps = coachingFiniteNumber(item.reps, 0, 1000);
+  const repsMax = coachingFiniteNumber(item.repsMax, 0, 1000);
+  const progressionOffset = coachingFiniteNumber(item.progressionOffset, -1000, 1000);
+  if (sets != null) result.sets = Math.round(sets);
+  if (reps != null) result.reps = Math.round(reps);
+  if (repsMax != null) result.repsMax = Math.round(repsMax);
+  if (progressionOffset != null) result.progressionOffset = Math.round(progressionOffset);
+  if (Array.isArray(item.repsPerSet)) result.repsPerSet = item.repsPerSet.slice(0, COACH_PLAN_IMPORT_LIMITS.setsPerItem).map(value => coachingFiniteNumber(value, 0, 1000)).filter(value => value != null).map(Math.round);
+  if (Array.isArray(item.timeSecPerSet)) result.timeSecPerSet = item.timeSecPerSet.slice(0, COACH_PLAN_IMPORT_LIMITS.setsPerItem).map(value => coachingFiniteNumber(value, 0, 86400)).filter(value => value != null).map(Math.round);
+  if (Array.isArray(item.plannedTechniques)) result.plannedTechniques = item.plannedTechniques.slice(0, COACH_PLAN_IMPORT_LIMITS.setsPerItem).map(value => typeof value === 'string' ? coachingSanitizeImportedLabel(value, 80) || null : null);
+  if (typeof item.supersetGroup === 'string') result.supersetGroup = coachingSanitizeImportedLabel(item.supersetGroup, 80) || null;
+  return result;
+}
+
+function coachingSanitizeImportedProgramData(programData, idMap) {
+  if (!programData || typeof programData !== 'object' || Array.isArray(programData)) return null;
+  const result = {};
+  if (programData.unit === 'kg' || programData.unit === 'lbs') result.unit = programData.unit;
+  if (typeof programData.includeDeload === 'boolean') result.includeDeload = programData.includeDeload;
+  const mainLifts = {};
+  for (const [rawId, rawLift] of Object.entries(programData.mainLifts || {}).slice(0, COACH_PLAN_IMPORT_LIMITS.exercises)) {
+    const mappedId = idMap[String(rawId)];
+    if (!mappedId || !rawLift || typeof rawLift !== 'object' || Array.isArray(rawLift)) continue;
+    const lift = {};
+    const tm = coachingFiniteNumber(rawLift.tm, 0, 100000);
+    const stall = coachingFiniteNumber(rawLift.stall, 0, 100);
+    if (tm != null) lift.tm = tm;
+    if (stall != null) lift.stall = Math.round(stall);
+    if (typeof rawLift.kind === 'string') lift.kind = coachingSanitizeImportedLabel(rawLift.kind, 24);
+    mainLifts[mappedId] = lift;
+  }
+  const tmHistory = {};
+  for (const [rawId, rawRows] of Object.entries(programData.tmHistory || {}).slice(0, COACH_PLAN_IMPORT_LIMITS.exercises)) {
+    const mappedId = idMap[String(rawId)];
+    if (!mappedId || !Array.isArray(rawRows)) continue;
+    tmHistory[mappedId] = rawRows.slice(0, COACH_PLAN_IMPORT_LIMITS.historyPerLift).filter(row => row && typeof row === 'object' && !Array.isArray(row)).map(row => {
+      const history = {};
+      const cycle = coachingFiniteNumber(row.cycle, 0, 100000);
+      const tm = coachingFiniteNumber(row.tm, 0, 100000);
+      if (cycle != null) history.cycle = Math.round(cycle);
+      if (tm != null) history.tm = tm;
+      if (typeof row.reason === 'string') history.reason = coachingSanitizeImportedLabel(row.reason, 32);
+      return history;
+    });
+  }
+  if (Object.keys(mainLifts).length) result.mainLifts = mainLifts;
+  if (Object.keys(tmHistory).length) result.tmHistory = tmHistory;
+  return Object.keys(result).length ? result : null;
+}
+
+function coachingSanitizeImportedPlanLabels(schedule, idMap) {
+  if (!schedule || typeof schedule !== 'object' || Array.isArray(schedule)) return null;
+  const cleanDay = day => {
+    if (!day || typeof day !== 'object' || Array.isArray(day)) return null;
+    const items = Array.isArray(day.items) ? day.items.map(item => coachingSanitizeImportedPlanItem(item, idMap)) : null;
+    if (!items || items.some(item => !item)) return null;
+    return {
+      name: coachingSanitizeImportedLabel(day.name, 80) || 'Training day',
+      ...(Number.isInteger(day.weekday) && day.weekday >= 0 && day.weekday <= 6 ? { weekday: day.weekday } : {}),
+      items,
+    };
+  };
+  const days = Array.isArray(schedule.days) ? schedule.days.map(cleanDay) : null;
+  if (!days || days.some(day => !day)) return null;
+  const result = {
+    name: coachingSanitizeImportedLabel(schedule.name, 120) || 'Imported plan',
+    days,
+  };
+  if (typeof schedule.is_flex === 'boolean') result.is_flex = schedule.is_flex;
+  const sessionsPerWeek = coachingFiniteNumber(schedule.sessions_per_week, 1, COACH_PLAN_IMPORT_LIMITS.days);
+  const mesocycleWeeks = coachingFiniteNumber(schedule.mesocycle_weeks, 1, 104);
+  const startRir = coachingFiniteNumber(schedule.mesocycle_start_rir, -10, 20);
+  const endRir = coachingFiniteNumber(schedule.mesocycle_end_rir, -10, 20);
+  if (sessionsPerWeek != null) result.sessions_per_week = Math.round(sessionsPerWeek);
+  if (mesocycleWeeks != null) result.mesocycle_weeks = Math.round(mesocycleWeeks);
+  if (startRir != null) result.mesocycle_start_rir = startRir;
+  if (endRir != null) result.mesocycle_end_rir = endRir;
+  if (typeof schedule.mesocycle_rir_enabled === 'boolean') result.mesocycle_rir_enabled = schedule.mesocycle_rir_enabled;
+  if (typeof schedule.mesocycle_autoregulate === 'boolean') result.mesocycle_autoregulate = schedule.mesocycle_autoregulate;
+  if (schedule.mesocycle_autoregulate_mode === 'load') result.mesocycle_autoregulate_mode = 'load';
+  if (schedule.program_type === '531') result.program_type = '531';
+  const programData = coachingSanitizeImportedProgramData(schedule.program_data, idMap);
+  if (programData && result.program_type === '531') result.program_data = programData;
+  if (Array.isArray(schedule.versions)) {
+    const seenDates = new Set();
+    const versions = schedule.versions.map(version => {
+      const validFrom = typeof version?.validFrom === 'string' ? version.validFrom : '';
+      const parsedDate = /^\d{4}-\d{2}-\d{2}$/.test(validFrom) ? Date.parse(`${validFrom}T00:00:00Z`) : NaN;
+      if (!version || typeof version !== 'object' || Array.isArray(version) || !Number.isFinite(parsedDate) || new Date(parsedDate).toISOString().slice(0, 10) !== validFrom) return null;
+      if (seenDates.has(validFrom)) return null;
+      const versionDays = Array.isArray(version.days) ? version.days.map(cleanDay) : null;
+      if (!versionDays || versionDays.some(day => !day)) return null;
+      seenDates.add(validFrom);
+      const cleanVersion = { validFrom, days: versionDays };
+      for (const key of ['cycleOffset', 'flexCycleAnchor', 'flexStartIndex']) {
+        const value = coachingFiniteNumber(version[key], 0, 1000000);
+        if (value != null) cleanVersion[key] = Math.round(value);
+      }
+      return cleanVersion;
+    });
+    if (versions.some(version => !version)) return null;
+    result.versions = versions.sort((a, b) => b.validFrom.localeCompare(a.validFrom));
+  }
+  return result;
+}
+
+async function coachingInsertImportedPlan(coachingId, clientId, schedule, newExercises) {
+  await LB.pushTrainingPlanToClient({ coachingId, clientId, schedule, exercises: newExercises });
+}
+
 function CoachClientScreen({ store, setStore, userId, go, coachingId, clientId, clientName, checkinAt, initialTab, backRoute = 'settings', hideTopBar = false, isSelf = false }) {
   const TABS = [
     { id: 'overview',   icon: 'fa-chart-bar',         label: 'Overview' },
@@ -1164,6 +1406,7 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   const [ownPlanPickerOpen, setOwnPlanPickerOpen] = useStateC(false);
   const [ownImportBusy, setOwnImportBusy] = useStateC(false);
   const [ownImportingId, setOwnImportingId] = useStateC(null); // which plan row is mid-import
+  const [fileImportBusy, setFileImportBusy] = useStateC(false);
 
   // Multi-device autosave (screens-schedule.jsx's ScheduleEditScreen) stores a
   // coach's in-progress edit of a client's plan under the COACH's own account
@@ -1229,74 +1472,47 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
 
   const importPlan = (e) => {
     const file = e.target.files[0];
-    if (!file) return;
+    if (!file || fileImportBusy) return;
     e.target.value = '';
+    if (file.size > COACH_PLAN_IMPORT_LIMITS.bytes) {
+      UI.alert('Plan file is too large.');
+      return;
+    }
+    setFileImportBusy(true);
     const reader = new FileReader();
     reader.onload = async (ev) => {
       try {
-        const data = JSON.parse(ev.target.result);
-        if (data.type !== 'zane-plan' || !data.schedule) { UI.alert('Invalid plan file.'); return; }
-        const idMap = {};
-        const newExercises = [];
-        (data.exercises || []).forEach(ex => {
-          const existing = (clientStore.exercises || []).find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
-          if (existing) {
-            idMap[ex.id] = existing.id;
-          } else {
-            const newId = LB.uid();
-            idMap[ex.id] = newId;
-            // Carry the behavior flags so imported time/cardio/bodyweight
-            // exercises keep their logging mode (mirrors the own-side import).
-            newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
-          }
-        });
-        const remapDays = (days) => (days || []).map(d => ({
-          ...d,
-          id: LB.uid(),
-          items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })),
-        }));
+        let data;
+        try { data = JSON.parse(String(ev.target?.result || '')); }
+        catch (_) { throw new Error('Could not read plan file.'); }
+        const validationError = coachingPlanImportValidationError(data, file.size);
+        if (validationError) throw new Error(validationError);
+        const { idMap, newExercises } = coachingPrepareImportedExercises(data.exercises, clientStore.exercises || []);
+        const importedSchedule = coachingSanitizeImportedPlanLabels(data.schedule, idMap);
+        if (!importedSchedule) throw new Error('The plan contains invalid or unknown exercise references.');
+        const assignDayIds = days => (days || []).map(day => ({ ...day, id: LB.uid() }));
         const sch = {
-          ...data.schedule,
+          ...importedSchedule,
           id: LB.uid(),
           archived: false,
-          days: remapDays(data.schedule.days),
-          versions: (data.schedule.versions || []).map(v => ({ ...v, days: remapDays(v.days) })),
+          days: assignDayIds(importedSchedule.days),
         };
-        // Remap 5/3/1 program_data (keyed by exId) and reset the cycle-bump gate,
-        // exactly like the own-side import.
-        if (sch.program_data && typeof sch.program_data === 'object') {
-          const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
-          const pd = { ...sch.program_data };
-          if (pd.mainLifts) pd.mainLifts = remapKeys(pd.mainLifts);
-          if (pd.tmHistory) pd.tmHistory = remapKeys(pd.tmHistory);
-          delete pd.bumpedCycle;
-          sch.program_data = pd;
-        }
-        if (newExercises.length) {
-          const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
-          if (exErr) { UI.alert(`Import failed: ${exErr.message}`); return; }
-        }
-        // Insert the FULL schedule (mesocycle_*, program_*, is_flex,
-        // sessions_per_week, versions), minus the local-only `mode` field, so the
-        // DB row matches the in-memory plan instead of collapsing to a bare day
-        // list on the next reload. If this insert fails the new exercises above
-        // are left orphaned, but surfacing the error beats a silent partial save.
-        // Build the insert row without object-rest (`const {mode, ...schRow}`):
-        // Babel compiles object-rest to a per-file `_excluded` array whose global
-        // name collides across all classic scripts in the shared precompile scope,
-        // and a stray one here corrupted the Btn component's prop filtering
-        // app-wide (see the Btn note in ui.jsx). A shallow copy + delete is
-        // equivalent and generates no `_excluded`.
-        const schRow = { ...sch };
-        delete schRow.mode;
-        const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
-        if (schErr) { UI.alert(`Import failed: ${schErr.message}`); return; }
+        if (Array.isArray(importedSchedule.versions)) sch.versions = importedSchedule.versions.map(version => ({ ...version, days: assignDayIds(version.days) }));
+        await coachingInsertImportedPlan(coachingId, clientId, sch, newExercises);
         setClientStore(s => ({
           ...s,
           exercises: [...(s.exercises || []), ...newExercises],
           schedules: [...(s.schedules || []), sch],
         }));
-      } catch (_) { UI.alert('Could not read plan file.'); }
+      } catch (error) {
+        UI.alert(`Import failed: ${error?.message || 'Could not read plan file.'}`);
+      } finally {
+        setFileImportBusy(false);
+      }
+    };
+    reader.onerror = () => {
+      setFileImportBusy(false);
+      UI.alert('Could not read plan file.');
     };
     reader.readAsText(file);
   };
@@ -1308,48 +1524,34 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
   // ACTIVATE button below already covers that, same as NEW PLAN and the JSON
   // import above (both just add; activation is always a separate step here).
   const importFromOwnPlan = async (sourceSch) => {
+    if (ownImportBusy) return;
     setOwnImportBusy(true);
     setOwnImportingId(sourceSch.id);
     let copyName = '';
     try {
-      const copy = JSON.parse(JSON.stringify(sourceSch));
+      const rawCopy = JSON.parse(JSON.stringify(sourceSch));
+      delete rawCopy.versions;
+      const exIds = new Set();
+      (rawCopy.days || []).forEach(day => (day.items || []).forEach(item => { if (item.exId) exIds.add(item.exId); }));
+      const sourceExercises = (store.exercises || []).filter(exercise => exIds.has(exercise.id));
+      const validationError = coachingPlanImportValidationError({ type: 'zane-plan', schedule: rawCopy, exercises: sourceExercises });
+      if (validationError) throw new Error(validationError);
+      const { idMap, newExercises } = coachingPrepareImportedExercises(sourceExercises, clientStore.exercises || []);
+      const copy = coachingSanitizeImportedPlanLabels(rawCopy, idMap);
+      if (!copy) throw new Error('This plan contains invalid or unknown exercise references.');
       copy.id = LB.uid();
       copy.archived = false;
       // My Plans / Client Templates is a bucket on the coach's own Plan tab;
       // meaningless once the plan lands in the client's account.
       copy.is_template = false;
-      delete copy.versions;
-      if (copy.program_data) delete copy.program_data.bumpedCycle;
       copyName = copy.name || '';
-      const exIds = new Set();
-      (copy.days || []).forEach(d => (d.items || []).forEach(it => { if (it.exId) exIds.add(it.exId); }));
-      const idMap = {};
-      const newExercises = [];
-      (store.exercises || []).filter(ex => exIds.has(ex.id)).forEach(ex => {
-        const existing = (clientStore.exercises || []).find(x => x.name.trim().toLowerCase() === ex.name.trim().toLowerCase());
-        if (existing) { idMap[ex.id] = existing.id; return; }
-        const newId = LB.uid();
-        idMap[ex.id] = newId;
-        newExercises.push({ id: newId, name: ex.name, tags: ex.tags || [], note: ex.note || '', category: ex.category || null, unilateral: ex.unilateral || false, equipment: ex.equipment || null, progression_reps: ex.progression_reps || null, movement_type: ex.movement_type || null, log_mode: ex.log_mode || null, no_weight_reps: ex.no_weight_reps || false, pull_bodyweight: ex.pull_bodyweight || false, bodyweight_mode: ex.bodyweight_mode || null, youtube_url: ex.youtube_url || null });
-      });
-      copy.days = (copy.days || []).map(d => ({ ...d, id: LB.uid(), items: (d.items || []).map(it => ({ ...it, exId: idMap[it.exId] || it.exId })) }));
-      if (copy.program_data && typeof copy.program_data === 'object') {
-        const remapKeys = (obj) => { const out = {}; for (const k of Object.keys(obj || {})) out[idMap[k] || k] = obj[k]; return out; };
-        if (copy.program_data.mainLifts) copy.program_data.mainLifts = remapKeys(copy.program_data.mainLifts);
-        if (copy.program_data.tmHistory) copy.program_data.tmHistory = remapKeys(copy.program_data.tmHistory);
-      }
-      if (newExercises.length) {
-        const { error: exErr } = await LB.supabase.from('zane_exercises').insert(newExercises.map(ex => ({ ...ex, user_id: clientId })));
-        if (exErr) { await confirm(`Could not import "${copyName}". ${exErr.message || ''}`.trim(), { title: 'Import failed', ok: 'OK', cancel: null }); return; }
-        // Reflect the inserted exercises locally right away, so a later schedule
-        // failure plus a retry dedupes against them instead of inserting a second set.
-        setClientStore(s => ({ ...s, exercises: [...(s.exercises || []), ...newExercises] }));
-      }
-      const schRow = { ...copy };
-      delete schRow.mode;
-      const { error: schErr } = await LB.supabase.from('zane_schedules').insert({ ...schRow, user_id: clientId });
-      if (schErr) { await confirm(`Could not import "${copyName}". ${schErr.message || ''}`.trim(), { title: 'Import failed', ok: 'OK', cancel: null }); return; }
-      setClientStore(s => ({ ...s, schedules: [...(s.schedules || []), copy] }));
+      copy.days = copy.days.map(day => ({ ...day, id: LB.uid() }));
+      await coachingInsertImportedPlan(coachingId, clientId, copy, newExercises);
+      setClientStore(s => ({
+        ...s,
+        exercises: [...(s.exercises || []), ...newExercises],
+        schedules: [...(s.schedules || []), copy],
+      }));
       setOwnPlanPickerOpen(false);
       await confirm(`Added "${copyName}" to ${clientName}'s plans.`, { title: 'Imported', ok: 'OK', cancel: null });
     } catch (e) {
@@ -1373,13 +1575,14 @@ function ClientPlanTab({ store, setStore, clientStore, setClientStore, clientId,
           <i className="fa-solid fa-plus" style={{ fontSize: 9 }} />
           NEW PLAN
         </button>
-        <input ref={importRef} type="file" accept=".json" style={{ display: 'none' }} onChange={importPlan} />
+        <input ref={importRef} type="file" accept=".json,application/json" disabled={fileImportBusy || ownImportBusy} style={{ display: 'none' }} onChange={importPlan} />
         <button
+          disabled={fileImportBusy || ownImportBusy}
           onClick={() => setImportChoiceOpen(true)}
-          style={{ padding: '7px 14px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}
+          style={{ padding: '7px 14px', borderRadius: 6, border: `var(--hair-width) solid ${UI.hairStrong}`, background: 'transparent', color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11, fontWeight: 600, letterSpacing: '0.06em', cursor: fileImportBusy || ownImportBusy ? 'default' : 'pointer', opacity: fileImportBusy || ownImportBusy ? 0.6 : 1, display: 'flex', alignItems: 'center', gap: 6 }}
         >
           <i className="fa-solid fa-file-import" style={{ fontSize: 9 }} />
-          IMPORT
+          {fileImportBusy ? 'IMPORTING…' : 'IMPORT'}
         </button>
       </div>
 

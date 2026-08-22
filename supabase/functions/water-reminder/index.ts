@@ -1,5 +1,7 @@
 import { sendNotification } from '../_shared/notifications.ts';
 import { localClock } from '../_shared/time.ts';
+import { fetchWithTimeout } from '../_shared/fetch.ts';
+import { claimReminderDelivery, finishReminderDelivery, pruneReminderDeliveries } from '../_shared/reminder-delivery.ts';
 
 // Water reminder cron function. Mirrors the training `reminder` function but
 // computes a hydration ramp: for each opted-in user it places "now" on the
@@ -25,7 +27,7 @@ const COOLDOWN_MS = 60 * 60 * 1000;    // at most one nudge per hour per user
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -33,7 +35,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
       'Content-Type': 'application/json',
       ...(options.headers ?? {}),
     },
-  });
+  }, 12000);
 }
 
 function hhmmToDecimal(t: string): number {
@@ -96,6 +98,20 @@ async function sendReminders() {
     const title = 'Zane · Hydration';
     const message = `You're behind on water. Time for about ${missing} ml. 💧`;
 
+    let claim;
+    try {
+      claim = await claimReminderDelivery(dbFetch, {
+        kind: 'water',
+        userId: row.user_id,
+        claimedAt: new Date(now).toISOString(),
+        expectedAt: row.water_last_push_at,
+      });
+    } catch (e) {
+      console.error(`[water-reminder] claim error for ${row.user_id}:`, e);
+      continue;
+    }
+    if (!claim) continue;
+
     // Respect the user's channel choice: when Pushover is enabled (use_pushover
     // and a key set) send only Pushover, otherwise send native Web Push. This
     // matches the use_pushover "instead of Web Push" semantics used elsewhere,
@@ -109,24 +125,13 @@ async function sendReminders() {
       logPrefix: 'water-reminder',
       ttl: 10800,
     });
-    if (!delivered) continue;
-
-    // Stamp the throttle only after a successful handoff. fetch only rejects on transport failure, so a
-    // PATCH that comes back 4xx/5xx resolves like a success and the write
-    // silently never happened. Check the status explicitly, the same way
-    // medication-reminder checks its state patch, otherwise a broken throttle
-    // looks exactly like a working one in the logs.
     try {
-      const res = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
-        method: 'PATCH',
-        headers: { 'Prefer': 'return=minimal' },
-        body: JSON.stringify({ water_last_push_at: new Date(now).toISOString() }),
+      const finalized = await finishReminderDelivery(dbFetch, {
+        kind: 'water', userId: row.user_id, claim, delivered,
       });
-      if (!res.ok) {
-        console.error(`[water-reminder] throttle write failed for ${row.user_id}: ${res.status} ${await res.text().catch(() => '')}`);
-      }
+      if (!finalized) console.error(`[water-reminder] claim finalization lost for ${row.user_id}`);
     } catch (e) {
-      console.error(`[water-reminder] throttle write error for ${row.user_id}:`, e);
+      console.error(`[water-reminder] claim finalization error for ${row.user_id}:`, e);
     }
   }
 }
@@ -151,6 +156,11 @@ Deno.serve(async (req) => {
 
   if (req.method === 'POST') {
     await sendReminders();
+    try {
+      await pruneReminderDeliveries(dbFetch);
+    } catch (error) {
+      console.error('[water-reminder] retention failed:', error);
+    }
     return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });
   }
   return new Response(JSON.stringify({ ok: true }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' } });

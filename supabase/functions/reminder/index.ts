@@ -1,4 +1,7 @@
 import { sendNotification } from '../_shared/notifications.ts';
+import { fetchWithTimeout } from '../_shared/fetch.ts';
+import { claimReminderDelivery, finishReminderDelivery, pruneReminderDeliveries } from '../_shared/reminder-delivery.ts';
+import { drainChatAttachmentCleanup } from '../_shared/chat-attachment-cleanup.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -9,7 +12,7 @@ const corsHeaders = {
 function dbFetch(path: string, options: RequestInit = {}) {
   const base = Deno.env.get('SUPABASE_URL') ?? '';
   const key  = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
-  return fetch(`${base}/rest/v1/${path}`, {
+  return fetchWithTimeout(`${base}/rest/v1/${path}`, {
     ...options,
     headers: {
       'Authorization': `Bearer ${key}`,
@@ -17,7 +20,7 @@ function dbFetch(path: string, options: RequestInit = {}) {
       'Content-Type': 'application/json',
       ...(options.headers ?? {}),
     },
-  });
+  }, 12000);
 }
 
 async function sendReminders() {
@@ -42,6 +45,20 @@ async function sendReminders() {
     const title = 'Zane · Training Reminder';
     const message = "Training day ahead. Time to get after it! 💪";
 
+    let claim;
+    try {
+      claim = await claimReminderDelivery(dbFetch, {
+        kind: 'generic',
+        userId: row.user_id,
+        claimedAt: new Date(now).toISOString(),
+        expectedAt: row.next_reminder_at,
+      });
+    } catch (e) {
+      console.error(`[reminder] claim error for ${row.user_id}:`, e);
+      continue;
+    }
+    if (!claim) continue;
+
     // Respect the user's channel choice: Pushover only when they turned it on
     // (use_pushover) and set a key, otherwise native Web Push. This used to send
     // BOTH whenever a key existed, so a Pushover user got the same reminder
@@ -56,18 +73,13 @@ async function sendReminders() {
       logPrefix: 'reminder',
       ttl: 43200,
     });
-    if (!delivered) continue;
-
-    // Only clear after the provider accepted the handoff. A failed delivery
-    // remains due and can retry on the next cron tick until the one-hour
-    // staleness backstop expires.
-    const clearResp = await dbFetch(`zane_user_settings?user_id=eq.${row.user_id}`, {
-      method: 'PATCH',
-      headers: { 'Prefer': 'return=minimal' },
-      body: JSON.stringify({ next_reminder_at: null }),
-    }).catch(e => { console.error(`[reminder] clear error for ${row.user_id}:`, e); return null; });
-    if (clearResp && !clearResp.ok) {
-      console.error(`[reminder] clear failed for ${row.user_id}: ${clearResp.status} ${await clearResp.text().catch(() => '')}`);
+    try {
+      const finalized = await finishReminderDelivery(dbFetch, {
+        kind: 'generic', userId: row.user_id, claim, delivered,
+      });
+      if (!finalized) console.error(`[reminder] claim finalization lost for ${row.user_id}`);
+    } catch (e) {
+      console.error(`[reminder] claim finalization error for ${row.user_id}:`, e);
     }
   }
 }
@@ -94,6 +106,21 @@ Deno.serve(async (req) => {
   // Allow manual trigger via POST for testing
   if (req.method === 'POST') {
     await sendReminders();
+    try {
+      await pruneReminderDeliveries(dbFetch);
+    } catch (error) {
+      console.error('[reminder] retention failed:', error);
+    }
+    // Chat deletions commit their tombstones before private Storage cleanup.
+    // Retrying this queue from an existing one-minute cron target makes object
+    // cleanup durable even when the user-triggered Edge invocation is cut off
+    // after the database deletion has already committed.
+    try {
+      const cleanup = await drainChatAttachmentCleanup();
+      if (cleanup.failed > 0) console.error('[reminder] chat attachment cleanup still pending:', cleanup);
+    } catch (error) {
+      console.error('[reminder] chat attachment cleanup failed:', error);
+    }
     return new Response(JSON.stringify({ ok: true }), {
       headers: { ...corsHeaders, 'Content-Type': 'application/json' },
     });
