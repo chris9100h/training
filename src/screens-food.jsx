@@ -495,6 +495,29 @@ function fdApplyFoodBarcodeOverrides(results, overrides) {
   });
 }
 
+// The barcode editor keeps its fields as strings, while the search result is
+// rounded for display (P/C/F to one decimal, kcal to a whole number). A click
+// on "Save as favorite" can arrive in the same event turn as the last input
+// change, before React has committed `macroOverride: true`. Compare the values
+// themselves as a second, synchronous source of truth so that the favorite and
+// the log never fall back to the provider snapshot in that small window.
+function fdBarcodeMacroOverrideActive(item, values) {
+  if (!item?.macroEditable) return !!item?.macroOverride;
+  if (item.macroOverride) return true;
+  const sameDisplayedValue = (original, current, decimals) => {
+    const a = original == null || original === '' ? null : Number(original);
+    const b = current == null || current === '' ? null : Number(current);
+    if (a == null || !Number.isFinite(a)) return b == null;
+    if (b == null || !Number.isFinite(b)) return false;
+    const round = decimals === 0 ? Math.round : fdRound1;
+    return Math.abs(round(a) - round(b)) < 0.001;
+  };
+  return !sameDisplayedValue(item.kcalPer100g, values?.kcalPer100g, 0)
+    || !sameDisplayedValue(item.proteinPer100g, values?.proteinPer100g, 1)
+    || !sameDisplayedValue(item.carbsPer100g, values?.carbsPer100g, 1)
+    || !sameDisplayedValue(item.fatPer100g, values?.fatPer100g, 1);
+}
+
 function fdRememberFoodBarcodeOverride(setStore, item, values) {
   const source = String(item?.source || '').toLowerCase();
   const sourceId = String(item?.sourceId || '').trim();
@@ -3765,7 +3788,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // flows straight into the scaled totals; for a real DB food they come
     // from the fixed rates on pendingFood, its own source's energy value,
     // never derived from macros.
-    const custom = !!pendingFood.custom || !!pendingFood.macroOverride;
+    const barcodeOverride = fdBarcodeMacroOverrideActive(pendingFood, {
+      kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+      carbsPer100g: c100Str, fatPer100g: f100Str,
+    });
+    const custom = !!pendingFood.custom || barcodeOverride;
     const rate = (s, key) => {
       if (!custom) return pendingFood[key] || 0;
       const n = parseFloat(s);
@@ -3782,8 +3809,15 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // pendingFood's own fixed per-100g energy value, so a high-fiber food
     // logged via search/barcode/recent respects net-carb mode the same way
     // a Custom Item with identical macros already does.
+    // When kcal has not been typed directly, derive it from the current
+    // visible macro fields here as well as in useAutoDerivedCalories. That
+    // avoids one stale-effect frame when the user edits a macro and taps the
+    // favorite button immediately afterwards.
+    const caloriesPer100 = custom && !kcal100Touched
+      ? LB.caloriesFromMacros(fdNum(p100Str), fdNum(c100Str), fdNum(f100Str), netCarbs ? pendingFood.fiberPer100g : null)
+      : fdNum(kcal100Str);
     const calories = custom
-      ? Math.round((fdNum(kcal100Str) || 0) * factor)
+      ? Math.round((caloriesPer100 || 0) * factor)
       : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0);
     // Migration 0204 extras. Scaled by the same factor, straight off the food
     // (never user-editable like P/C/F: they play no part in the calorie math,
@@ -3794,11 +3828,11 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     const satFat = sc1(pendingFood.satFatPer100g);
     const sodiumMg = pendingFood.sodiumMgPer100g == null ? null : Math.round(pendingFood.sodiumMgPer100g * factor);
     return { calories, protein, carbs, fat, fiber, sugar, satFat, sodiumMg };
-  }, [pendingFood, qtyStr, qtyExactG, qtyUseOz, p100Str, c100Str, f100Str, kcal100Str, store.settings?.netCarbs]);
+  }, [pendingFood, qtyStr, qtyExactG, qtyUseOz, p100Str, c100Str, f100Str, kcal100Str, kcal100Touched, store.settings?.netCarbs]);
 
   // A scanned custom item needs a name before it can be logged/favorited; a
   // DB food always has one, so this only ever gates the custom path.
-  const qtyNameMissing = !!(pendingFood && (pendingFood.custom || pendingFood.macroOverride)) && !String(pendingFood.name || '').trim();
+  const qtyNameMissing = !!(pendingFood && (pendingFood.custom || pendingFood.macroOverride || pendingFood.macroEditable)) && !String(pendingFood.name || '').trim();
 
   // Every call site that opens the quantity sheet for a (possibly new)
   // pendingFood must go through this instead of setQtySheetOpen(true)
@@ -3877,7 +3911,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
     // A scanned label rides through the quantity sheet as a custom item
     // (foodId null, source 'custom'): it has per-100g rates to scale by, but
     // no shared-cache identity, so it must never be cached or keyed by source.
-    const custom = !!pendingFood.custom || !!pendingFood.macroOverride;
+    const custom = !!pendingFood.custom || fdBarcodeMacroOverrideActive(pendingFood, {
+      kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+      carbsPer100g: c100Str, fatPer100g: f100Str,
+    });
     const name = (pendingFood.name || '').trim();
     if (custom && !name) return null;
     return {
@@ -3934,6 +3971,19 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   // reflects (or removes) the existing one.
   async function toggleFavorite(entry) {
     if (!entry) return;
+    const barcodeOverride = fdBarcodeMacroOverrideActive(pendingFood, {
+      kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+      carbsPer100g: c100Str, fatPer100g: f100Str,
+    });
+    // Persist a barcode correction from the favorite action itself. Previously
+    // this only happened when the user also logged the item, so a correction
+    // followed by "Save as favorite" could be lost on the next scan/device.
+    if (barcodeOverride) {
+      fdRememberFoodBarcodeOverride(setStore, pendingFood, {
+        kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+        carbsPer100g: c100Str, fatPer100g: f100Str,
+      });
+    }
     const already = favedId || existingFavId(entry.foodId, entry.foodName);
     if (already) {
       setFavedId(null);
@@ -4030,7 +4080,10 @@ function FoodScreen({ store, setStore, go, userId, date }) {
   async function confirmLogFood(planned = false) {
     const built = buildQtyEntry();
     if (!built) return;
-    if (pendingFood?.macroOverride) {
+    if (fdBarcodeMacroOverrideActive(pendingFood, {
+      kcalPer100g: kcal100Str, proteinPer100g: p100Str,
+      carbsPer100g: c100Str, fatPer100g: f100Str,
+    })) {
       fdRememberFoodBarcodeOverride(setStore, pendingFood, {
         kcalPer100g: kcal100Str, proteinPer100g: p100Str,
         carbsPer100g: c100Str, fatPer100g: f100Str,
@@ -11517,7 +11570,10 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     if (!qty || qty <= 0) return null;
     const factor = qty / 100;
     const netCarbs = !!store.settings?.netCarbs;
-    const corrected = !!qtyItem.macroOverride;
+    const corrected = fdBarcodeMacroOverrideActive(qtyItem, {
+      kcalPer100g: qtyKcal100Str, proteinPer100g: qtyP100Str,
+      carbsPer100g: qtyC100Str, fatPer100g: qtyF100Str,
+    });
     const protein = fdRound1((corrected ? (fdNum(qtyP100Str) || 0) : (qtyItem.proteinPer100g || 0)) * factor);
     const carbs = fdRound1((corrected ? (fdNum(qtyC100Str) || 0) : (qtyItem.carbsPer100g || 0)) * factor);
     const fat = fdRound1((corrected ? (fdNum(qtyF100Str) || 0) : (qtyItem.fatPer100g || 0)) * factor);
@@ -11527,20 +11583,27 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     const sugar = qtyItem.sugarPer100g != null ? fdRound1(qtyItem.sugarPer100g * factor) : null;
     const satFat = qtyItem.satFatPer100g != null ? fdRound1(qtyItem.satFatPer100g * factor) : null;
     const sodiumMg = qtyItem.sodiumMgPer100g != null ? Math.round(qtyItem.sodiumMgPer100g * factor) : null;
+    const caloriesPer100 = corrected && !qtyKcal100Touched
+      ? LB.caloriesFromMacros(fdNum(qtyP100Str), fdNum(qtyC100Str), fdNum(qtyF100Str), netCarbs ? qtyItem.fiberPer100g : null)
+      : fdNum(qtyKcal100Str);
     return {
       calories: corrected
-        ? Math.round((fdNum(qtyKcal100Str) || 0) * factor)
+        ? Math.round((caloriesPer100 || 0) * factor)
         : Math.round(LB.caloriesFromMacros(protein, carbs, fat, netCarbs ? fiber : null) || 0),
       protein, carbs, fat, fiber, sugar, satFat, sodiumMg,
     };
-  }, [qtyItem, qtyStr, qtyExactG, qtyUseOz, qtyP100Str, qtyC100Str, qtyF100Str, qtyKcal100Str, store.settings?.netCarbs]);
+  }, [qtyItem, qtyStr, qtyExactG, qtyUseOz, qtyP100Str, qtyC100Str, qtyF100Str, qtyKcal100Str, qtyKcal100Touched, store.settings?.netCarbs]);
   // "Add" on the quantity step: stages the item (not yet in the recipe, see
   // the "Add N ingredients" button below) and caches a not-yet-cached DB
   // food right away, same rule confirmLogFood/toggleFavorite use in
   // FoodScreen (a recipe is as durable a record as a favorite).
   function confirmStageItem() {
     if (!qtyItem || !qtyPreview) return;
-    if (qtyItem.macroOverride) {
+    const corrected = fdBarcodeMacroOverrideActive(qtyItem, {
+      kcalPer100g: qtyKcal100Str, proteinPer100g: qtyP100Str,
+      carbsPer100g: qtyC100Str, fatPer100g: qtyF100Str,
+    });
+    if (corrected) {
       fdRememberFoodBarcodeOverride(setStore, qtyItem, {
         kcalPer100g: qtyKcal100Str, proteinPer100g: qtyP100Str,
         carbsPer100g: qtyC100Str, fatPer100g: qtyF100Str,
@@ -11548,8 +11611,8 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
     }
     setStaged(list => [...list, {
       tempId: LB.uid(),
-      foodId: qtyItem.macroOverride || !qtyItem.sourceId ? null : `${qtyItem.source}:${qtyItem.sourceId}`,
-      foodName: qtyItem.name, brand: qtyItem.brand, source: qtyItem.macroOverride ? 'custom' : qtyItem.source,
+      foodId: corrected || !qtyItem.sourceId ? null : `${qtyItem.source}:${qtyItem.sourceId}`,
+      foodName: qtyItem.name, brand: qtyItem.brand, source: corrected ? 'custom' : qtyItem.source,
       quantityG: qtyGrams(), calories: qtyPreview.calories, protein: qtyPreview.protein,
       carbs: qtyPreview.carbs, fat: qtyPreview.fat, fiber: qtyPreview.fiber,
       sugar: qtyPreview.sugar, satFat: qtyPreview.satFat, sodiumMg: qtyPreview.sodiumMg,
@@ -11558,7 +11621,7 @@ function FdIngredientPickerOpen({ open, onClose, onAdd, store, showRecipes, excl
       // (4 pcs)" instead of a bare gram number; null for a grams-pick.
       loggedUnit: qtyUnitIdx != null ? (qtyItem.units?.[qtyUnitIdx] || null) : null,
     }]);
-    if (!qtyItem.macroOverride) ensureFoodCached(qtyItem);
+    if (!corrected) ensureFoodCached(qtyItem);
     closeQtySheet();
   }
   function removeStaged(tempId) {
