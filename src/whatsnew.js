@@ -22,6 +22,17 @@
    the weight, not a way to make everything louder. */
 window.WHATS_NEW = [
   {
+    id: 'v2.881',
+    date: '2026-08-22',
+    title: 'Your progress, your way 📸',
+    items: [
+      '📸 Progress pictures are here. Connect Google Drive under Settings → Account, then tap “Upload progress pic” in any Daily Log. Your photos stay private in your own Drive and appear in a timeline in Health.',
+      '🔒 Why Google Drive? Your personal images remain in your own storage instead of being hosted on Zane. That keeps them private and avoids turning Zane into a general image-hosting platform that would require additional moderation and compliance work.',
+      '🔁 Keep one picture per day, replace it whenever you want, and browse your progress over time in one place.',
+      '🧮 Barcode corrections now stick. Correct a scanned food’s calories or macros, save it as a favorite, and Zane will reuse your corrected values the next time you scan that barcode.'
+    ],
+  },
+  {
     id: 'v2.878',
     date: '2026-08-21',
     title: 'More control, better imports, clearer progress ✨',
