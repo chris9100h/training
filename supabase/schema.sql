@@ -8089,6 +8089,7 @@ CREATE TABLE IF NOT EXISTS public.zane_coaching_drive_connections (
   google_account_email text,
   root_folder_id text,
   overview_spreadsheet_id text,
+  progress_folder_id text,
   status text NOT NULL DEFAULT 'connected',
   archive_enabled boolean NOT NULL DEFAULT true,
   include_photos boolean NOT NULL DEFAULT false,
@@ -8219,3 +8220,66 @@ REVOKE ALL ON FUNCTION public.release_coaching_drive_worker_lease(uuid, text) FR
 GRANT EXECUTE ON FUNCTION public.release_coaching_drive_worker_lease(uuid, text) TO service_role;
 REVOKE ALL ON FUNCTION public.claim_coaching_drive_janitor(text) FROM PUBLIC, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.claim_coaching_drive_janitor(text) TO service_role;
+
+-- ── Personal Google Drive progress pictures ────────────────────────────────
+CREATE TABLE IF NOT EXISTS public.zane_drive_progress_photos (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id uuid NOT NULL,
+  photo_date date NOT NULL,
+  connection_id uuid,
+  staging_path text UNIQUE,
+  drive_file_id text,
+  file_name text NOT NULL,
+  mime_type text NOT NULL CHECK (mime_type IN ('image/jpeg','image/png','image/webp')),
+  byte_size integer NOT NULL CHECK (byte_size > 0 AND byte_size <= 8388608),
+  status text NOT NULL DEFAULT 'staged' CHECK (status IN ('staged','uploading','uploaded','failed','deleting')),
+  attempts integer NOT NULL DEFAULT 0 CHECK (attempts >= 0),
+  next_attempt_at timestamptz NOT NULL DEFAULT now(),
+  locked_at timestamptz,
+  locked_by text,
+  last_error text,
+  created_at timestamptz NOT NULL DEFAULT now(),
+  updated_at timestamptz NOT NULL DEFAULT now(),
+  uploaded_at timestamptz,
+  UNIQUE (user_id, photo_date)
+);
+CREATE INDEX IF NOT EXISTS idx_drive_progress_photos_user_date
+  ON public.zane_drive_progress_photos(user_id, photo_date DESC);
+CREATE INDEX IF NOT EXISTS idx_drive_progress_photos_due
+  ON public.zane_drive_progress_photos(status, next_attempt_at, locked_at);
+ALTER TABLE public.zane_drive_progress_photos ENABLE ROW LEVEL SECURITY;
+CREATE POLICY drive_progress_photo_select_own ON public.zane_drive_progress_photos
+  FOR SELECT TO authenticated USING (user_id = (select auth.uid()));
+REVOKE ALL ON TABLE public.zane_drive_progress_photos FROM PUBLIC, anon;
+REVOKE INSERT, UPDATE, DELETE ON TABLE public.zane_drive_progress_photos FROM authenticated;
+GRANT SELECT ON TABLE public.zane_drive_progress_photos TO authenticated;
+GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.zane_drive_progress_photos TO service_role;
+
+CREATE OR REPLACE FUNCTION public.reserve_drive_progress_photo(date, text, text, integer) RETURNS jsonb
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN '{}'::jsonb; END; $function$;
+CREATE OR REPLACE FUNCTION public.release_drive_progress_photo(uuid) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+CREATE OR REPLACE FUNCTION public.delete_owned_drive_progress_photos() RETURNS integer
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN 0; END; $function$;
+CREATE OR REPLACE FUNCTION public.claim_drive_progress_uploads(integer, text) RETURNS SETOF public.zane_drive_progress_photos
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN; END; $function$;
+CREATE OR REPLACE FUNCTION public.finish_drive_progress_upload(uuid, text, text, text, text, timestamptz) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+CREATE OR REPLACE FUNCTION public.claim_drive_progress_deletions(integer, text) RETURNS SETOF public.zane_drive_progress_photos
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN; END; $function$;
+CREATE OR REPLACE FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) RETURNS boolean
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO 'public' AS $function$ BEGIN RETURN false; END; $function$;
+REVOKE ALL ON FUNCTION public.reserve_drive_progress_photo(date, text, text, integer) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.reserve_drive_progress_photo(date, text, text, integer) TO authenticated;
+REVOKE ALL ON FUNCTION public.release_drive_progress_photo(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.release_drive_progress_photo(uuid) TO authenticated;
+REVOKE ALL ON FUNCTION public.delete_owned_drive_progress_photos() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.delete_owned_drive_progress_photos() TO authenticated;
+REVOKE ALL ON FUNCTION public.claim_drive_progress_uploads(integer, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_drive_progress_uploads(integer, text) TO service_role;
+REVOKE ALL ON FUNCTION public.finish_drive_progress_upload(uuid, text, text, text, text, timestamptz) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finish_drive_progress_upload(uuid, text, text, text, text, timestamptz) TO service_role;
+REVOKE ALL ON FUNCTION public.claim_drive_progress_deletions(integer, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.claim_drive_progress_deletions(integer, text) TO service_role;
+REVOKE ALL ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.finish_drive_progress_deletion(uuid, text, boolean, text) TO service_role;

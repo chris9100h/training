@@ -99,6 +99,7 @@ const EXCLUDED = {
   zane_coaching_drive_photo_cleanup: 'service-only staging cleanup tombstones; operational rows rebuilt by the Drive janitor',
   zane_coaching_drive_worker_leases: 'short-lived service-only Drive worker leases; operational coordination state, never user content',
   zane_coaching_drive_maintenance: 'short-lived service-only Drive janitor lease; operational coordination state, never user content',
+  zane_drive_progress_photos: 'Drive-backed progress-picture metadata and upload queue; the image bytes remain in the user-owned Drive and operational rows are recreated on upload, so provider IDs and retry state are not portable backup data',
 };
 
 // Columns that legitimately never round-trip.
