@@ -1,6 +1,7 @@
--- Clear the two live feature-map layers only when both still match the exact
--- semantic snapshots that the bake tool wrote into the generated catalog.
--- Timestamps and JSON object key order do not participate in the comparison.
+-- Replace the first version's table lock with a transaction-scoped advisory
+-- lock. Supabase's branch migration validator runs function definitions in an
+-- autocommit context where LOCK TABLE is rejected before a fresh branch can
+-- finish replaying the migration chain.
 
 CREATE OR REPLACE FUNCTION public.clear_feature_map_layers_if_unchanged(
   p_expected_draft jsonb,
@@ -24,10 +25,6 @@ BEGIN
     RAISE EXCEPTION 'feature map snapshots must be JSON arrays';
   END IF;
 
-  -- Supabase validates migration-defined functions in autocommit mode.
-  -- A top-level LOCK TABLE is rejected there, while this advisory transaction
-  -- lock keeps concurrent bake calls serialized without requiring an explicit
-  -- transaction block in the migration itself.
   PERFORM pg_catalog.pg_advisory_xact_lock(
     pg_catalog.hashtextextended('zane_feature_map_bake', 732493)
   );

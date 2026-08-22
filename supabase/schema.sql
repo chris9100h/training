@@ -9330,9 +9330,11 @@ BEGIN
     RAISE EXCEPTION 'feature map snapshots must be JSON arrays';
   END IF;
 
-  LOCK TABLE public.zane_feature_map,
-             public.zane_feature_map_published
-    IN SHARE ROW EXCLUSIVE MODE;
+  -- Supabase validates migration-defined functions in autocommit mode.
+  -- Serialize concurrent bake calls with a transaction-scoped advisory lock.
+  PERFORM pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('zane_feature_map_bake', 732493)
+  );
 
   SELECT coalesce(
     jsonb_agg(
