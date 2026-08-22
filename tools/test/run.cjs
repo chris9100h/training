@@ -15,6 +15,7 @@ const suites = [
   'reminder-time.test.cjs',
   'notification-delivery.test.cjs',
   'store.test.cjs',
+  'keyboard-viewport.test.cjs',
 ];
 const configuredTimeout = Number(process.env.ZANE_TEST_SUITE_TIMEOUT_MS);
 const suiteTimeoutMs = Number.isFinite(configuredTimeout) && configuredTimeout >= 1000

@@ -77,6 +77,39 @@ function localViewportLayerPosition() {
     : 'fixed';
 }
 
+// How much bottom space a full-height position:fixed overlay has to reserve
+// for the on-screen keyboard. Two separate questions hide in here and getting
+// them confused is what broke every text field on Android:
+//
+//   "is a keyboard up, and how tall is it?"  -> keyboardGap
+//   "how much of MY layer does it cover?"    -> reserve
+//
+// A fixed layer is laid out in the LAYOUT viewport, and the two mobile
+// browsers disagree about what the keyboard does to that viewport:
+//
+//   Chrome on Android honours the interactive-widget=resizes-content in our
+//   viewport meta and shrinks the layout viewport itself, so a fixed overlay
+//   already stops above the keys and covers nothing. reserve = 0.
+//   iOS leaves the layout viewport at full height and lets the keyboard sit
+//   on top, so the same overlay really does run on behind it, and the whole
+//   keyboard has to be reserved.
+//
+// Measuring the covered part answers both without sniffing the platform.
+// The baseline (the last keyboard-free layout height) is still needed for the
+// first question: where both viewports shrink together their current
+// difference is zero no matter how tall the keyboard is.
+//
+// Pure on purpose: tools/test/keyboard-viewport.test.cjs lifts this function
+// out of the file by name and runs it against both viewport modes.
+function keyboardViewportReservation({ layoutHeight, visualHeight, visualOffsetTop, baselineHeight, typing }) {
+  if (!typing) return { keyboardGap: 0, reserve: 0 };
+  const visualBottom = (visualHeight || 0) + (visualOffsetTop || 0);
+  const baseline = Math.max(baselineHeight || 0, layoutHeight || 0);
+  const keyboardGap = Math.max(0, baseline - visualBottom);
+  const covered = Math.max(0, (layoutHeight || 0) - visualBottom);
+  return { keyboardGap, reserve: Math.min(keyboardGap, covered) };
+}
+
 // Keep a focused native field above the part of the viewport that is actually
 // visible while iOS is showing its keyboard. `scrollIntoView({block:'nearest'})`
 // is not reliable here: with the app shell, a Sheet panel, and a nested list
@@ -1461,7 +1494,7 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
   React.useEffect(() => {
     if (!open) return;
     const vv = window.visualViewport;
-    let prevKb = 0, scrollTimer = null, focusTimer = null;
+    let prevKeyboardGap = 0, scrollTimer = null, focusTimer = null;
     const schedulePanelFocus = () => {
       const panel = panelNodeRef.current;
       const el = document.activeElement;
@@ -1496,24 +1529,37 @@ function Sheet({ open, onClose, title, titleColor, titleRight, children, renderC
       // height gap. Refresh the baseline only while no field is typing, which
       // also lets rotation/toolbars settle naturally between edits.
       if (!typing) keyboardBaseHeightRef.current = Math.max(currentLayoutHeight, vv.height);
-      const keyboardBaseHeight = Math.max(keyboardBaseHeightRef.current, currentLayoutHeight);
-      const kb = typing ? Math.max(0, keyboardBaseHeight - vv.height - vv.offsetTop) : 0;
+      // reserve is what this fixed backdrop actually has to pay for; keyboardGap
+      // only reports that a keyboard is up. Paying the gap instead of the
+      // reservation is what pushed every sheet off the top of the screen on
+      // Android, where the browser has already shrunk the layout viewport.
+      const { keyboardGap, reserve: kb } = keyboardViewportReservation({
+        layoutHeight: currentLayoutHeight,
+        visualHeight: vv.height,
+        visualOffsetTop: vv.offsetTop,
+        baselineHeight: keyboardBaseHeightRef.current,
+        typing,
+      });
       setKbHeight(kb);
       setVvHeight(vv.height);
       // When the native keyboard opens, the panel shrinks around it but nothing
       // re-scrolls the focused field, so a native <input> low in the panel (e.g.
       // the AMRAP variation-name box on round 2+) ends up hidden behind the
       // keyboard. Pull it back into view once the viewport settles, and only on
-      // the open transition (kb grows) so manual scrolling afterwards is left
-      // alone: a plain vv 'scroll' keeps kb steady and never triggers this.
-      if (typing && kb > prevKb + 8) {
+      // the open transition (the gap grows) so manual scrolling afterwards is
+      // left alone: a plain vv 'scroll' keeps the gap steady and never
+      // triggers this. Watch keyboardGap, not the reserved kb: where the
+      // browser shrinks the layout viewport itself, kb is legitimately 0 for
+      // every keyboard height and would never register an open transition,
+      // leaving a field low in the panel unscrolled.
+      if (typing && keyboardGap > prevKeyboardGap + 8) {
         clearTimeout(scrollTimer);
         scrollTimer = setTimeout(() => {
           const el = document.activeElement;
           keepFocusedInputVisible(el, { boundary: panelNodeRef.current });
         }, 120);
       }
-      prevKb = kb;
+      prevKeyboardGap = keyboardGap;
     };
     vv.addEventListener('resize', update);
     vv.addEventListener('scroll', update);

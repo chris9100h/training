@@ -52,6 +52,32 @@ Ein Audit (2026-07) hat jedes `position:'fixed'`-Overlay im Code auf sein exakte
 - `wizGuideOpen` addierte `env(safe-area-inset-top)` doppelt (eigener Wrapper + `AutoregGuideScreen`s eigene `TopBar`).
 - `MiniSheet`-Aufrufer `pushTarget` dimmte doppelt (eigenes `dim:true` obendrauf auf das bereits offene, dimmende `pushOpen`), abweichend vom sonst konsistenten `dim:false`-Stacking-Pattern der Nachbar-Aufrufer.
 
+## Keyboard & Viewport (Platz reservieren für die Bildschirmtastatur)
+
+Die Regel in einem Satz: **wie hoch die Tastatur ist und wie viel ein Overlay dafür reservieren muss, sind zwei verschiedene Zahlen.** Wer sie verwechselt, baut denselben Bug wie 2026-08-19 (siehe unten).
+
+`index.html` setzt im Viewport-Meta `interactive-widget=resizes-content`. Die beiden mobilen Browser machen daraus verschiedene Dinge, und ein `position:fixed`-Overlay liegt im **Layout**-Viewport:
+
+| | Layout-Viewport bei offener Tastatur | Ein `fixed`-Overlay mit `bottom:0` | Muss reservieren |
+|---|---|---|---|
+| Chrome/Android | schrumpft (der Browser respektiert `resizes-content`) | endet schon über den Tasten | **nichts** |
+| iOS | bleibt voll hoch, Tastatur legt sich darüber | läuft hinter der Tastatur weiter | **die ganze Tastatur** |
+
+Deshalb reicht `innerHeight - visualViewport.height` als Antwort nicht: auf Android schrumpfen beide gemeinsam, die Differenz ist 0, obwohl eine Tastatur da ist. Eine gemerkte tastaturfreie Baseline erkennt sie zwar, beantwortet aber die **andere** Frage und darf nicht als Reservierung durchgereicht werden.
+
+`keyboardViewportReservation()` in `ui.jsx` liefert beides getrennt und ist die einzige Stelle, die das entscheiden soll:
+
+- `keyboardGap`: Baseline minus sichtbarer Unterkante, also „ist eine Tastatur offen, und wie hoch". Nur für Erkennung (z.B. „gerade aufgegangen, also Feld nachscrollen").
+- `reserve`: `min(keyboardGap, layoutHeight - sichtbare Unterkante)`, also der Teil eines vollhohen Fixed-Layers, den die Tastatur wirklich verdeckt. Das ist der Wert, der ins Layout darf. Android 0, iOS die volle Höhe, ohne Plattform-Sniffing.
+
+Nutzer: `Sheet` (`ui.jsx`, `paddingBottom` des Backdrops) und `FullSheet` (`screens-settings.jsx`, `bottom`-Inset). Bei einem neuen Fixed-Overlay mit Textfeld dieselbe Funktion verwenden, nicht neu rechnen.
+
+**Warum das dokumentiert ist:** Commit `3161013` (2026-08-19, „Harden mobile keyboard input scrolling") führte in `Sheet` die Baseline ein und reichte sie direkt als `paddingBottom` durch. Auf iOS korrekt, auf Android doppelt bezahlt: bei einer 380px-Tastatur auf 900px Bildschirm rutschte das Panel auf `top: -239px`, also 239px über den oberen Bildschirmrand. Betroffen waren alle Sheets mit Textfeld (81 der 167 `<Sheet>`-Stellen), was als „ich sehe beim Tippen das Textfeld nicht mehr" gemeldet wurde. In `FullSheet` gab es dieselbe Fehlerklasse als Race: sein Guard las die Höhe von `#root`, die aber erst stimmt, wenn der rAF-Watcher der Shell sie publiziert hat, wodurch der Support-Chat für einzelne Frames auf 140px kollabierte.
+
+**Nicht betroffen und bewusst anders:** Die App-Shell selbst (`#root` via `--app-viewport-top`/`--app-viewport-height` im Watcher in `index.html`) misst korrekt und braucht nichts. `ExerciseWizard`/`PlanWizard` setzen `top`/`height` direkt aus `visualViewport` statt zu reservieren, was auf beiden Plattformen aufgeht. Der `keyboardHeight`-Prop von `Sheet` ist etwas anderes: die **app-eigene** Zifferntastatur ist echtes DOM, verändert keinen Viewport und muss deshalb immer voll reserviert werden.
+
+Abgesichert durch `tools/test/keyboard-viewport.test.cjs` (Unit-Test der reinen Funktion, beide Viewport-Modi).
+
 ## Screenshot-Export (`captureNodeAsPng`, html2canvas)
 
 Alle teilbaren Bilder (Session-Detail, Session-Compare, Plan-Poster, Food-Log, Shopping-List, Rezept, Water) laufen über `captureNodeAsPng` in `screens-lib.jsx`. html2canvas (1.4.1, lazy vom CDN) rendert **nicht** die Live-Seite, sondern einen `<iframe>`-Klon davon: es misst im Klon und zeichnet ins Canvas. Fast jeder Export-Bug kommt aus einer Abweichung zwischen Live-DOM und Klon. Invarianten, die deshalb gelten müssen:

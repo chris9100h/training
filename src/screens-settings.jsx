@@ -338,27 +338,34 @@ function FullSheet({ open, onClose, title, children }) {
         return;
       }
 
-      const baseline = Math.max(baselineHeightRef.current, layoutHeight);
-      const gap = Math.max(0, Math.round(baseline - visualBottom));
       // Use the sheet's actual painted bottom as a second signal. On iOS the
       // layout viewport can stay full-height while the keyboard overlays it,
-      // so the baseline/root heuristic may say "already resized" even though
-      // this dialog still extends underneath the keyboard. The overlap is in
-      // the same getBoundingClientRect coordinate space as visualViewport.
+      // so a viewport-only reading may say "already resized" even though this
+      // dialog still extends underneath the keyboard. The overlap is in the
+      // same getBoundingClientRect coordinate space as visualViewport.
       const sheetRect = sheet.getBoundingClientRect();
       const sheetOverlap = Math.max(0, Math.round(sheetRect.bottom - visualBottom));
-      const rootRect = document.getElementById('root')?.getBoundingClientRect();
-      const shellAlreadyResized = !!rootRect
-        && rootRect.height < baseline - 100
-        && rootRect.bottom <= visualBottom + 80;
+      // How much of a full-height fixed layer the keyboard really covers, so
+      // an inset is never paid twice where the browser already shrank the
+      // layout viewport for us (interactive-widget=resizes-content, i.e.
+      // Chrome on Android), which would collapse this sheet to almost no
+      // height. This used to be inferred from #root's measured rect, but that
+      // rect is only correct once the shell's own rAF watcher has published
+      // the new viewport height: sampling every frame across the transition
+      // showed the sheet collapsing to 140px for a few frames whenever this
+      // measure() won the race. Reading the viewports directly has no such
+      // ordering dependency.
+      const reserve = typeof keyboardViewportReservation === 'function'
+        ? keyboardViewportReservation({
+            layoutHeight, visualHeight, visualOffsetTop: vv?.offsetTop || 0,
+            baselineHeight: baselineHeightRef.current, typing,
+          }).reserve
+        : 0;
       // Browser chrome is normally well below this threshold; only reserve
       // space for a real on-screen keyboard. Applying the inset to the sheet
       // moves its composer above the keyboard even when the browser did not
-      // resize the fixed root itself. If the app shell has already resized to
-      // the visual viewport, do not apply the same inset a second time.
-      // Otherwise the sheet would collapse to almost no height under
-      // interactive-widget=resizes-content.
-      const next = Math.max(sheetOverlap, shellAlreadyResized ? 0 : (gap > 100 ? gap : 0));
+      // resize the fixed root itself.
+      const next = Math.max(sheetOverlap, reserve > 100 ? Math.round(reserve) : 0);
       if (next !== keyboardInsetRef.current) {
         keyboardInsetRef.current = next;
         setKeyboardInset(next);
