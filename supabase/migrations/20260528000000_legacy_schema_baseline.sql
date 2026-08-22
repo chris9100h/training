@@ -975,6 +975,7 @@ BEGIN
                 jsonb_build_object(
                   'id',    day->>'id',
                   'name',  day->>'name',
+                  'weekday', day->'weekday',
                   'items', (
                     SELECT COALESCE(jsonb_agg(
                       jsonb_build_object(
