@@ -2738,14 +2738,14 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
   const hasSelfCoachRole = selfOn && !!store.coaching?.asSelf;
   const isDriveCoach = hasExternalCoachRole || hasSelfCoachRole || !!store.settings?.showCoachingTab;
   useEffectSet(() => {
-    if (!coachingSheet || !isDriveCoach) return;
+    if (!accountSheet && (!coachingSheet || !isDriveCoach)) return;
     let alive = true;
     setDriveLoading(true); setDriveMessage(null);
     LB.getCoachingDriveStatus().then(value => { if (alive) setDriveStatus(value); })
       .catch(error => { if (alive) setDriveMessage(error.message || 'Drive status unavailable'); })
       .finally(() => { if (alive) setDriveLoading(false); });
     return () => { alive = false; };
-  }, [coachingSheet, isDriveCoach, userId]);
+  }, [accountSheet, coachingSheet, isDriveCoach, userId]);
   const connectDrive = async () => {
     setDriveLoading(true); setDriveMessage(null);
     try { window.location.assign(await LB.startCoachingDriveOAuth()); }
@@ -3098,27 +3098,15 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
             <div style={{ marginTop: 22, paddingTop: 16, borderTop: `var(--hair-width) solid ${UI.hair}` }}>
               <div className="micro-gold" style={{ marginBottom: 7 }}>GOOGLE DRIVE ARCHIVE</div>
               <div style={{ fontSize: 11, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>
-                Save your own and client check-ins as Google Sheets in Drive, plus one overview sheet. Drive failures never block check-in submission.
+                Save your own and client check-ins as Google Sheets in Drive, plus one overview sheet. Drive failures never block check-in submission. Manage the connection under Account.
               </div>
-              {!driveStatus && <Btn style={{ width: '100%' }} onClick={connectDrive} disabled={driveLoading}>{driveLoading ? 'Loading…' : 'Connect Google Drive'}</Btn>}
-              {driveStatus && <>
-                <div style={{ padding: '9px 11px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 8 }}>
-                  <div style={{ color: driveStatus.status === 'connected' ? 'var(--ok)' : UI.danger, fontWeight: 700 }}>
-                    {driveStatus.status === 'needs_reauth' ? 'Reconnect required' : driveStatus.status === 'connected' ? 'Connected' : 'Not connected'}
-                  </div>
-                  {driveStatus.google_account_email && <div style={{ marginTop: 3 }}>{driveStatus.google_account_email}</div>}
-                </div>
-                <Row label="Archive check-ins">
-                  <Toggle on={driveStatus.status === 'connected' && driveStatus.archive_enabled !== false} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled === false, includePhotos: driveStatus.include_photos === true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
-                </Row>
-                <Row label="Include check-in photos">
-                  <Toggle on={driveStatus.status === 'connected' && driveStatus.include_photos === true} onToggle={() => configureDrive({ archiveEnabled: driveStatus.archive_enabled !== false, includePhotos: driveStatus.include_photos !== true })} disabled={driveLoading || driveStatus.status !== 'connected'} />
-                </Row>
-                <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
-                  <Btn style={{ flex: 1 }} onClick={connectDrive} disabled={driveLoading}>Reconnect</Btn>
-                  <Btn kind="ghost" style={{ flex: 1 }} onClick={disconnectDrive} disabled={driveLoading}>Disconnect</Btn>
-                </div>
-              </>}
+              <Row label="Archive check-ins">
+                <Toggle on={driveStatus?.status === 'connected' && driveStatus.archive_enabled !== false} onToggle={() => configureDrive({ archiveEnabled: driveStatus?.archive_enabled === false, includePhotos: driveStatus?.include_photos === true })} disabled={driveLoading || driveStatus?.status !== 'connected'} />
+              </Row>
+              <Row label="Include check-in photos">
+                <Toggle on={driveStatus?.status === 'connected' && driveStatus.include_photos === true} onToggle={() => configureDrive({ archiveEnabled: driveStatus?.archive_enabled !== false, includePhotos: driveStatus?.include_photos !== true })} disabled={driveLoading || driveStatus?.status !== 'connected'} />
+              </Row>
+              {driveStatus?.status !== 'connected' && !driveMessage && <div style={{ color: UI.inkFaint, fontSize: 11, fontFamily: UI.fontUi, lineHeight: 1.45, marginTop: 8 }}>Connect Google Drive under Account to enable the archive.</div>}
               {driveMessage && <div style={{ color: UI.danger, fontSize: 11, fontFamily: UI.fontUi, marginTop: 8 }}>{driveMessage}</div>}
             </div>
           )}
@@ -3849,6 +3837,27 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
                 {xHandleMsg.text}
               </div>
             )}
+          </div>
+          <div className="knurl" />
+          <div style={{ padding: '16px 0 18px' }}>
+            <div className="micro" style={{ marginBottom: 7, color: UI.inkFaint }}>GOOGLE DRIVE</div>
+            <div style={{ fontSize: 12, color: UI.inkFaint, fontFamily: UI.fontUi, lineHeight: 1.5, marginBottom: 10 }}>
+              Keep private progress pictures in your own Google Drive. Zane only creates and reads the files it owns; disconnecting never deletes your Drive files.
+            </div>
+            {!driveStatus && <Btn style={{ width: '100%' }} onClick={connectDrive} disabled={driveLoading}>{driveLoading ? 'Loading…' : 'Connect Google Drive'}</Btn>}
+            {driveStatus && <>
+              <div style={{ padding: '9px 11px', background: UI.bgInset, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, fontSize: 11, color: UI.inkSoft, fontFamily: UI.fontUi, marginBottom: 8 }}>
+                <div style={{ color: driveStatus.status === 'connected' ? 'var(--ok)' : UI.danger, fontWeight: 700 }}>
+                  {driveStatus.status === 'needs_reauth' ? 'Reconnect required' : driveStatus.status === 'connected' ? 'Connected' : 'Disconnected'}
+                </div>
+                {driveStatus.google_account_email && <div style={{ marginTop: 3 }}>{driveStatus.google_account_email}</div>}
+              </div>
+              <div style={{ display: 'flex', gap: 8, marginTop: 10 }}>
+                <Btn style={{ flex: 1 }} onClick={connectDrive} disabled={driveLoading}>Reconnect</Btn>
+                <Btn kind="ghost" style={{ flex: 1 }} onClick={disconnectDrive} disabled={driveLoading}>Disconnect</Btn>
+              </div>
+            </>}
+            {driveMessage && <div style={{ color: UI.danger, fontSize: 11, fontFamily: UI.fontUi, marginTop: 8 }}>{driveMessage}</div>}
           </div>
           <div className="knurl" />
           <Row label="Push notifications" first>

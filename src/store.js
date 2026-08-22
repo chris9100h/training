@@ -1592,6 +1592,8 @@ async function deleteOwnedStorageObjects(userId) {
       })
       .filter(path => path && path.split('/')[0] === String(userId))
   ));
+  const progressRes = await _supabase.from('zane_drive_progress_photos').select('staging_path').eq('user_id', userId);
+  const progressPaths = uniquePaths((progressRes.data || []).map(row => row.staging_path).filter(path => path && path.split('/')[0] === String(userId)));
 
   const removeInBatches = async (bucket, paths) => {
     for (let offset = 0; offset < paths.length; offset += 1000) {
@@ -1600,6 +1602,7 @@ async function deleteOwnedStorageObjects(userId) {
   };
   await removeInBatches('social-chat-attachments', socialPaths);
   await removeInBatches('coaching-drive-staging', coachingPaths);
+  await removeInBatches('drive-progress-staging', progressPaths);
   await removeInBatches('chat-attachments', chatPaths);
 }
 
@@ -1652,6 +1655,11 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
     unwrap(_supabase.from('zane_food_template_days').delete().eq('user_id', userId)),
     unwrap(_supabase.from('zane_checkin_schema_templates').delete().eq('user_id', userId)),
   ];
+  // Progress-photo metadata and its private staging bytes are personal data,
+  // so an explicit delete-all removes them. Backup restore uses this same
+  // wipe helper with keepPush=true; keep the metadata there so existing Drive
+  // pictures remain visible after a restore (the backup does not contain them).
+  if (!keepPush) ops.push(unwrap(_supabase.rpc('delete_owned_drive_progress_photos')));
   // zane_recipe_shares has RLS with no policies, so it is only reachable
   // through an RPC. Without this, every old ?share=<token> link kept serving
   // the recipe snapshot (and the sharer's display name) after a full account
@@ -9777,6 +9785,22 @@ async function coachingDriveRequest(action, extra = {}) {
   return body;
 }
 
+async function coachingDriveMediaRequest(photoId) {
+  const { data } = await _supabase.auth.getSession();
+  const token = data?.session?.access_token;
+  if (!token) throw new Error('Sign in to view this progress picture');
+  const res = await limitedSupabaseFetch(COACHING_DRIVE_URL, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action: 'progress-media', photoId }),
+  }, { priority: 'foreground', timeoutMs: 30000 });
+  if (!res?.ok) {
+    const body = await res?.json?.().catch(() => ({}));
+    throw new Error(body?.error || 'Progress picture could not be loaded');
+  }
+  return await res.blob();
+}
+
 async function getCoachingDriveStatus() {
   return coachingDriveRequest('status');
 }
@@ -9804,6 +9828,45 @@ async function configureCoachingDrive(values) {
     archiveEnabled: values?.archiveEnabled !== false,
     includePhotos: values?.includePhotos === true,
   });
+}
+
+async function listProgressPhotos(limit = 50, offset = 0, photoDate = null) {
+  const body = await coachingDriveRequest('progress-list', { limit, offset, ...(photoDate ? { photoDate } : {}) });
+  return { photos: Array.isArray(body?.photos) ? body.photos : [], hasMore: body?.hasMore === true };
+}
+
+async function loadProgressPhotoBlob(photoId) {
+  return coachingDriveMediaRequest(photoId);
+}
+
+async function deleteProgressPhoto(photoId) {
+  return coachingDriveRequest('progress-delete', { photoId });
+}
+
+async function stageProgressPhoto(file, photoDate) {
+  if (!file || !photoDate) throw new Error('Progress picture upload is incomplete');
+  if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) throw new Error('Use a JPG, PNG or WebP image');
+  if (file.size <= 0 || file.size > 8 * 1024 * 1024) throw new Error('Each photo must be 8 MB or smaller');
+  const ext = file.type === 'image/png' ? 'png' : file.type === 'image/webp' ? 'webp' : 'jpg';
+  const rawName = String(file.name || `progress-picture.${ext}`).replace(/[^A-Za-z0-9._-]+/g, '_').slice(-100) || `progress-picture.${ext}`;
+  const safe = (/^[A-Za-z0-9]/.test(rawName) ? rawName : `progress-${rawName}`).slice(0, 100) || `progress-picture.${ext}`;
+  const reservation = await unwrap(_supabase.rpc('reserve_drive_progress_photo', {
+    p_photo_date: photoDate, p_file_name: safe, p_mime_type: file.type, p_byte_size: file.size,
+  }));
+  const row = typeof reservation.data === 'string' ? JSON.parse(reservation.data) : reservation.data;
+  if (!row?.id || !row?.staging_path) throw new Error('Progress picture reservation failed');
+  try {
+    const uploaded = await _supabase.storage.from('drive-progress-staging').upload(row.staging_path, file, { contentType: file.type, upsert: true });
+    if (uploaded.error) throw uploaded.error;
+    return { id: row.id, photoDate, status: 'staged', driveFileId: row.drive_file_id || null };
+  } catch (error) {
+    // A failed Storage upload cannot be recovered by the Drive worker because
+    // there is no binary to read.  Tombstone the reservation so the worker can
+    // remove an object that may have been accepted just before the network
+    // error, then let the user retry cleanly.
+    await _supabase.rpc('release_drive_progress_photo', { p_photo_id: row.id }).catch(() => {});
+    throw error;
+  }
 }
 
 // Photos are deliberately staged in a private, short-lived bucket. This is
@@ -14353,6 +14416,7 @@ window.LB = {
   updateDailyLogDerived, loadClientStore, pushMealPlanToClient, pushMedicationPlanToClient, loadCoachClientsStatus, reloadCoachingState, loadUserSupportChats, enableSelfCoaching, inviteClient, respondToCoachingInvite, endCoaching,
   addCoachingNote, updateCoachingNote, deleteCoachingNote, markCoachingNotesRead, loadCoachingNotes, loadCoachingThreads, createCoachingThread, deleteCoachingThread, getOrCreateCoachingThread, uploadChatImage,
   getCoachingDriveStatus, getCoachingDrivePhotoStatus, startCoachingDriveOAuth, disconnectCoachingDrive, retryCoachingDriveExports, configureCoachingDrive, stageCoachingCheckinPhoto,
+  listProgressPhotos, loadProgressPhotoBlob, deleteProgressPhoto, stageProgressPhoto,
   unreadCoachingNotes, isNoteFromClient, techniqueRounds, groupBySuperset, supersetLabel, timeAgo, dayLabel, cyclePosFromStartDate, mergeCollectionById, mergeBootScalars, mergePlanDrafts, caloriesFromMacros, detectCacheVersion,
   normSet, stableJson, syncValuesEqual, sessionToRow, // exported for tools/test/store.test.cjs
   OZ_G, LB_G, gToOz, ozToG, formatMassG, roundShoppingQty, cleanupAppliesToExercise,

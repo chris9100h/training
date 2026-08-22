@@ -1075,6 +1075,158 @@ function CatSection({ label, extra, collapsed, onToggle, children }) {
   );
 }
 
+const progressPictureObjectUrls = new Map();
+const progressPictureCacheKey = photo => photo?.id ? `${photo.id}:${photo.uploaded_at || photo.updated_at || ''}` : '';
+
+function ProgressPictureImage({ photo, height = 190 }) {
+  const cacheKey = progressPictureCacheKey(photo);
+  const [src, setSrc] = useStateH(progressPictureObjectUrls.get(cacheKey) || null);
+  const [error, setError] = useStateH(null);
+  useEffectH(() => {
+    let live = true;
+    setError(null);
+    if (!photo?.id || progressPictureObjectUrls.has(cacheKey)) {
+      setSrc(photo?.id ? progressPictureObjectUrls.get(cacheKey) : null);
+      return () => { live = false; };
+    }
+    setSrc(null);
+    LB.loadProgressPhotoBlob(photo.id).then(blob => {
+      if (!live) return;
+      const url = URL.createObjectURL(blob);
+      progressPictureObjectUrls.set(cacheKey, url);
+      setSrc(url);
+    }).catch(error => { if (live) setError(error.message || 'Image unavailable'); });
+    return () => { live = false; };
+  }, [cacheKey, photo?.id]);
+  if (error) return <div style={{ height, display: 'grid', placeItems: 'center', color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11 }}>{error}</div>;
+  if (!src) return <div style={{ height, display: 'grid', placeItems: 'center', color: UI.inkGhost, fontFamily: UI.fontUi, fontSize: 11 }}>Loading picture…</div>;
+  return <img src={src} alt={`Progress picture ${photo.photo_date}`} style={{ width: '100%', height, objectFit: 'cover', borderRadius: 5, display: 'block', background: UI.bgInset }} />;
+}
+
+function ProgressPictureSection({ userId, date, store }) {
+  const [driveStatus, setDriveStatus] = useStateH(null);
+  const [photo, setPhoto] = useStateH(null);
+  const [busy, setBusy] = useStateH(false);
+  const [message, setMessage] = useStateH(null);
+  const [inputKey, setInputKey] = useStateH(0);
+  const fileRef = useRefH(null);
+  const refresh = () => LB.listProgressPhotos(1, 0, date).then(result => setPhoto(result.photos[0] || null)).catch(() => {});
+  useEffectH(() => {
+    let live = true;
+    setMessage(null); setPhoto(null);
+    LB.getCoachingDriveStatus().then(status => {
+      if (!live) return;
+      setDriveStatus(status);
+      if (status?.status === 'connected') refresh();
+    }).catch(error => { if (live) setMessage(error.message || 'Drive status unavailable'); });
+    return () => { live = false; };
+  }, [date, userId]);
+  const onFile = async event => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setBusy(true); setMessage('Upload queued. It will continue in the background.');
+    try { await LB.stageProgressPhoto(file, date); setMessage('Upload queued. This picture will appear here when Drive finishes.'); }
+    catch (error) { setMessage(error.message || 'Could not queue the picture'); }
+    finally { setBusy(false); setInputKey(v => v + 1); }
+  };
+  const remove = async () => {
+    if (!photo || busy) return;
+    setBusy(true); setMessage(null);
+    try { await LB.deleteProgressPhoto(photo.id); setPhoto(null); setMessage('Picture removal queued.'); }
+    catch (error) { setMessage(error.message || 'Could not remove the picture'); }
+    finally { setBusy(false); }
+  };
+  // The Daily Log stays uncluttered for users who have not connected Drive.
+  // Connection and re-authentication are managed centrally under Account;
+  // this section is only an upload/replace/remove control once Drive is ready.
+  if (driveStatus?.status !== 'connected') return null;
+  return (
+    <div style={{ marginTop: 14, padding: 12, border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, background: UI.bgInset }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <i className="fa-solid fa-camera" style={{ color: UI.gold, fontSize: 12 }} />
+        <div style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Progress picture</div>
+      </div>
+      <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.5, margin: '6px 0 10px' }}>
+        Keep one private picture for this day in your Google Drive.
+      </div>
+      {photo && <div style={{ marginBottom: 10 }}><ProgressPictureImage photo={photo} height={170} /></div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input key={inputKey} ref={fileRef} type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={onFile} style={{ display: 'none' }} />
+        <Btn onClick={() => fileRef.current?.click()} disabled={busy} style={{ flex: 1 }}>{photo ? 'Replace' : 'Upload progress pic'}</Btn>
+        {photo && <Btn kind="ghost" onClick={remove} disabled={busy} style={{ flex: 1 }}>Remove</Btn>}
+      </div>
+      {message && <div style={{ color: message.startsWith('Could') ? UI.danger : UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.45, marginTop: 8 }}>{message}</div>}
+    </div>
+  );
+}
+
+function ProgressPicturesTimeline({ userId, store, open, onClose }) {
+  const [photos, setPhotos] = useStateH([]);
+  const [offset, setOffset] = useStateH(0);
+  const [hasMore, setHasMore] = useStateH(false);
+  const [loading, setLoading] = useStateH(false);
+  const [error, setError] = useStateH(null);
+  const load = async (nextOffset, replace = false) => {
+    setLoading(true); setError(null);
+    try {
+      const result = await LB.listProgressPhotos(50, nextOffset);
+      setPhotos(prev => replace ? result.photos : [...prev, ...result.photos]);
+      setOffset(nextOffset); setHasMore(result.hasMore);
+    } catch (e) { setError(e.message || 'Could not load progress pictures'); }
+    finally { setLoading(false); }
+  };
+  useEffectH(() => { if (open) load(0, true); }, [open, userId]);
+  return <Sheet open={open} onClose={onClose}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+      <div className="sheet-title">PROGRESS PICTURES</div>
+      <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.5 }}>Private pictures from your Google Drive, newest first.</div>
+      {error && <div style={{ color: UI.danger, fontFamily: UI.fontUi, fontSize: 11 }}>{error}</div>}
+      {!loading && !photos.length && !error && <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 12, padding: '24px 0', textAlign: 'center' }}>No progress pictures yet.</div>}
+      {photos.map(photo => {
+        const weight = (store.dailyLogs || []).find(log => log.date === photo.photo_date)?.weight;
+        return <div key={photo.id} style={{ border: `var(--hair-width) solid ${UI.hair}`, borderRadius: 6, padding: 8, background: UI.bgInset }}>
+          <ProgressPictureImage photo={photo} height={230} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginTop: 7, color: UI.inkSoft, fontFamily: UI.fontUi, fontSize: 11 }}>
+            <span>{photo.photo_date}</span><span>{weight != null ? `${weight} ${UI.unit()}` : ''}</span>
+          </div>
+        </div>;
+      })}
+      {loading && <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, textAlign: 'center' }}>Loading…</div>}
+      {hasMore && !loading && <Btn kind="ghost" onClick={() => load(offset + 50)}>Load older</Btn>}
+      <Btn onClick={onClose}>Done</Btn>
+    </div>
+  </Sheet>;
+}
+
+function ProgressPicturesCard({ userId, store, dragHandle }) {
+  const [driveStatus, setDriveStatus] = useStateH(null);
+  const [photos, setPhotos] = useStateH([]);
+  const [open, setOpen] = useStateH(false);
+  useEffectH(() => {
+    let live = true;
+    LB.getCoachingDriveStatus().then(status => {
+      if (!live) return;
+      setDriveStatus(status);
+      if (status?.status === 'connected') LB.listProgressPhotos(1, 0).then(result => { if (live) setPhotos(result.photos); }).catch(() => {});
+    }).catch(() => {});
+    return () => { live = false; };
+  }, [userId]);
+  return <>
+    <Card style={{ padding: 14, borderLeft: `3px solid ${UI.gold}`, height: '100%' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        {dragHandle}
+        <span style={{ ...HEALTH_CARD_HEADER_STYLE, flex: 1 }}>Progress pictures</span>
+        <button onClick={() => setOpen(true)} style={{ background: 'transparent', border: 'none', color: UI.inkFaint, padding: 2, cursor: 'pointer' }} aria-label="Open progress pictures"><i className="fa-solid fa-expand" style={{ fontSize: 11 }} /></button>
+      </div>
+      {driveStatus?.status !== 'connected' ? <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, lineHeight: 1.5, padding: '16px 0 4px' }}>Connect Google Drive in Settings → Account to keep private progress pictures.</div>
+        : photos[0] ? <button onClick={() => setOpen(true)} style={{ display: 'block', width: '100%', marginTop: 10, padding: 0, border: 'none', background: 'transparent', textAlign: 'left', cursor: 'pointer', WebkitTapHighlightColor: 'transparent' }} aria-label="Open progress pictures timeline"><ProgressPictureImage photo={photos[0]} height={150} /><div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 10, marginTop: 6 }}>{photos[0].photo_date} · tap to view timeline</div></button>
+        : <div style={{ color: UI.inkFaint, fontFamily: UI.fontUi, fontSize: 11, padding: '16px 0 4px' }}>Upload your first picture from a Daily Log.</div>}
+    </Card>
+    <ProgressPicturesTimeline open={open} onClose={() => setOpen(false)} userId={userId} store={store} />
+  </>;
+}
+
 function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeCoachingSchema, onSetStatus, userId, glucoseLogs, glucoseUnit, bloodPressureLogs, bodyTempLogs, tempUnit, go }) {
   // Always-current store snapshot: saveTemp's fever nudge awaits a Supabase
   // write and then a user-interaction-gated confirm dialog, both arbitrarily
@@ -2192,6 +2344,8 @@ function DailyLogScreen({ open, onClose, store, setStore, date, targets, activeC
           </div>
         </div>
       )}
+
+      <ProgressPictureSection userId={userId} date={date} store={store} />
 
       </div>
 
@@ -5579,7 +5733,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // Macros/Adherence/Targets move, hide, and show as one unit, id 'macroGroup',
   // see its cardEls entry below, since hiding just one of the three orphans the
   // others (e.g. an adherence chart with no targets to compare against).
-  const DEFAULT_CARD_ORDER = ['week', 'today', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'bodyMeasurements'];
+  const DEFAULT_CARD_ORDER = ['week', 'today', 'progressPictures', 'aiSummary', 'macroGroup', 'weight', 'cardio', 'steps', 'water', 'glucose', 'bloodPressure', 'bodyTemp', 'bodyMeasurements'];
   const [cardOrder, setCardOrder] = useStateH(() => {
     let saved = [];
     try { saved = JSON.parse(localStorage.getItem(CARD_ORDER_KEY) || '[]'); } catch (_) {}
@@ -5772,6 +5926,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
       mealOfChoiceOrdinal={LB.mealOfChoiceWeekCount(store.dailyLogs, selectedDate).ordinal}
       foodDayClosed={LB.foodDayIsClosed(store.dailyLogs, today)}
       onOpenFood={go && store.settings?.showFoodTab ? () => go({ name: 'food', date: today }) : null} />,
+    progressPictures: <ProgressPicturesCard userId={userId} store={store} dragHandle={handle} />,
     aiSummary: <AiSummaryCard key={selectedDate} dragHandle={handle} store={store} setStore={setStore} userId={userId} selectedDate={selectedDate} />,
     // Targets first (full width, needs the room for the P/C/F chip rows),
     // then Adherence + the macro breakdown paired below it, always full-width
@@ -5844,7 +5999,7 @@ function HealthScreen({ store, setStore, go, userId, openMacroTargets }) {
   // stays in the 2-col grid no matter what, a card left alone at the end of
   // an odd run just leaves the other half of its row empty instead of
   // stretching to fill it.
-  const fullWidthCardIds = new Set(['week', 'today', 'aiSummary', 'macroGroup']);
+  const fullWidthCardIds = new Set(['week', 'today', 'progressPictures', 'aiSummary', 'macroGroup']);
 
   return (
     <Screen>

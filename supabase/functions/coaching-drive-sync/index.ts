@@ -17,6 +17,7 @@ const corsHeaders = {
 const DRIVE_FILE = 'application/vnd.google-apps.folder';
 const SHEET_FILE = 'application/vnd.google-apps.spreadsheet';
 const BUCKET = 'coaching-drive-staging';
+const PROGRESS_BUCKET = 'drive-progress-staging';
 const MAX_PHOTOS = 8;
 
 function json(value: unknown, status = 200) {
@@ -308,12 +309,12 @@ async function appendOverview(access: string, spreadsheetId: string, rows: strin
   });
 }
 
-function storageObjectUrl(path: string) {
+function storageObjectUrl(path: string, bucket = BUCKET) {
   // The metadata path is validated by the database trigger. Encoding every
   // segment here is still necessary defence in depth: service-role requests
   // must never allow URL normalisation to turn a client value into `../...`.
   const encoded = String(path).split('/').map(segment => encodeURIComponent(segment)).join('/');
-  return `${base()}/storage/v1/object/${encodeURIComponent(BUCKET)}/${encoded}`;
+  return `${base()}/storage/v1/object/${encodeURIComponent(bucket)}/${encoded}`;
 }
 
 async function deleteStagingObject(path: string, tolerateMissing = true, timeoutMs = 10000) {
@@ -324,6 +325,26 @@ async function deleteStagingObject(path: string, tolerateMissing = true, timeout
   if (res.ok || (tolerateMissing && isMissingStorageObjectResponse(res.status, body))) return;
   const error = new Error(`staging photo delete ${res.status}`); (error as any).status = res.status;
   throw error;
+}
+
+function progressStorageObjectUrl(path: string) { return storageObjectUrl(path, PROGRESS_BUCKET); }
+
+async function deleteProgressStagingObject(path: string, tolerateMissing = true, timeoutMs = 10000) {
+  const res = await timedFetch(progressStorageObjectUrl(path), {
+    method: 'DELETE', headers: { Authorization: `Bearer ${serviceKey()}`, apikey: serviceKey() },
+  }, timeoutMs);
+  const body = res.status === 400 ? await res.text().catch(() => '') : '';
+  if (res.ok || (tolerateMissing && isMissingStorageObjectResponse(res.status, body))) return;
+  const error = new Error(`progress staging photo delete ${res.status}`); (error as any).status = res.status;
+  throw error;
+}
+
+async function clearProgressStagingPath(id: string) {
+  const res = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(id)}`, {
+    method: 'PATCH', headers: { Prefer: 'return=minimal' },
+    body: JSON.stringify({ staging_path: null, updated_at: new Date().toISOString() }),
+  });
+  if (!res.ok) throw new Error(`progress staging metadata cleanup ${res.status}`);
 }
 
 async function findDrivePhoto(access: string, folderId: string, photoId: string) {
@@ -351,6 +372,134 @@ async function uploadDrivePhoto(access: string, folderId: string, photo: any) {
   const res = await googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink', { method: 'POST', headers: { Authorization: `Bearer ${access}` }, body: form }, 30000);
   if (!res.ok) { const e = new Error(`Google photo upload ${res.status}`); (e as any).status = res.status; throw e; }
   return await res.json();
+}
+
+async function uploadProgressDrivePhoto(access: string, folderId: string, photo: any) {
+  let fileId = photo.drive_file_id || null;
+  if (!fileId) {
+    const params = new URLSearchParams({ q: `appProperties has { key = 'zaneProgressPhotoId' and value = '${String(photo.id).replaceAll("'", "\\'")}' } and trashed = false and ${q(folderId)} in parents`, spaces: 'drive', fields: 'files(id,name,mimeType)', pageSize: '1' });
+    const existingBody = await (await drive(`files?${params}`, access)).json().catch(() => ({}));
+    const existing = existingBody?.files?.[0] || null;
+    fileId = existing?.id || null;
+  }
+  // A worker may have uploaded to Drive and crashed before the DB acknowledgement.
+  // In that case the staging object may already be gone, so resolve the
+  // idempotent Drive file before trying to read Storage. A failed replacement
+  // may also have kept the old Drive file while its new staging object was
+  // cleaned up; keeping that old image visible is safer than retrying missing
+  // bytes forever.
+  if (fileId && !photo.staging_path) return { id: fileId };
+  const objectRes = await timedFetch(progressStorageObjectUrl(photo.staging_path), {
+    headers: { Authorization: `Bearer ${serviceKey()}`, apikey: serviceKey() },
+  }, 20000);
+  if (!objectRes.ok) {
+    // Older workers deleted the staging object before acknowledging the DB.
+    // Preserve the already-existing Drive file rather than creating a failed
+    // retry loop; all new uploads use the safer finish-then-delete order below.
+    if (fileId && objectRes.status === 404) return { id: fileId };
+    const error = new Error(`progress staging photo ${objectRes.status}`); (error as any).status = objectRes.status; throw error;
+  }
+  const blob = await objectRes.blob();
+  const ext = photo.mime_type === 'image/png' ? 'png' : photo.mime_type === 'image/webp' ? 'webp' : 'jpg';
+  const driveName = `${String(photo.photo_date).slice(0, 10)} Progress Picture.${ext}`;
+  if (fileId) {
+    const upload = await googleFetch(`https://www.googleapis.com/upload/drive/v3/files/${encodeURIComponent(fileId)}?uploadType=media&fields=id,name,mimeType`, {
+      method: 'PATCH', headers: { Authorization: `Bearer ${access}`, 'Content-Type': photo.mime_type }, body: blob,
+    }, 30000);
+    if (!upload.ok) { const e = new Error(`Google progress photo update ${upload.status}`); (e as any).status = upload.status; throw e; }
+    const meta = await drive(`files/${encodeURIComponent(fileId)}?fields=id,name,mimeType`, access, {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: driveName }),
+    });
+    return await meta.json();
+  }
+  const meta = { name: driveName, mimeType: photo.mime_type, parents: [folderId], appProperties: { zaneProgressPhotoId: String(photo.id), zaneProgressDate: String(photo.photo_date) } };
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(meta)], { type: 'application/json' }));
+  form.append('file', blob, driveName);
+  const res = await googleFetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType', { method: 'POST', headers: { Authorization: `Bearer ${access}` }, body: form }, 30000);
+  if (!res.ok) { const e = new Error(`Google progress photo upload ${res.status}`); (e as any).status = res.status; throw e; }
+  return await res.json();
+}
+
+async function progressFolders(access: string, connection: any, year: string) {
+  const root = await ensureFolder(access, 'ZANE', null, { key: 'zanePersonalRoot', value: '1' });
+  const progress = await ensureFolder(access, 'Progress Pictures', root, { key: 'zaneProgressRoot', value: '1' });
+  const yearFolder = await ensureFolder(access, year, progress, { key: 'zaneProgressYear', value: year });
+  if (connection.progress_folder_id !== yearFolder) await updateConnection(connection.id, { progress_folder_id: yearFolder });
+  return yearFolder;
+}
+
+async function listProgressPhotosForUser(userId: string, limit = 50, offset = 0, photoDate: string | null = null) {
+  const dateFilter = photoDate && /^\d{4}-\d{2}-\d{2}$/.test(photoDate)
+    ? `&photo_date=eq.${encodeURIComponent(photoDate)}` : '';
+  const res = await db(`zane_drive_progress_photos?user_id=eq.${encodeURIComponent(userId)}&status=in.(uploaded,failed)&drive_file_id=not.is.null${dateFilter}&select=id,user_id,photo_date,drive_file_id,file_name,mime_type,byte_size,status,uploaded_at,updated_at&order=photo_date.desc&limit=${Math.min(51, Math.max(1, limit))}&offset=${Math.max(0, offset)}`);
+  if (!res.ok) throw new Error('progress picture lookup failed');
+  return await res.json().catch(() => []);
+}
+
+async function runProgressSync(worker: string) {
+  const claim = await db('rpc/claim_drive_progress_uploads', { method: 'POST', body: JSON.stringify({ p_limit: 5, p_worker: worker }) });
+  if (!claim.ok) throw new Error('progress photo claim failed');
+  const rows = await claim.json().catch(() => []);
+  let uploaded = 0, failed = 0;
+  const accesses = new Map<string, string>(); const connections = new Map<string, any>();
+  for (const photo of Array.isArray(rows) ? rows : []) {
+    try {
+      const connectionRes = await db(`zane_coaching_drive_connections?id=eq.${encodeURIComponent(photo.connection_id)}&status=eq.connected&select=*`);
+      if (!connectionRes.ok) throw new Error('progress Drive connection lookup failed');
+      const connection = (await connectionRes.json().catch(() => []))[0];
+      if (!connection) throw new Error('Drive connection is not active');
+      connections.set(connection.id, connection);
+      let access = accesses.get(connection.id);
+      if (!access) { access = await accessToken(connection.id); accesses.set(connection.id, access); }
+      const folder = await progressFolders(access, connection, String(photo.photo_date).slice(0, 4));
+      const result = await uploadProgressDrivePhoto(access, folder, photo);
+      const finish = await db('rpc/finish_drive_progress_upload', { method: 'POST', body: JSON.stringify({ p_photo_id: photo.id, p_worker: worker, p_status: 'uploaded', p_drive_file_id: result.id }) });
+      if (!finish.ok) throw new Error('progress photo finish failed');
+      const finishBody = await finish.json().catch(() => null);
+      const finishAcknowledged = finishBody === true
+        || (Array.isArray(finishBody) && (finishBody[0] === true || finishBody[0]?.finish_drive_progress_upload === true))
+        || finishBody?.finish_drive_progress_upload === true;
+      if (!finishAcknowledged) throw new Error('progress photo finish was not acknowledged');
+      // The DB row is now durable.  A failed cleanup is harmless and can be
+      // retried by the bounded janitor without replaying the Drive upload.
+      try {
+        await deleteProgressStagingObject(photo.staging_path, true, 5000);
+        await clearProgressStagingPath(photo.id);
+      } catch (error) { console.error('[coaching-drive] progress staging cleanup', photo.id, error); }
+      uploaded++;
+    } catch (error) {
+      const status = (error as any)?.status;
+      const needs = status === 401 || status === 403 || (status === 400 && (error as any)?.googleAuthCode === 'invalid_grant');
+      const retryAt = new Date(Date.now() + (needs ? 60 : Math.min(60, 2 ** Math.min(5, Number(photo.attempts || 1))) * 60) * 1000).toISOString();
+      await db('rpc/finish_drive_progress_upload', { method: 'POST', body: JSON.stringify({ p_photo_id: photo.id, p_worker: worker, p_status: 'failed', p_error: String((error as any)?.message || 'Progress photo upload failed').slice(0, 500), p_next_attempt_at: retryAt }) }).catch(() => {});
+      if (needs && photo.connection_id) await updateConnection(photo.connection_id, { status: 'needs_reauth', last_error: 'Google authorization expired while uploading a progress picture' }).catch(() => {});
+      failed++;
+    }
+  }
+  const deleteClaim = await db('rpc/claim_drive_progress_deletions', { method: 'POST', body: JSON.stringify({ p_limit: 5, p_worker: worker }) });
+  if (deleteClaim.ok) {
+    const deleted = await deleteClaim.json().catch(() => []);
+    for (const photo of Array.isArray(deleted) ? deleted : []) {
+      try {
+        if (photo.drive_file_id && photo.connection_id) {
+          const connection = connections.get(photo.connection_id) || (await (await db(`zane_coaching_drive_connections?id=eq.${encodeURIComponent(photo.connection_id)}&select=*`)).json().catch(() => []))[0];
+          if (connection) {
+            const access = accesses.get(connection.id) || await accessToken(connection.id);
+            if (access) {
+              try { await drive(`files/${encodeURIComponent(photo.drive_file_id)}`, access, { method: 'DELETE' }); }
+              catch (error) { if ((error as any)?.status !== 404) throw error; }
+            }
+          }
+        }
+        if (photo.staging_path) await deleteProgressStagingObject(photo.staging_path, true, 5000);
+        await db('rpc/finish_drive_progress_deletion', { method: 'POST', body: JSON.stringify({ p_photo_id: photo.id, p_worker: worker, p_success: true }) });
+      } catch (error) {
+        await db('rpc/finish_drive_progress_deletion', { method: 'POST', body: JSON.stringify({ p_photo_id: photo.id, p_worker: worker, p_success: false, p_error: String((error as any)?.message || 'Progress photo deletion failed').slice(0, 500) }) }).catch(() => {});
+      }
+    }
+  }
+  return { claimed: Array.isArray(rows) ? rows.length : 0, uploaded, failed };
 }
 
 async function updateConnection(id: string, values: Record<string, unknown>) {
@@ -510,7 +659,6 @@ async function syncOverview(coachId: string, connection: any, access: string, ov
 
 async function startOAuth(userId: string) {
   const { clientId, redirectUri } = googleClient();
-  if (!(await canUseCoachDrive(userId))) throw new Error('enable the Coaching tab or Self-Coaching before connecting Google Drive');
   const oldStateRes = await db(`zane_coaching_drive_oauth_states?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'DELETE' });
   if (!oldStateRes.ok) throw new Error('could not rotate OAuth state');
   const state = b64(randomBytes(32)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
@@ -567,7 +715,7 @@ async function callback(req: Request) {
   if (!stateRes.ok) return redirect(`${appOrigin()}?coachingDrive=expired`);
   const stateRow = (await stateRes.json().catch(() => []))[0];
   if (!stateRow) return redirect(`${appOrigin()}?coachingDrive=expired`);
-  if (!(await canUseCoachDrive(stateRow.coach_id))) return redirect(`${appOrigin()}?coachingDrive=not-authorized`);
+  const coachingEligible = await canUseCoachDrive(stateRow.coach_id).catch(() => false);
   const { clientId, clientSecret, redirectUri } = googleClient();
   const token = await googleToken({ code, client_id: clientId, client_secret: clientSecret, redirect_uri: redirectUri, grant_type: 'authorization_code' });
   if (!token.refresh_token) return redirect(`${appOrigin()}?coachingDrive=error`);
@@ -576,20 +724,22 @@ async function callback(req: Request) {
     : null;
   const googleEmail = profileRes?.ok ? (await profileRes.json().catch(() => ({})))?.email : null;
   const sealed = await seal(token.refresh_token);
-  const existingRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(stateRow.coach_id)}&select=id,google_account_email`);
+  const existingRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(stateRow.coach_id)}&select=id,google_account_email,archive_enabled,include_photos`);
   if (!existingRes.ok) throw new Error('Drive connection lookup failed');
   const existing = (await existingRes.json().catch(() => []))[0];
   const accountChanged = Boolean(existing?.google_account_email && googleEmail && existing.google_account_email !== googleEmail);
-  const connectionRes = await db('zane_coaching_drive_connections?on_conflict=coach_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify({ id: existing?.id || crypto.randomUUID(), coach_id: stateRow.coach_id, google_account_email: googleEmail || null, status: 'connected', archive_enabled: true, ...(accountChanged ? { root_folder_id: null, overview_spreadsheet_id: null } : {}), last_error: null, connected_at: new Date().toISOString() }) });
+  const connectionRes = await db('zane_coaching_drive_connections?on_conflict=coach_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=representation' }, body: JSON.stringify({ id: existing?.id || crypto.randomUUID(), coach_id: stateRow.coach_id, google_account_email: googleEmail || null, status: 'connected', archive_enabled: existing ? existing.archive_enabled !== false : coachingEligible, include_photos: existing ? existing.include_photos === true : false, ...(accountChanged ? { root_folder_id: null, overview_spreadsheet_id: null, progress_folder_id: null } : {}), last_error: null, connected_at: new Date().toISOString() }) });
   if (!connectionRes.ok) throw new Error(`Drive connection save failed (${connectionRes.status})`);
   const connectionRows = await connectionRes.json().catch(() => []);
   const connectionId = connectionRows[0]?.id || existing?.id;
   if (!connectionId) throw new Error('Drive connection id missing');
   const tokenRes = await db('zane_coaching_drive_tokens?on_conflict=connection_id', { method: 'POST', headers: { Prefer: 'resolution=merge-duplicates,return=minimal' }, body: JSON.stringify({ connection_id: connectionId, refresh_token_ciphertext: sealed.ciphertext, refresh_token_iv: sealed.iv, key_version: 1, updated_at: new Date().toISOString() }) });
   if (!tokenRes.ok) throw new Error(`Drive token save failed (${tokenRes.status})`);
-  if (accountChanged) await resetExportIds(stateRow.coach_id);
-  else await requeueReauthExports(stateRow.coach_id);
-  await queueBackfill(stateRow.coach_id);
+  if (coachingEligible) {
+    if (accountChanged) await resetExportIds(stateRow.coach_id);
+    else await requeueReauthExports(stateRow.coach_id);
+    await queueBackfill(stateRow.coach_id);
+  }
   return redirect(`${appOrigin()}?coachingDrive=connected`);
 }
 
@@ -617,6 +767,39 @@ async function cleanupStalePhotos(limit = 20, budgetMs = 6000) {
     } catch (error) {
       console.error('[coaching-drive] stale photo cleanup failed', row.id, error);
     }
+  }
+}
+
+async function cleanupStaleProgressPhotos(limit = 20, budgetMs = 6000) {
+  // A browser can disappear between the reservation and Storage upload, and a
+  // worker can crash after a successful Drive upload.  Keep the private
+  // staging bucket bounded without deleting the durable Drive file or its
+  // timeline metadata.
+  const uploadedCutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const oldCutoff = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString();
+  const rows: any[] = [];
+  for (const query of [
+    `zane_drive_progress_photos?status=eq.uploaded&staging_path=not.is.null&updated_at=lt.${encodeURIComponent(uploadedCutoff)}&select=id,staging_path,status&order=updated_at&limit=${limit}`,
+    `zane_drive_progress_photos?status=eq.staged&staging_path=not.is.null&created_at=lt.${encodeURIComponent(oldCutoff)}&select=id,staging_path,status&order=created_at&limit=${limit}`,
+    `zane_drive_progress_photos?status=eq.failed&staging_path=not.is.null&created_at=lt.${encodeURIComponent(oldCutoff)}&select=id,staging_path,status&order=created_at&limit=${limit}`,
+  ]) {
+    const res = await db(query);
+    if (!res.ok) throw new Error('stale progress photo lookup failed');
+    const page = await res.json().catch(() => []);
+    if (!Array.isArray(page)) throw new Error('stale progress photo lookup returned invalid data');
+    rows.push(...page);
+  }
+  const deadline = Date.now() + budgetMs;
+  for (const row of rows) {
+    if (Date.now() >= deadline) break;
+    try {
+      await deleteProgressStagingObject(row.staging_path, true, 2500);
+      const patch = row.status === 'uploaded'
+        ? { staging_path: null, updated_at: new Date().toISOString() }
+        : { staging_path: null, status: 'failed', next_attempt_at: '9999-12-31T00:00:00Z', last_error: 'Progress picture staging expired and was cleaned up', updated_at: new Date().toISOString() };
+      const patchRes = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(row.id)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify(patch) });
+      if (!patchRes.ok) console.error('[coaching-drive] stale progress metadata update failed', row.id, patchRes.status);
+    } catch (error) { console.error('[coaching-drive] stale progress photo cleanup failed', row.id, error); }
   }
 }
 
@@ -663,6 +846,7 @@ async function runPhotoJanitors() {
     ['expired-reservations', cleanupExpiredPhotoReservations],
     ['deleted-checkins', cleanupPhotoTombstones],
     ['stale-photos', cleanupStalePhotos],
+    ['stale-progress-photos', cleanupStaleProgressPhotos],
   ] as const) {
     try { await job(20, 6000); }
     catch (error) { console.error(`[coaching-drive] ${name} janitor`, error); }
@@ -761,8 +945,11 @@ async function runSync() {
   } finally {
     for (const coachId of coaches) await releaseCoachLease(coachId, worker);
   }
+  let progress = { claimed: 0, uploaded: 0, failed: 0 };
+  try { progress = await runProgressSync(worker); }
+  catch (error) { console.error('[coaching-drive] progress sync', error); }
   if (await claimPhotoJanitor(worker)) await runPhotoJanitors();
-  return { claimed: claimed.length, succeeded, failed };
+  return { claimed: claimed.length, succeeded, failed, progress };
 }
 
 Deno.serve(async (req) => {
@@ -791,14 +978,12 @@ Deno.serve(async (req) => {
     return json({ enabled: Boolean((await connectionRes.json().catch(() => []))[0]) });
   }
   if (body.action === 'status') {
-    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
-    const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id,coach_id,google_account_email,root_folder_id,overview_spreadsheet_id,status,archive_enabled,include_photos,connected_at,last_sync_at,last_error`);
+    const res = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id,coach_id,google_account_email,root_folder_id,progress_folder_id,overview_spreadsheet_id,status,archive_enabled,include_photos,connected_at,last_sync_at,last_error`);
     if (!res.ok) return json({ error: 'Drive status unavailable' }, 502);
     return json((await res.json().catch(() => []))[0] || null);
   }
   if (body.action === 'disconnect') {
-    if (!(await canUseCoachDrive(userId))) return json({ error: 'Coach mode is not enabled' }, 403);
-    const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ archive_enabled: false, include_photos: false, status: 'paused', last_error: 'Disconnected by coach', updated_at: new Date().toISOString() }) });
+    const connectionRes = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'paused', last_error: 'Disconnected by user', updated_at: new Date().toISOString() }) });
     if (!connectionRes.ok) return json({ error: 'Could not disconnect Google Drive' }, 502);
     const ownConnection = await db(`zane_coaching_drive_connections?coach_id=eq.${encodeURIComponent(userId)}&select=id`);
     if (!ownConnection.ok) return json({ error: 'Could not verify Drive disconnect' }, 502);
@@ -807,8 +992,46 @@ Deno.serve(async (req) => {
       const revoke = await db(`zane_coaching_drive_tokens?connection_id=eq.${encodeURIComponent(connectionId)}`, { method: 'DELETE' });
       if (!revoke.ok) return json({ error: 'Could not revoke stored Drive token' }, 502);
     }
-    const exportRes = await db(`zane_coaching_drive_exports?coach_id=eq.${encodeURIComponent(userId)}&status=in.(pending,processing,failed,needs_reauth)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', next_attempt_at: '9999-12-31T00:00:00Z', last_error: 'Drive disconnected by coach', locked_at: null, locked_by: null, updated_at: new Date().toISOString() }) });
+    const exportRes = await db(`zane_coaching_drive_exports?coach_id=eq.${encodeURIComponent(userId)}&status=in.(pending,processing,failed,needs_reauth)`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'failed', next_attempt_at: '9999-12-31T00:00:00Z', last_error: 'Drive disconnected by user', locked_at: null, locked_by: null, updated_at: new Date().toISOString() }) });
     if (!exportRes.ok) return json({ error: 'Could not pause Drive exports' }, 502);
+    return json({ ok: true });
+  }
+  if (body.action === 'progress-list') {
+    const rawLimit = Number(body.limit || 50); const rawOffset = Number(body.offset || 0);
+    const limit = Number.isFinite(rawLimit) ? Math.min(50, Math.max(1, Math.floor(rawLimit))) : 50;
+    const offset = Number.isFinite(rawOffset) ? Math.max(0, Math.floor(rawOffset)) : 0;
+    const photoDate = typeof body.photoDate === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(body.photoDate) ? body.photoDate : null;
+    try {
+      const photos = await listProgressPhotosForUser(userId, limit + 1, offset, photoDate);
+      return json({ photos: photos.slice(0, limit), hasMore: photos.length > limit });
+    }
+    catch (error) { return json({ error: String((error as any)?.message || 'Progress pictures unavailable') }, 502); }
+  }
+  if (body.action === 'progress-media') {
+    const photoId = String(body.photoId || '');
+    if (!/^[0-9a-f-]{36}$/i.test(photoId)) return json({ error: 'invalid progress picture' }, 400);
+    const rowRes = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(photoId)}&user_id=eq.${encodeURIComponent(userId)}&status=in.(uploaded,failed)&drive_file_id=not.is.null&select=connection_id,drive_file_id,mime_type`);
+    if (!rowRes.ok) return json({ error: 'Progress picture unavailable' }, 502);
+    const row = (await rowRes.json().catch(() => []))[0];
+    if (!row?.drive_file_id || !row?.connection_id) return json({ error: 'Progress picture is not ready' }, 409);
+    try {
+      const access = await accessToken(row.connection_id);
+      const media = await drive(`files/${encodeURIComponent(row.drive_file_id)}?alt=media`, access);
+      return new Response(media.body, { status: 200, headers: { ...corsHeaders, 'Content-Type': row.mime_type || media.headers.get('content-type') || 'application/octet-stream', 'Cache-Control': 'private, max-age=300' } });
+    } catch (error) {
+      const status = (error as any)?.status;
+      const needsReauth = status === 401 || status === 403 || (status === 400 && (error as any)?.googleAuthCode === 'invalid_grant');
+      if (needsReauth) await updateConnection(row.connection_id, { status: 'needs_reauth', last_error: 'Google authorization expired while loading a progress picture' }).catch(() => {});
+      return json({ error: 'Progress picture could not be loaded' }, status === 404 ? 404 : needsReauth ? 401 : 502);
+    }
+  }
+  if (body.action === 'progress-delete') {
+    const photoId = String(body.photoId || '');
+    if (!/^[0-9a-f-]{36}$/i.test(photoId)) return json({ error: 'invalid progress picture' }, 400);
+    const rowRes = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(photoId)}&user_id=eq.${encodeURIComponent(userId)}&select=id`);
+    if (!rowRes.ok || !(await rowRes.json().catch(() => []))[0]) return json({ error: 'Progress picture not found' }, 404);
+    const mark = await db(`zane_drive_progress_photos?id=eq.${encodeURIComponent(photoId)}&user_id=eq.${encodeURIComponent(userId)}`, { method: 'PATCH', headers: { Prefer: 'return=minimal' }, body: JSON.stringify({ status: 'deleting', next_attempt_at: new Date().toISOString(), locked_at: null, locked_by: null, last_error: null, updated_at: new Date().toISOString() }) });
+    if (!mark.ok) return json({ error: 'Could not remove progress picture' }, 502);
     return json({ ok: true });
   }
   if (body.action === 'configure') {
