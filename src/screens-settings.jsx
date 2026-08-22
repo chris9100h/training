@@ -902,7 +902,7 @@ function PasskeySheet({ open, onClose }) {
 }
 
 // ─── SETTINGS ────────────────────────────────────────────────────────
-function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, markIntentionalSignOut, tapDebugEnabled = false, onTapDebugChange }) {
+function SettingsScreen({ store, setStore, go, userId, runtimeConfig, syncStatus, openSupportInbox, openSupportSheet, onTestUpdateBanner, flushBeforeSignOut, runAtomicBackupRestore, markIntentionalSignOut, tapDebugEnabled = false, onTapDebugChange }) {
   const [confirmEl, confirm] = useConfirm();
   const [nickname, setNickname] = useStateSet(store.user?.name || '');
 
@@ -2177,7 +2177,13 @@ const [adminSheet, setAdminSheet] = useStateSet(false);
       setImporting(true);
       setImportProgress({ pct: 0, phase: 'Starting…' });
       try {
-        await LB.importFromBackup(backup, userId, (pct, phase) => setImportProgress({ pct, phase }), unitConvert);
+        if (typeof runAtomicBackupRestore !== 'function') throw new Error('Reload Zane before restoring this backup.');
+        await runAtomicBackupRestore(() => LB.importFromBackup(
+          backup,
+          userId,
+          (pct, phase) => setImportProgress({ pct, phase }),
+          unitConvert,
+        ));
         LB.clearLocal(userId); window.location.reload();
       }
       catch (err) { setImporting(false); await confirm(`Import failed: ${err.message || 'Unknown error'}`, { title: 'Error', ok: 'OK' }); }

@@ -1787,6 +1787,8 @@ async function deleteAllData(userId, { keepPush = false } = {}) {
 // same transaction that replaces the live rows.
 function validateBackup(b) {
   if (!b || typeof b !== 'object') return 'File is not a Zane backup.';
+  const version = b._version ?? 1;
+  if (!Number.isInteger(version) || version < 1 || version > 2) return `Unsupported backup version "${version}".`;
   for (const key of ['sessions', 'exercises', 'schedules']) {
     if (!Array.isArray(b[key])) return `Backup is missing or has an invalid "${key}" list.`;
   }
@@ -1837,682 +1839,571 @@ function remapExerciseDayKey(key, idRemap) {
   return match ? idRemap[match] + key.slice(match.length) : key;
 }
 
-// Restoring used to issue a client-side delete across 33 tables and then upload
-// the replacement in many unrelated requests. Any tab close, network error or
-// rejected row after the delete left a partially wiped account. Keep restore
-// fail-closed until a staged, size-bounded server contract can validate the
-// complete payload and perform the replacement in one Postgres transaction.
-// Export remains available. Most importantly, direct callers cannot bypass the
-// disabled Settings button and reach the old destructive implementation.
-const BACKUP_RESTORE_AVAILABLE = false;
+// The Preview corruption, rollback, retry, privilege and valid-restore matrix
+// passed before this gate was enabled. The browser writes only inert staging
+// rows through RPCs; the final RPC performs the live replacement in one server
+// transaction. There is no browser-side delete/upsert fallback.
+const BACKUP_RESTORE_AVAILABLE = true;
 const BACKUP_RESTORE_UNAVAILABLE_MESSAGE = 'Backup restore is temporarily unavailable while atomic server-side restore is being completed. No account data was changed.';
+const BACKUP_RESTORE_PROTOCOL_VERSION = 1;
+const BACKUP_RESTORE_CHUNK_MAX_BYTES = 240 * 1024;
+const BACKUP_RESTORE_TOTAL_MAX_BYTES = 32 * 1024 * 1024;
+const BACKUP_RESTORE_MAX_CHUNKS = 512;
+const BACKUP_RESTORE_RPC_ATTEMPTS = 3;
+const BACKUP_RESTORE_PENDING_PREFIX = 'logbook-backup-restore-pending-';
 
-async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
-  // unitConvert: { multiplier: number, targetUnit: 'kg'|'lbs'|'mixed' } | null
-  // Validate the recognizable outer shape, then fail before constructing rows,
-  // generating replacement ids, reporting destructive progress or touching
-  // Supabase. The unreachable mapping below remains temporarily so the schema
-  // coverage harness can evaluate it after removing this exact guard in its
-  // isolated VM; production has no second callable unsafe function.
+function backupRestorePendingKey(userId) {
+  return BACKUP_RESTORE_PENDING_PREFIX + String(userId || 'anonymous');
+}
+
+function readPendingBackupRestore(userId, contentHash) {
+  try {
+    const pending = JSON.parse(localStorage.getItem(backupRestorePendingKey(userId)) || 'null');
+    return pending?.contentHash === contentHash && typeof pending?.operationId === 'string'
+      ? pending.operationId
+      : null;
+  } catch (_) { return null; }
+}
+
+function savePendingBackupRestore(userId, contentHash, operationId) {
+  try {
+    localStorage.setItem(backupRestorePendingKey(userId), JSON.stringify({ contentHash, operationId, createdAt: Date.now() }));
+  } catch (_) {}
+}
+
+function clearPendingBackupRestore(userId, operationId) {
+  try {
+    const key = backupRestorePendingKey(userId);
+    const pending = JSON.parse(localStorage.getItem(key) || 'null');
+    if (!pending || pending.operationId === operationId) localStorage.removeItem(key);
+  } catch (_) {}
+}
+
+function newBackupRestoreOperationId(contentHash) {
+  const cryptoApi = (typeof crypto !== 'undefined' ? crypto : null) || window.crypto;
+  if (!cryptoApi?.getRandomValues) throw new Error('This browser cannot securely start a backup restore. Try a newer browser or device.');
+  const random = new Uint8Array(12);
+  cryptoApi.getRandomValues(random);
+  const nonce = Array.from(random, byte => byte.toString(16).padStart(2, '0')).join('');
+  return `restore_${contentHash.slice(0, 32)}_${nonce}`;
+}
+
+function backupRestoreByteLength(value) {
+  return new TextEncoder().encode(typeof value === 'string' ? value : stableJson(value)).byteLength;
+}
+
+async function backupRestoreSha256(value) {
+  const subtle = (typeof crypto !== 'undefined' ? crypto.subtle : null) || window.crypto?.subtle;
+  if (!subtle) throw new Error('This browser cannot securely verify backup chunks. Try a newer browser or device.');
+  const bytes = new TextEncoder().encode(typeof value === 'string' ? value : stableJson(value));
+  const digest = new Uint8Array(await subtle.digest('SHA-256', bytes));
+  return Array.from(digest, b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function backupRestoreReceipt(data) {
+  return (Array.isArray(data) ? data[0] : data) || {};
+}
+
+function backupRestoreRetryable(error) {
+  const code = String(error?.code || error?.cause?.code || '');
+  const status = Number(error?.status || error?.cause?.status || 0);
+  const message = String(error?.message || error || '');
+  return status >= 500 || status === 0 || ['57014', '53300', '53400', '57P01', '08000', '08003', '08006', '08001'].includes(code)
+    || /network|fetch|timeout|timed out|connection|temporar/i.test(message);
+}
+
+async function backupRestoreRpc(name, args) {
+  let lastError;
+  for (let attempt = 0; attempt < BACKUP_RESTORE_RPC_ATTEMPTS; attempt++) {
+    try {
+      const { data, error } = await _supabase.rpc(name, args);
+      if (!error) return backupRestoreReceipt(data);
+      lastError = Object.assign(new Error(error.message || `${name} failed`), { cause: error, code: error.code, status: error.status });
+    } catch (error) {
+      lastError = error;
+    }
+    if (!backupRestoreRetryable(lastError) || attempt === BACKUP_RESTORE_RPC_ATTEMPTS - 1) throw lastError;
+    await new Promise(resolve => setTimeout(resolve, 250 * (2 ** attempt)));
+  }
+  throw lastError || new Error(`${name} failed`);
+}
+
+function prepareBackupRestore(backup, operationId, unitConvert = null) {
   const invalid = validateBackup(backup);
   if (invalid) throw new Error(invalid);
-  throw new Error(BACKUP_RESTORE_UNAVAILABLE_MESSAGE);
-
+  if (unitConvert && (!(unitConvert.multiplier > 0) || !isFinite(unitConvert.multiplier)
+    || !['kg', 'lbs', 'mixed'].includes(unitConvert.targetUnit))) {
+    throw new Error('Backup weight conversion is invalid.');
+  }
   const sett = backup.settings ?? {};
-  // Every stored weight has to move with the unit, not just sets[].kg: a
-  // half-converted restore leaves increments, training maxes and the body
-  // weight history reading as the OLD unit while the sets read as the new one.
   const convKg = unitConvert
     ? v => (typeof v === 'number' && isFinite(v) ? Math.round(v * unitConvert.multiplier * 100) / 100 : v)
     : v => v;
-  // { equipment: { increment, maxKg } } plus the plateInventoryKg /
-  // plateInventoryLbs arrays, which are already unit-specific by key and must
-  // NOT be scaled.
+  const convKgMap = obj => {
+    if (!unitConvert || !obj || typeof obj !== 'object') return obj || {};
+    return Object.fromEntries(Object.entries(obj).map(([key, value]) => [key, convKg(value)]));
+  };
   const convEquipmentConfig = cfg => {
     if (!unitConvert || !cfg || typeof cfg !== 'object') return cfg ?? null;
-    const out = {};
-    for (const k in cfg) {
-      const v = cfg[k];
-      if (!v || typeof v !== 'object' || Array.isArray(v)) { out[k] = v; continue; }
-      out[k] = { ...v, ...(v.increment != null ? { increment: convKg(v.increment) } : {}), ...(v.maxKg != null ? { maxKg: convKg(v.maxKg) } : {}) };
-    }
-    return out;
+    return Object.fromEntries(Object.entries(cfg).map(([key, value]) => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return [key, value];
+      return [key, { ...value,
+        ...(value.increment != null ? { increment: convKg(value.increment) } : {}),
+        ...(value.maxKg != null ? { maxKg: convKg(value.maxKg) } : {}),
+      }];
+    }));
   };
-  // meso weight boosts/declines are { exId_dayId: kgDelta } maps.
-  const convKgMap = obj => {
-    if (!unitConvert || !obj || typeof obj !== 'object') return obj;
-    const out = {};
-    for (const k in obj) out[k] = convKg(obj[k]);
-    return out;
+  const convertDrops = drops => {
+    if (!unitConvert || !drops) return drops ?? null;
+    const stretch = value => value ? { ...value, kg: convKg(value.kg) } : value;
+    if (Array.isArray(drops)) return drops.map(d => ({ ...d, kg: convKg(d.kg), stretch: stretch(d.stretch) }));
+    return { ...drops, stretch: stretch(drops.stretch) };
   };
-  const importSessions = backup.sessions?.filter(s => s.id) ?? [];
+  const convertHornLoads = loads => unitConvert && Array.isArray(loads)
+    ? loads.map(h => h && typeof h === 'object' ? { ...h, kg: convKg(h.kg) } : h)
+    : loads ?? null;
 
   const idRemap = {};
-  const exerciseRows = (backup.exercises || []).map(e => {
-    const newId = uid();
+  const seenExerciseIds = new Set();
+  const exerciseRows = backup.exercises.map((e, index) => {
+    if (seenExerciseIds.has(e.id)) throw new Error(`Backup contains duplicate exercise id "${e.id}".`);
+    seenExerciseIds.add(e.id);
+    const newId = `rst_${operationId.slice(-20)}_${index.toString(36)}`;
     idRemap[e.id] = newId;
-    return { id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null, unilateral: e.unilateral ?? false, equipment: e.equipment ?? null, progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null, no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null, pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null, youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned, progression_increment: convKg(e.progression_increment ?? null), horn_labels: e.horn_labels ?? null, user_id: userId };
+    return {
+      id: newId, name: e.name, tags: e.tags ?? [], note: e.note ?? '', category: e.category ?? null,
+      unilateral: e.unilateral ?? false, equipment: e.equipment ?? null,
+      progression_reps: e.progression_reps ?? null, movement_type: e.movement_type ?? null,
+      no_weight_reps: !!e.no_weight_reps, log_mode: e.log_mode ?? null,
+      pull_bodyweight: !!e.pull_bodyweight, bodyweight_mode: e.bodyweight_mode ?? null,
+      youtube_url: e.youtube_url ?? null, note_pinned: !!e.note_pinned,
+      progression_increment: convKg(e.progression_increment ?? null), horn_labels: e.horn_labels ?? null,
+    };
   });
-  // Exercises got fresh ids above, everything that references an exId must be
-  // remapped or it dangles after restore. remapEx: single id; remapExKeyed:
-  // { exId: v } maps; remapExDayKeyed: { exId_dayId: v } maps.
   const remapEx = id => idRemap[id] ?? id;
-  const remapExKeyed = obj => {
-    const out = {};
-    for (const k in (obj || {})) out[remapEx(k)] = obj[k];
-    return out;
-  };
-  const remapExDayKeyed = obj => {
-    const out = {};
-    for (const k in (obj || {})) out[remapExerciseDayKey(k, idRemap)] = obj[k];
-    return out;
-  };
-  const remapDays = days => (Array.isArray(days) ? days : []).map(d => ({
-    ...d,
-    items: Array.isArray(d.items)
-      ? d.items.map(it => (it.exId != null ? { ...it, exId: remapEx(it.exId) } : it))
-      : d.items,
+  const remapExKeyed = obj => Object.fromEntries(Object.entries(obj || {}).map(([key, value]) => [remapEx(key), value]));
+  const remapExDayKeyed = obj => Object.fromEntries(Object.entries(obj || {}).map(([key, value]) => [remapExerciseDayKey(key, idRemap), value]));
+  const remapDays = days => (Array.isArray(days) ? days : []).map(day => ({
+    ...day,
+    items: Array.isArray(day.items) ? day.items.map(item => item.exId != null ? { ...item, exId: remapEx(item.exId) } : item) : day.items,
   }));
-  const sessionRows = importSessions.map(s => sessionToRow(s, userId));
-  const settingsRow = {
-    user_id: userId,
+  const mapProgramData = value => {
+    if (!value || typeof value !== 'object') return value ?? null;
+    const pd = { ...value };
+    if (pd.mainLifts) pd.mainLifts = remapExKeyed(pd.mainLifts);
+    if (pd.tmHistory) pd.tmHistory = remapExKeyed(pd.tmHistory);
+    if (unitConvert && pd.mainLifts) pd.mainLifts = Object.fromEntries(Object.entries(pd.mainLifts).map(([key, lift]) => [key, lift && typeof lift === 'object' ? { ...lift, tm: convKg(lift.tm) } : lift]));
+    if (unitConvert && pd.tmHistory) pd.tmHistory = Object.fromEntries(Object.entries(pd.tmHistory).map(([key, history]) => [key, Array.isArray(history) ? history.map(item => item && typeof item === 'object' ? { ...item, tm: convKg(item.tm) } : item) : history]));
+    if (unitConvert && pd.unit) pd.unit = unitConvert.targetUnit === 'lbs' ? 'lbs' : 'kg';
+    delete pd.bumpedCycle;
+    return pd;
+  };
+
+  const remapMesoRecap = value => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return value ?? null;
+    const remapContrib = contrib => remapExDayKeyed(contrib || {});
+    const remapTargets = targets => Array.isArray(targets) ? targets.map(target => {
+      if (!target || typeof target !== 'object') return target;
+      return {
+        ...target,
+        ...(target.exId != null ? { exId: remapEx(target.exId) } : {}),
+        ...(typeof target.key === 'string' ? { key: remapExerciseDayKey(target.key, idRemap) } : {}),
+      };
+    }) : targets;
+    const remapMuscleAnswers = (bucket, withExerciseIds = false) => Object.fromEntries(
+      Object.entries(bucket || {}).map(([muscle, record]) => {
+        if (!record || typeof record !== 'object' || Array.isArray(record)) return [muscle, record];
+        return [muscle, {
+          ...record,
+          ...(withExerciseIds && Array.isArray(record.exIds) ? { exIds: record.exIds.map(remapEx) } : {}),
+          ...(Array.isArray(record.targets) ? { targets: remapTargets(record.targets) } : {}),
+          ...(record.contrib && typeof record.contrib === 'object' ? { contrib: remapContrib(record.contrib) } : {}),
+        }];
+      }),
+    );
+    const raw = value.raw && typeof value.raw === 'object' && !Array.isArray(value.raw)
+      ? value.raw
+      : null;
+    const answers = raw?.answers && typeof raw.answers === 'object' && !Array.isArray(raw.answers)
+      ? raw.answers
+      : null;
+    const joint = answers ? Object.fromEntries(Object.entries(answers.joint || {}).map(([oldExId, record]) => {
+      const newExId = remapEx(oldExId);
+      if (!record || typeof record !== 'object' || Array.isArray(record)) return [newExId, record];
+      return [newExId, {
+        ...record,
+        ...(record.exId != null || oldExId ? { exId: remapEx(record.exId ?? oldExId) } : {}),
+        ...(record.contrib && typeof record.contrib === 'object' ? { contrib: remapContrib(record.contrib) } : {}),
+      }];
+    })) : null;
+    const mappedRaw = raw ? {
+      ...raw,
+      ...(raw.repMissBase && typeof raw.repMissBase === 'object' ? { repMissBase: remapContrib(raw.repMissBase) } : {}),
+      ...(raw.negOwner && typeof raw.negOwner === 'object' ? { negOwner: remapContrib(raw.negOwner) } : {}),
+      ...(answers ? { answers: {
+        ...answers,
+        soreness: remapMuscleAnswers(answers.soreness),
+        joint,
+        volume: remapMuscleAnswers(answers.volume, true),
+      } } : {}),
+    } : null;
+    return {
+      ...value,
+      ...(unitConvert ? { unit: weightAxisUnit(unitConvert.targetUnit) } : {}),
+      ...(Array.isArray(value.gains) ? { gains: value.gains.map(gain => gain && typeof gain === 'object' ? {
+        ...gain,
+        ...(typeof gain.key === 'string' ? { key: remapExerciseDayKey(gain.key, idRemap) } : {}),
+        ...(gain.weightDelta != null ? { weightDelta: convKg(gain.weightDelta) } : {}),
+      } : gain) } : {}),
+      ...(mappedRaw ? { raw: mappedRaw } : {}),
+    };
+  };
+
+  const importSessions = backup.sessions.filter(s => s?.id);
+  const sessionRows = importSessions.map(s => ({
+    id: s.id, schedule_id: s.scheduleId ?? null, day_id: s.dayId ?? null, day_name: s.dayName ?? null,
+    date: s.date ?? null, ended: s.ended ?? null, started_at: s.startedAt ?? null,
+    duration_minutes: s.durationMinutes ?? null, feel: s.feel ?? null,
+    is_bonus: !!s.isBonus, is_freestyle: !!s.isFreestyle, is_deload: !!s.isDeload,
+    is_cleanup: !!s.isCleanup, imported: !!s.imported || String(s.id).startsWith('import_'),
+    meso_recap: remapMesoRecap(s.mesoRecap), readiness: s.readiness ?? null,
+    signal_weight: s.signalWeight ?? null, cycle_pos: s.cyclePos ?? null,
+  }));
+  const entryRows = [];
+  const setRows = [];
+  for (const session of importSessions) {
+    (session.entries || []).forEach((entry, entryIndex) => {
+      const entryId = `${session.id}_e${entryIndex}`;
+      entryRows.push({
+        id: entryId, session_id: session.id, entry_idx: entryIndex,
+        ex_id: remapEx(entry.exId), name: entry.name || '', planned_sets: entry.plannedSets ?? null,
+        planned_reps: entry.plannedReps ?? null, planned_reps_per_set: entry.plannedRepsPerSet ?? null,
+        planned_reps_max: entry.plannedRepsMax ?? null,
+        planned_progression_offset: entry.plannedProgressionOffset ?? null,
+        planned_techniques: entry.plannedTechniques ?? null, note: entry.note || '',
+        superset_group: entry.supersetGroup ?? null,
+      });
+      (entry.sets || []).forEach((set, setIndex) => setRows.push({
+        id: `${entryId}_s${setIndex}`, session_id: session.id, entry_id: entryId, set_idx: setIndex,
+        kg: convKg(set.kg ?? null), reps: set.reps ?? null, reps_l: set.repsL ?? null,
+        reps_r: set.repsR ?? null, time_sec: set.timeSec ?? null,
+        added_kg: convKg(set.addedKg ?? null), done: set.done ?? false, skipped: set.skipped ?? false,
+        warmup: set.warmup ?? false, technique: set.technique ?? null,
+        drops: convertDrops(set.drops), horn_loads: convertHornLoads(set.hornLoads),
+      }));
+    });
+  }
+
+  const hasProfile = !!backup.user && (backup.user.name != null
+    || Object.prototype.hasOwnProperty.call(backup.user, 'xHandle')
+    || Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePublic')
+    || Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePromptOptedOut'));
+  const profileRows = hasProfile ? [{
+    name: backup.user?.name || '', x_handle: normalizeXHandle(backup.user?.xHandle),
+    x_handle_public: backup.user?.xHandlePublic ?? true,
+    x_handle_prompt_opted_out: backup.user?.xHandlePromptOptedOut ?? false,
+  }] : [];
+  // Push/provider and social/coaching preferences deliberately stay live. They
+  // are account/device relationships, not portable personal backup data.
+  const settingsRows = [{
     active_schedule_id: backup.activeScheduleId ?? null,
     active_meal_template_id: backup.activeMealTemplateId ?? null,
-    cycle_index: backup.cycleIndex ?? 0,
-    cycle_start_date: backup.cycleStartDate ?? null,
-    week_plan_start_date: backup.weekPlanStartDate ?? null,
-    last_advanced_date: backup.lastAdvancedDate ?? null,
+    cycle_index: backup.cycleIndex ?? 0, cycle_start_date: backup.cycleStartDate ?? null,
+    week_plan_start_date: backup.weekPlanStartDate ?? null, last_advanced_date: backup.lastAdvancedDate ?? null,
     in_progress_session_id: backup.inProgress ?? null,
     unit: unitConvert?.targetUnit ?? sett.unit ?? null,
-    rest_default: sett.restDefault || 120,
-    rest_big: sett.restBig || 180,
-    rest_medium: sett.restMedium || 120,
-    rest_small: sett.restSmall || 90,
+    rest_default: sett.restDefault || 120, rest_big: sett.restBig || 180,
+    rest_medium: sett.restMedium || 120, rest_small: sett.restSmall || 90,
     auto_open_rest_timer: sett.autoOpenRestTimer ?? false,
-    push_enabled: sett.pushEnabled ?? false,
-    pushover_user_key: sett.pushoverUserKey ?? null,
-    use_pushover: sett.usePushover ?? false,
-    cycle_week_view: sett.cycleWeekView ?? false,
-    week_start_day: normalizeWeekStartDay(sett.weekStartDay),
-    accent_color: sett.accentColor ?? 'copper',
-    dark_mode: sett.darkMode ?? 'dark',
-    custom_day_types: backup.customDayTypes ?? [],
-    reminder_enabled: sett.reminderEnabled ?? false,
-    reminder_time: sett.reminderTime ?? '07:00',
-    tempo_enabled: sett.tempoEnabled ?? false,
-    tempo_eccentric: sett.tempoEccentric ?? null,
-    tempo_concentric: sett.tempoConcentric ?? null,
-    smart_progression: sett.smartProgression ?? false,
-    progression_range_top: sett.progressionRangeTop ?? null,
-    equipment_config: convEquipmentConfig(sett.equipmentConfig),
-    weight_fill_down: sett.weightFillDown ?? true,
-    net_carbs: sett.netCarbs ?? false,
-    food_force_grams: sett.foodForceGrams ?? false,
-    plan_mode: sett.planMode ?? true,
-    hide_food_categories: sett.hideFoodCategories ?? false,
+    cycle_week_view: sett.cycleWeekView ?? false, week_start_day: normalizeWeekStartDay(sett.weekStartDay),
+    accent_color: sett.accentColor ?? 'copper', dark_mode: sett.darkMode ?? 'dark',
+    custom_day_types: backup.customDayTypes ?? [], reminder_enabled: sett.reminderEnabled ?? false,
+    reminder_time: sett.reminderTime ?? '07:00', tempo_enabled: sett.tempoEnabled ?? false,
+    tempo_eccentric: sett.tempoEccentric ?? null, tempo_concentric: sett.tempoConcentric ?? null,
+    smart_progression: sett.smartProgression ?? false, progression_range_top: sett.progressionRangeTop ?? null,
+    equipment_config: convEquipmentConfig(sett.equipmentConfig), weight_fill_down: sett.weightFillDown ?? true,
+    net_carbs: sett.netCarbs ?? false, food_force_grams: sett.foodForceGrams ?? false,
+    plan_mode: sett.planMode ?? true, hide_food_categories: sett.hideFoodCategories ?? false,
     show_warmup_in_summary: sett.showWarmupInSummary ?? true,
-    show_coaching_tab: sett.showCoachingTab ?? false,
-    show_friends_tab: sett.showFriendsTab ?? false,
-    social_push_messages: sett.socialPushMessages ?? true,
-    social_push_friend_requests: sett.socialPushFriendRequests ?? true,
-    social_push_finished_comments: sett.socialPushFinishedComments ?? false,
-    social_push_friend_started: sett.socialPushFriendStarted ?? false,
-    be_your_own_coach: sett.beYourOwnCoach ?? false,
-    session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90,
-    macro_targets: sett.macroTargets ?? null,
-    macro_calc: sett.macroCalc ?? null,
-    meal_windows: sett.mealWindows ?? null,
-    meal_categories: sett.mealCategories ?? null,
-    fasting_protocol: sett.fastingProtocol ?? null,
-    show_health_tab: sett.showHealthTab ?? false,
-    show_water_tab: sett.showWaterTab ?? false,
-    show_food_tab: sett.showFoodTab ?? false,
-    onboarding_completed: sett.onboardingCompleted ?? false,
-    show_regression: sett.showRegression ?? true,
-    pin_all_notes: sett.pinAllNotes ?? false,
-    glucose_unit: sett.glucoseUnit ?? 'mmol',
-    temp_unit: sett.tempUnit ?? null,
-    hidden_health_cards: sett.hiddenHealthCards ?? null,
-    fever_threshold_c: sett.feverThresholdC ?? 38,
-    cleanup_percent: sett.cleanupPercent ?? 20,
-    watermark_opacity: sett.watermarkOpacity ?? null,
-    default_checkin_schema: sett.defaultCheckinSchema ?? null,
-    vip_background: sett.vipBackground ?? null,
-    active_cardio_plan_id: backup.activeCardioPlanId ?? null,
-    status_mode: backup.statusMode ?? null,
-    status_mode_since: backup.statusModeSince ?? null,
+    session_timeout_minutes: sett.sessionTimeoutMinutes ?? 90, macro_targets: sett.macroTargets ?? null,
+    macro_calc: sett.macroCalc ?? null, meal_windows: sett.mealWindows ?? null,
+    meal_categories: sett.mealCategories ?? null, fasting_protocol: sett.fastingProtocol ?? null,
+    show_health_tab: sett.showHealthTab ?? false, show_water_tab: sett.showWaterTab ?? false,
+    show_food_tab: sett.showFoodTab ?? false, onboarding_completed: sett.onboardingCompleted ?? false,
+    show_regression: sett.showRegression ?? true, pin_all_notes: sett.pinAllNotes ?? false,
+    glucose_unit: sett.glucoseUnit ?? 'mmol', temp_unit: sett.tempUnit ?? null,
+    hidden_health_cards: normalizeHiddenHealthCards(sett.hiddenHealthCards),
+    fever_threshold_c: sett.feverThresholdC ?? 38, cleanup_percent: sett.cleanupPercent ?? 20,
+    watermark_opacity: sett.watermarkOpacity ?? null, default_checkin_schema: sett.defaultCheckinSchema ?? null,
+    vip_background: sett.vipBackground ?? null, active_cardio_plan_id: backup.activeCardioPlanId ?? null,
+    status_mode: backup.statusMode ?? null, status_mode_since: backup.statusModeSince ?? null,
     deload_prompt_dismissed_at: backup.deloadPromptDismissedAt ?? null,
-    water_goal_ml: sett.waterGoalMl ?? 2000,
-    water_start_time: sett.waterStartTime ?? '08:00',
-    water_end_time: sett.waterEndTime ?? '22:00',
-    water_bottles_today: sett.waterBottlesToday ?? 0,
-    water_bottles_date: sett.waterBottlesDate ?? null,
-    water_drinks: sett.waterDrinks ?? null,
-    water_coffee_sizes: sett.waterCoffeeSizes ?? null,
-    water_bottle_enabled: sett.waterBottleEnabled ?? true,
-    water_bottle_ml: sett.waterBottleMl ?? 1500,
-    water_reminder_enabled: sett.waterReminderEnabled ?? false,
-    meal_reminder_enabled: sett.mealReminderEnabled ?? false,
-    meds_enabled: sett.medsEnabled ?? false,
+    water_goal_ml: sett.waterGoalMl ?? 2000, water_start_time: sett.waterStartTime ?? '08:00',
+    water_end_time: sett.waterEndTime ?? '22:00', water_bottles_today: sett.waterBottlesToday ?? 0,
+    water_bottles_date: sett.waterBottlesDate ?? null, water_drinks: sett.waterDrinks ?? null,
+    water_coffee_sizes: sett.waterCoffeeSizes ?? null, water_bottle_enabled: sett.waterBottleEnabled ?? true,
+    water_bottle_ml: sett.waterBottleMl ?? 1500, water_reminder_enabled: sett.waterReminderEnabled ?? false,
+    meal_reminder_enabled: sett.mealReminderEnabled ?? false, meds_enabled: sett.medsEnabled ?? false,
     medication_reminder_enabled: sett.medicationReminderEnabled ?? false,
     daily_log_reminder_enabled: sett.dailyLogReminderEnabled ?? false,
-    daily_log_reminder_time: sett.dailyLogReminderTime ?? '19:00',
-    pillbox_slots: sett.pillboxSlots ?? null,
+    daily_log_reminder_time: sett.dailyLogReminderTime ?? '19:00', pillbox_slots: sett.pillboxSlots ?? null,
+  }];
+
+  const sections = {
+    profile: profileRows,
+    exercises: exerciseRows,
+    schedules: backup.schedules.map(s => ({
+      id: s.id, name: s.name, days: remapDays(s.days), archived: !!s.archived,
+      versions: Array.isArray(s.versions) ? s.versions.map(v => ({ ...v, days: remapDays(v.days) })) : [],
+      is_flex: !!s.is_flex, sessions_per_week: s.sessions_per_week ?? null,
+      mesocycle_weeks: s.mesocycle_weeks ?? null, mesocycle_start_rir: s.mesocycle_start_rir ?? null,
+      mesocycle_end_rir: s.mesocycle_end_rir ?? null,
+      mesocycle_rir_enabled: s.mesocycle_rir_enabled ?? true,
+      mesocycle_autoregulate: !!s.mesocycle_autoregulate,
+      mesocycle_autoregulate_mode: s.mesocycle_autoregulate_mode ?? null,
+      program_type: s.program_type ?? null, program_data: mapProgramData(s.program_data),
+      is_template: !!s.is_template,
+    })),
+    sessions: sessionRows,
+    settings: settingsRows,
+    session_entries: entryRows,
+    sets: setRows,
+    skips: (backup.skips || []).map(s => ({ id: s.id, date: s.date, day_id: s.dayId, day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null })),
+    cardio_logs: (backup.cardioLogs || []).map(l => ({ id: l.id, date: l.date, type: l.type ?? null, duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null, pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null, note: l.note ?? null, session_id: l.sessionId ?? null })),
+    daily_logs: (backup.dailyLogs || []).map(l => ({
+      id: l.id, date: l.date, weight: convKg(l.weight ?? null), steps: l.steps ?? null,
+      waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
+      arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
+      body_fat_pct: l.bodyFatPct ?? null, calories: l.calories ?? null, protein: l.protein ?? null,
+      carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null, water_ml: l.waterMl ?? null,
+      note: l.note ?? null, off_plan_note: l.offPlanNote ?? null, meal_of_choice: !!l.mealOfChoice,
+      meal_of_choice_hour: l.mealOfChoiceHour ?? null, food_day_closed: !!l.foodDayClosed,
+      adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
+      daily_coach_fields: l.coachFields ?? null, ai_summary: l.aiSummary ?? null,
+      ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
+    })),
+    water_logs: (backup.waterLogs || []).map(l => ({ id: l.id, date: l.date, time: l.time, amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null, breakdown: l.breakdown ?? null })),
+    adaptive_tdee_history: (backup.adaptiveTdeeHistory || []).filter(h => h?.asOfDate).map(h => ({
+      as_of_date: h.asOfDate, window_start: h.windowStart, window_end: h.windowEnd,
+      tdee_kcal: h.tdee, avg_calories_kcal: h.avgCalories, weight_start_kg: h.weightStartKg,
+      weight_end_kg: h.weightEndKg, weight_change_kg: h.weightChangeKg,
+      weight_rate_kg_week: h.weightRateKgWeek, day_span: h.daySpan, calorie_days: h.calorieDays,
+      weigh_ins: h.weighIns, decision: h.decision || 'reconstructed', source: h.source || 'reconstructed',
+      targets_snapshot: h.targetsSnapshot ?? null, calculated_at: h.calculatedAt ?? null,
+      decided_at: h.decidedAt ?? null, created_at: h.createdAt ?? null, updated_at: h.updatedAt ?? null,
+    })),
+    food_recipes: (backup.foodRecipes || []).map(r => ({ id: r.id, name: r.name, items: r.items || [], portions: r.portions || 1, cooked_weight_g: r.cookedWeightG ?? null, updated_at: r.updatedAt ?? null })),
+    food_meal_plans: (backup.foodMealPlans || []).map(p => ({ id: p.id, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate, updated_at: p.updatedAt ?? null })),
+    food_template_slots: (backup.foodTemplateSlots || []).map(t => ({
+      id: t.id, food_id: t.foodId ?? null, food_name: t.foodName, brand: t.brand ?? null,
+      source: t.source ?? null, quantity_g: t.quantityG, calories: t.calories,
+      protein: t.protein, carbs: t.carbs, fat: t.fat, fiber: t.fiber ?? null,
+      sugar: t.sugar ?? null, sat_fat: t.satFat ?? null, sodium_mg: t.sodiumMg ?? null,
+      recipe_items: t.recipeItems ?? null, recipe_id: t.recipeId ?? null,
+      logged_total_portions: t.loggedTotalPortions ?? null, logged_cooked_grams: t.loggedCookedGrams ?? null,
+      logged_cooked_weight_g: t.loggedCookedWeightG ?? null, hour: t.hour,
+      day_type: t.dayType ?? 'any', sort_idx: t.sortIdx ?? 0, meal_plan_id: t.mealPlanId ?? null,
+    })),
+    food_logs: (backup.foodLogs || []).map(l => ({
+      id: l.id, date: l.date, time: l.time, food_id: l.foodId ?? null, food_name: l.foodName,
+      brand: l.brand ?? null, source: l.source ?? null, quantity_g: l.quantityG,
+      calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
+      fiber: l.fiber ?? null, sugar: l.sugar ?? null, sat_fat: l.satFat ?? null,
+      sodium_mg: l.sodiumMg ?? null, recipe_items: l.recipeItems ?? null,
+      recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
+      logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
+      logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
+      planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
+    })),
+    food_favorites: (backup.foodFavorites || []).map(f => ({
+      id: f.id, food_id: f.foodId ?? null, food_name: f.foodName, brand: f.brand ?? null,
+      source: f.source ?? null, quantity_g: f.quantityG, calories: f.calories,
+      protein: f.protein, carbs: f.carbs, fat: f.fat, fiber: f.fiber ?? null,
+      sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
+      units: f.units ?? [],
+    })),
+    food_barcode_overrides: (backup.foodBarcodeOverrides || []).map(o => ({
+      source: o.source, source_id: o.sourceId, food_name: o.foodName, brand: o.brand ?? null,
+      kcal_per_100g: o.kcalPer100g, protein_per_100g: o.proteinPer100g,
+      carbs_per_100g: o.carbsPer100g, fat_per_100g: o.fatPer100g,
+      created_at: o.createdAt ?? null, updated_at: o.updatedAt ?? o.createdAt ?? null,
+    })),
+    food_shopping_prefs: (backup.foodShoppingPrefs || []).map(p => ({
+      id: p.id, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
+      excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null,
+      package_size_g: p.packageSizeG ?? null, low_stock_threshold_g: p.lowStockThresholdG ?? null,
+      stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
+      food_name: p.foodName, brand: p.brand ?? null, updated_at: p.updatedAt ?? null,
+    })),
+    medication_plans: (backup.medicationPlans || []).map(p => ({ id: p.id, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate, active: p.active !== false, updated_at: p.updatedAt ?? null })),
+    medications: (backup.medications || []).map(m => ({
+      id: m.id, name: m.name, brand: m.brand ?? null, category: m.category ?? null,
+      unit_label: m.unitLabel || 'pills', package_size: m.packageSize ?? null,
+      low_stock_threshold: m.lowStockThreshold ?? null, stock_baseline: m.stockBaseline ?? null,
+      stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
+      exclude_from_pillbox: !!m.excludeFromPillbox, exclude_from_low_stock: !!m.excludeFromLowStock,
+      track_stock: m.trackStock != null ? !!m.trackStock : m.stockBaseline != null,
+      updated_at: m.updatedAt ?? null,
+    })),
+    medication_plan_items: (backup.medicationPlanItems || []).map(item => ({ id: item.id, medication_plan_id: item.medicationPlanId, medication_id: item.medicationId })),
+    medication_schedule_slots: (backup.medicationScheduleSlots || []).map(s => ({
+      id: s.id, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
+      weekdays: s.weekdays || [], hour: s.hour, dose_qty: s.doseQty,
+      interval_days: s.intervalDays ?? null, start_date: s.startDate ?? null,
+      end_date: s.endDate ?? null, updated_at: s.updatedAt ?? null,
+    })),
+    medication_logs: (backup.medicationLogs || []).map(l => ({
+      id: l.id, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
+      date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned,
+      skipped: !!l.skipped, schedule_slot_id: l.scheduleSlotId ?? null,
+      reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
+      snoozed_until: l.snoozedUntil ?? null,
+    })),
+    food_template_days: (backup.foodTemplateDays || []).map(d => ({ id: d.id, date: d.date })),
+    workout_templates: (backup.workoutTemplates || []).map(t => ({ id: t.id, name: t.name, exercises: (t.exercises || []).map(e => e.exId != null ? { ...e, exId: remapEx(e.exId) } : e) })),
+    checkin_schema_templates: (backup.checkinSchemaTemplates || []).map(t => ({ id: t.id, name: t.name, schema: t.schema || [] })),
+    glucose_logs: (backup.glucoseLogs || []).map(l => ({ id: l.id, date: l.date, time: l.time, value_mmol: l.valueMmol ?? null, context: l.context ?? 'other', note: l.note ?? null })),
+    blood_pressure_logs: (backup.bloodPressureLogs || []).map(l => ({ id: l.id, date: l.date, time: l.time, systolic: l.systolic ?? null, diastolic: l.diastolic ?? null, note: l.note ?? null })),
+    body_temp_logs: (backup.bodyTempLogs || []).map(l => ({ id: l.id, date: l.date, time: l.time, value_c: l.valueC ?? null, note: l.note ?? null })),
+    cardio_plans: (backup.cardioPlans || []).map(p => ({
+      id: p.id, name: p.name, activity_type: p.activityType, archived: p.archived ?? false,
+      mode: p.mode ?? null, days: p.days ?? {}, manual_targets: p.manualTargets ?? null,
+      goal: p.goal ?? null, goal_due_date: p.goalDueDate ?? null, start_fitness: p.startFitness ?? null,
+      generated_weeks: p.generatedWeeks ?? null, plan_start_date: p.planStartDate ?? null,
+    })),
+    status_periods: (backup.statusPeriods || []).map(p => ({ id: p.id, mode: p.mode, started_at: p.startedAt ?? null, ended_at: p.endedAt ?? null })),
+    meso_states: (backup.mesoStates || []).map(m => ({
+      schedule_id: m.scheduleId, weeks: m.weeks, start_date: m.startDate ?? null,
+      start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
+      deltas: remapExDayKeyed(m.deltas), weight_boosts: convKgMap(remapExDayKeyed(m.weightBoosts)),
+      weight_boost_declines: remapExDayKeyed(m.weightBoostDeclines),
+      joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
+      growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
+      affinity: remapExKeyed(m.affinity), autoreg_state: m.autoregState ?? null,
+      completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
+    })),
   };
+  return { backupVersion: backup._version ?? 1, sections, idRemap };
+}
 
-  // Pre-count chunks upfront so the UI can show accurate progress.
-  const CHUNK = 50;
-  const exChunks = exerciseRows.length ? Math.ceil(exerciseRows.length / CHUNK) : 0;
-  const sessChunks = sessionRows.length ? Math.ceil(sessionRows.length / CHUNK) : 0;
-  const totalEntries = importSessions.reduce((n, s) => n + (s.entries?.length || 0), 0);
-  const totalSets = importSessions.reduce((n, s) => n + (s.entries || []).reduce((m, e) => m + (e.sets?.length || 0), 0), 0);
-  const entryChunks = totalEntries ? Math.ceil(totalEntries / CHUNK) : 0;
-  const setChunks = totalSets ? Math.ceil(totalSets / CHUNK) : 0;
-  const hasProfile = !!backup.user && (
-    backup.user.name != null || Object.prototype.hasOwnProperty.call(backup.user, 'xHandle') ||
-    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePublic') ||
-    Object.prototype.hasOwnProperty.call(backup.user, 'xHandlePromptOptedOut')
-  );
-  const totalSteps = 1 // delete
-    + (hasProfile ? 1 : 0)
-    + exChunks
-    + (backup.schedules?.length ? 1 : 0)
-    + sessChunks
-    + 1 // settings
-    + entryChunks + setChunks
-    + (backup.skips?.length ? 1 : 0)
-    + (backup.cardioLogs?.length ? 1 : 0)
-    + (backup.dailyLogs?.length ? 1 : 0)
-    + (backup.waterLogs?.length ? 1 : 0)
-    + (backup.adaptiveTdeeHistory?.length ? 1 : 0)
-    + (backup.foodLogs?.length ? 1 : 0)
-    + (backup.foodFavorites?.length ? 1 : 0)
-    + (backup.foodBarcodeOverrides?.length ? 1 : 0)
-    + (backup.foodRecipes?.length ? 1 : 0)
-    + (backup.foodTemplateSlots?.length ? 1 : 0)
-    + (backup.foodTemplateDays?.length ? 1 : 0)
-    + (backup.foodMealPlans?.length ? 1 : 0)
-    + (backup.foodShoppingPrefs?.length ? 1 : 0)
-    + (backup.medicationPlans?.length ? 1 : 0)
-    + (backup.medications?.length ? 1 : 0)
-    + (backup.medicationPlanItems?.length ? 1 : 0)
-    + (backup.medicationScheduleSlots?.length ? 1 : 0)
-    + (backup.medicationLogs?.length ? 1 : 0)
-    + (backup.workoutTemplates?.length ? 1 : 0)
-    + (backup.checkinSchemaTemplates?.length ? 1 : 0)
-    + (backup.glucoseLogs?.length ? 1 : 0)
-    + (backup.bloodPressureLogs?.length ? 1 : 0)
-    + (backup.bodyTempLogs?.length ? 1 : 0)
-    + (backup.cardioPlans?.length ? 1 : 0)
-    + (backup.statusPeriods?.length ? 1 : 0)
-    + (backup.mesoStates?.length ? 1 : 0);
-  let stepsDone = 0;
-  const prog = (phase) => onProgress?.(Math.min(99, Math.round(stepsDone / Math.max(1, totalSteps) * 100)), phase);
-  const tag = (label, fn) => fn().catch(e => { throw new Error(`[${label}] ${e?.message || e}`); });
-
-  prog('Clearing old data…');
-  try { await deleteAllData(userId, { keepPush: true }); } catch(e) { throw new Error(`[delete] ${e?.message || e}`); }
-  stepsDone++;
-
-  if (hasProfile) {
-    prog('Restoring profile…');
-    await tag('profile', () => unwrap(_supabase.from('zane_profiles').upsert({
-      id: userId,
-      name: backup.user?.name || '',
-      x_handle: normalizeXHandle(backup.user?.xHandle),
-      x_handle_public: backup.user?.xHandlePublic ?? true,
-      x_handle_prompt_opted_out: backup.user?.xHandlePromptOptedOut ?? false,
-    })));
-    stepsDone++;
-  }
-
-  for (let i = 0; i < exerciseRows.length; i += CHUNK) {
-    prog(`Uploading exercises (${i/CHUNK+1}/${exChunks})…`);
-    await tag(`exercises ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_exercises').upsert(exerciseRows.slice(i, i + CHUNK))));
-    stepsDone++;
-  }
-
-  if (backup.schedules?.length) {
-    prog('Uploading plans…');
-    await tag('schedules', () => unwrap(_supabase.from('zane_schedules').upsert(backup.schedules.map(({ mode, ...s }) => ({
-      ...s,
-      days: remapDays(s.days),
-      versions: Array.isArray(s.versions) ? s.versions.map(v => ({ ...v, days: remapDays(v.days) })) : s.versions,
-      // 5/3/1 program_data.mainLifts / tmHistory are keyed BY exId, so they must
-      // be remapped to the fresh ids too or they dangle against the remapped day
-      // items after restore (mirrors the single-plan share path in
-      // screens-schedule.jsx). bumpedCycle is a source-plan guard: drop it so the
-      // restored copy counts cycles from zero.
-      ...(s.program_data && typeof s.program_data === 'object' ? (() => {
-        const pd = { ...s.program_data };
-        if (pd.mainLifts) pd.mainLifts = remapExKeyed(pd.mainLifts);
-        if (pd.tmHistory) pd.tmHistory = remapExKeyed(pd.tmHistory);
-        // Training maxes are stored weights: without this a converted restore
-        // keeps computing every 5/3/1 working set off the old unit's TM.
-        if (unitConvert) {
-          if (pd.mainLifts) {
-            const ml = {};
-            for (const k in pd.mainLifts) { const l = pd.mainLifts[k]; ml[k] = (l && typeof l === 'object') ? { ...l, tm: convKg(l.tm) } : l; }
-            pd.mainLifts = ml;
-          }
-          if (pd.tmHistory) {
-            const th = {};
-            for (const k in pd.tmHistory) { const h = pd.tmHistory[k]; th[k] = Array.isArray(h) ? h.map(x => (x && typeof x === 'object') ? { ...x, tm: convKg(x.tm) } : x) : h; }
-            pd.tmHistory = th;
-          }
-          if (pd.unit) pd.unit = unitConvert.targetUnit === 'lbs' ? 'lbs' : 'kg';
-        }
-        delete pd.bumpedCycle;
-        return { program_data: pd };
-      })() : {}),
-      user_id: userId,
-    })))));
-    stepsDone++;
-  }
-
-  for (let i = 0; i < sessionRows.length; i += CHUNK) {
-    prog(`Uploading sessions (${i/CHUNK+1}/${sessChunks})…`);
-    await tag(`sessions ${i/CHUNK+1}`, () => unwrap(_supabase.from('zane_sessions').upsert(sessionRows.slice(i, i + CHUNK))));
-    stepsDone++;
-  }
-
-  prog('Uploading settings…');
-  await tag('settings', () => unwrap(_supabase.from('zane_user_settings').upsert(settingsRow)));
-  stepsDone++;
-
-  // Entries then sets after sessions are committed (FK order: sessions → entries → sets)
-  if (importSessions.length) {
-    try {
-      const convertKg = kg => (kg != null ? convKg(kg) : null);
-      // st.drops carries its own weights alongside the set's top-level kg:
-      // either an array of technique rounds (drop sets / myo-reps, each round
-      // shaped { kg, reps, ..., stretch?: { kg, timeSec } }) or a standalone
-      // object { partials, stretch } for lengthened_partial/weighted_stretch
-      // (see LB.techniqueRounds). Both shapes need the same kg conversion the
-      // top-level set gets, or a unit-converting restore leaves drop-set/
-      // myo-rep/stretch weights in the old unit next to the converted top set.
-      const convertDrops = drops => {
-        if (!drops) return drops;
-        const convertStretch = s => (s ? { ...s, kg: convertKg(s.kg) } : s);
-        if (Array.isArray(drops)) {
-          return drops.map(d => ({ ...d, kg: convertKg(d.kg), stretch: convertStretch(d.stretch) }));
-        }
-        return { ...drops, stretch: convertStretch(drops.stretch) };
-      };
-      const sessionsForEntries = importSessions.map(s => ({
-        ...s,
-        entries: (s.entries || []).map(e => ({
-          ...e,
-          exId: idRemap[e.exId] ?? e.exId,
-          sets: unitConvert ? (e.sets || []).map(st => ({ ...st, kg: convertKg(st.kg), drops: convertDrops(st.drops) })) : e.sets,
-        })),
-      }));
-      await _syncEntryRelational(sessionsForEntries, userId, null, (phase) => {
-        stepsDone++;
-        prog(phase);
-      });
+async function buildBackupRestoreChunks(prepared, operationId) {
+  const chunks = [];
+  let totalBytes = 0;
+  let rowCount = 0;
+  for (const [section, rows] of Object.entries(prepared.sections)) {
+    // Empty collections are still explicit manifest members. Without this,
+    // the server could not distinguish "restore this table to empty" from a
+    // truncated upload that silently omitted the table altogether.
+    if (!rows.length) {
+      const empty = { section, offset: 0, rows: [] };
+      const chunkHash = await backupRestoreSha256(empty);
+      const byteLength = backupRestoreByteLength(empty);
+      chunks.push({ ...empty, chunkHash, byteLength });
+      totalBytes += byteLength;
     }
-    catch(e) { throw new Error(`[entries/sets] ${e?.message || e}`); }
+    for (let offset = 0; offset < rows.length;) {
+      let end = offset;
+      let candidate = null;
+      while (end < rows.length) {
+        const next = { section, offset, rows: rows.slice(offset, end + 1) };
+        if (backupRestoreByteLength(next) > BACKUP_RESTORE_CHUNK_MAX_BYTES) break;
+        candidate = next;
+        end++;
+      }
+      if (!candidate) throw new Error(`Backup row in "${section}" exceeds the restore chunk limit.`);
+      const chunkHash = await backupRestoreSha256(candidate);
+      const byteLength = backupRestoreByteLength(candidate);
+      chunks.push({ ...candidate, chunkHash, byteLength });
+      totalBytes += byteLength;
+      offset = end;
+    }
+    rowCount += rows.length;
   }
-  if (backup.skips?.length) {
-    prog('Uploading skips…');
-    await unwrap(_supabase.from('zane_skips').upsert(
-      backup.skips.map(s => ({
-        id: s.id, user_id: userId, date: s.date, day_id: s.dayId,
-        day_name: s.dayName, skip_reason: s.skipReason, skipped_at: s.skippedAt ?? null,
-      }))
-    ));
-    stepsDone++;
+  if (chunks.length > BACKUP_RESTORE_MAX_CHUNKS) throw new Error('Backup requires too many restore chunks.');
+  if (totalBytes > BACKUP_RESTORE_TOTAL_MAX_BYTES) throw new Error('Backup exceeds the restore size limit.');
+  // Fixed-width lowercase SHA-256 values make direct ordered concatenation
+  // unambiguous and byte-identical in browsers and Postgres.
+  const restoreDigest = await backupRestoreSha256(chunks.map(chunk => chunk.chunkHash).join(''));
+  const manifest = {
+    operation_id: operationId,
+    version: BACKUP_RESTORE_PROTOCOL_VERSION,
+    normalizer_version: BACKUP_RESTORE_PROTOCOL_VERSION,
+    chunks: chunks.map((chunk, index) => ({
+      index, section: chunk.section, offset: chunk.offset,
+      row_count: chunk.rows.length, hash: chunk.chunkHash,
+    })),
+    totals: { chunk_count: chunks.length, row_count: rowCount, byte_count: totalBytes },
+  };
+  return { chunks, manifest, restoreDigest };
+}
+
+function assertBackupRestoreReceipt(receipt, operationId, phase, expected = null) {
+  if (!receipt || receipt.operation_id !== operationId) throw new Error(`${phase} returned an invalid restore operation.`);
+  if (phase === 'Commit' && receipt.status !== 'committed') throw new Error('Restore did not reach a committed state.');
+  if (phase === 'Commit' && receipt.restore_digest !== expected.restoreDigest) throw new Error('Commit returned a different restore digest.');
+  if (phase === 'Commit' && Number(receipt.row_count) !== expected.rowCount) throw new Error('Commit returned an unexpected restored row count.');
+  if (phase === 'Commit' && (!receipt.table_counts || typeof receipt.table_counts !== 'object')) throw new Error('Commit returned invalid table counts.');
+}
+
+async function importFromBackup(backup, userId, onProgress, unitConvert = null) {
+  // userId is used only to isolate the device-local resume marker. It is never
+  // sent to a restore RPC; the server derives the only possible target from
+  // auth.uid().
+  const invalid = validateBackup(backup);
+  if (invalid) throw new Error(invalid);
+  if (!BACKUP_RESTORE_AVAILABLE) {
+    throw new Error(BACKUP_RESTORE_UNAVAILABLE_MESSAGE);
   }
-  if (backup.cardioLogs?.length) {
-    prog('Uploading cardio logs…');
-    await unwrap(_supabase.from('zane_cardio_logs').upsert(
-      backup.cardioLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, type: l.type ?? null,
-        duration_minutes: l.durationMinutes, distance_m: l.distanceM ?? null,
-        pace_feeling: l.paceFeeling ?? null, effort: l.effort ?? null,
-        note: l.note ?? null, session_id: l.sessionId ?? null,
-      }))
-    ));
-    stepsDone++;
+  onProgress?.(1, 'Validating backup…');
+  const operationSeed = {
+    protocol_version: BACKUP_RESTORE_PROTOCOL_VERSION,
+    backup_version: backup._version ?? 1,
+    backup,
+    conversion: unitConvert ? { multiplier: unitConvert.multiplier, target_unit: unitConvert.targetUnit } : null,
+  };
+  const contentHash = await backupRestoreSha256(operationSeed);
+  const operationId = readPendingBackupRestore(userId, contentHash)
+    || newBackupRestoreOperationId(contentHash);
+  const prepared = prepareBackupRestore(backup, operationId, unitConvert);
+  onProgress?.(5, 'Preparing restore…');
+  const { chunks, manifest, restoreDigest } = await buildBackupRestoreChunks(prepared, operationId);
+  const expectedCommit = { restoreDigest, rowCount: manifest.totals.row_count };
+  // Persist only after all local validation/chunking succeeds and before the
+  // first network request. A retry after a lost response resumes this exact
+  // operation; a fully successful later import gets a fresh nonce.
+  savePendingBackupRestore(userId, contentHash, operationId);
+  onProgress?.(10, 'Starting secure restore…');
+  const begun = await backupRestoreRpc('begin_backup_restore', { p_operation_id: operationId, p_manifest: manifest });
+  assertBackupRestoreReceipt(begun, operationId, 'Begin');
+  if (begun.status === 'committed') {
+    assertBackupRestoreReceipt(begun, operationId, 'Commit', expectedCommit);
+    clearPendingBackupRestore(userId, operationId);
+    onProgress?.(100, 'Done!');
+    return begun;
   }
-  if (backup.dailyLogs?.length) {
-    prog('Uploading daily logs…');
-    await unwrap(_supabase.from('zane_daily_logs').upsert(
-      backup.dailyLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date,
-        weight: convKg(l.weight ?? null), steps: l.steps ?? null,
-        // Body measurements are cm/%, unit-independent: deliberately NOT
-        // through convKg (only weight is unit-converted on restore).
-        waist_cm: l.waistCm ?? null, hips_cm: l.hipsCm ?? null, chest_cm: l.chestCm ?? null,
-        arm_cm: l.armCm ?? null, thigh_cm: l.thighCm ?? null, calf_cm: l.calfCm ?? null,
-        body_fat_pct: l.bodyFatPct ?? null,
-        calories: l.calories ?? null, protein: l.protein ?? null,
-        carbs: l.carbs ?? null, fat: l.fat ?? null, fiber: l.fiber ?? null,
-        water_ml: l.waterMl ?? null, note: l.note ?? null,
-        off_plan_note: l.offPlanNote ?? null,
-        meal_of_choice: !!l.mealOfChoice,
-        meal_of_choice_hour: l.mealOfChoiceHour ?? null,
-        food_day_closed: !!l.foodDayClosed,
-        adherence: l.adherence ?? null, targets_snap: l.targetsSnap ?? null,
-        daily_coach_fields: l.coachFields ?? null,
-        ai_summary: l.aiSummary ?? null, ai_summary_generated_at: l.aiSummaryGeneratedAt ?? null,
-      }))
-    ));
-    stepsDone++;
+  const staged = new Set(Array.isArray(begun.staged_indexes) ? begun.staged_indexes.map(Number) : []);
+  let stagedBytes = chunks.reduce((sum, chunk, index) => staged.has(index) ? sum + chunk.byteLength : sum, 0);
+  for (let index = 0; index < chunks.length; index++) {
+    if (!staged.has(index)) {
+      const chunk = chunks[index];
+      const receipt = await backupRestoreRpc('stage_backup_restore_chunk', {
+        p_operation_id: operationId,
+        p_chunk_index: index,
+        p_chunk: { section: chunk.section, offset: chunk.offset, rows: chunk.rows },
+        p_chunk_hash: chunk.chunkHash,
+      });
+      assertBackupRestoreReceipt(receipt, operationId, 'Stage');
+      stagedBytes += chunk.byteLength;
+    }
+    const pct = 10 + Math.round((stagedBytes / Math.max(1, manifest.totals.byte_count)) * 75);
+    onProgress?.(Math.min(85, pct), `Uploading backup (${index + 1}/${chunks.length})…`);
   }
-  if (backup.waterLogs?.length) {
-    prog('Uploading water logs…');
-    await unwrap(_supabase.from('zane_water_logs').upsert(
-      backup.waterLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, time: l.time,
-        amount_ml: l.amountMl, name: l.name ?? null, category: l.category ?? null,
-        breakdown: l.breakdown ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.adaptiveTdeeHistory?.length) {
-    prog('Uploading adaptive TDEE history…');
-    await unwrap(_supabase.from('zane_adaptive_tdee_history').upsert(
-      backup.adaptiveTdeeHistory.filter(h => h?.asOfDate).map(h => ({
-        id: 'tdee_' + userId + '_' + h.asOfDate,
-        user_id: userId,
-        as_of_date: h.asOfDate,
-        window_start: h.windowStart,
-        window_end: h.windowEnd,
-        tdee_kcal: h.tdee,
-        avg_calories_kcal: h.avgCalories,
-        weight_start_kg: h.weightStartKg,
-        weight_end_kg: h.weightEndKg,
-        weight_change_kg: h.weightChangeKg,
-        weight_rate_kg_week: h.weightRateKgWeek,
-        day_span: h.daySpan,
-        calorie_days: h.calorieDays,
-        weigh_ins: h.weighIns,
-        decision: h.decision || 'reconstructed',
-        source: h.source || 'reconstructed',
-        targets_snapshot: h.targetsSnapshot ?? null,
-        calculated_at: h.calculatedAt ?? new Date().toISOString(),
-        decided_at: h.decidedAt ?? null,
-        created_at: h.createdAt ?? new Date().toISOString(),
-        updated_at: h.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  // Food restore dependency order: recipes and meal-plan slots are parents of
-  // food logs (`recipe_id` / `template_slot_id`). Commit every definition
-  // before uploading a log that may reference it.
-  if (backup.foodRecipes?.length) {
-    prog('Uploading food recipes…');
-    await tag('food recipes', () => unwrap(_supabase.from('zane_food_recipes').upsert(
-      backup.foodRecipes.map(r => ({
-        id: r.id, user_id: userId, name: r.name, items: r.items || [], portions: r.portions || 1,
-        cooked_weight_g: r.cookedWeightG ?? null,
-        updated_at: r.updatedAt ?? new Date().toISOString(),
-      }))
-    )));
-    stepsDone++;
-  }
-  if (backup.foodMealPlans?.length) {
-    prog('Uploading meal plans…');
-    await tag('meal plans', () => unwrap(_supabase.from('zane_food_meal_plans').upsert(
-      backup.foodMealPlans.map(p => ({
-        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
-        coach_id: p.coachId ?? null, updated_at: p.updatedAt ?? new Date().toISOString(),
-      }))
-    )));
-    stepsDone++;
-  }
-  if (backup.foodTemplateSlots?.length) {
-    prog('Uploading meal template…');
-    await tag('meal template', () => unwrap(_supabase.from('zane_food_template_slots').upsert(
-      backup.foodTemplateSlots.map(templateSlotRow(userId))
-    )));
-    stepsDone++;
-  }
-  if (backup.foodLogs?.length) {
-    prog('Uploading food logs…');
-    const foodLogRows = backup.foodLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, time: l.time,
-        food_id: l.foodId ?? null, food_name: l.foodName, brand: l.brand ?? null,
-        source: l.source ?? null, quantity_g: l.quantityG,
-        calories: l.calories, protein: l.protein, carbs: l.carbs, fat: l.fat,
-        fiber: l.fiber ?? null, sugar: l.sugar ?? null, sat_fat: l.satFat ?? null, sodium_mg: l.sodiumMg ?? null,
-        recipe_items: l.recipeItems ?? null,
-        recipe_id: l.recipeId ?? null, logged_total_portions: l.loggedTotalPortions ?? null,
-        logged_cooked_grams: l.loggedCookedGrams ?? null, logged_cooked_weight_g: l.loggedCookedWeightG ?? null,
-        logged_unit: l.loggedUnit ?? null, split_batch: l.splitBatch ?? null,
-        planned: l.planned ?? false, template_slot_id: l.templateSlotId ?? null,
-      }));
-    // Shared food-cache rows and old recipe references are advisory because the
-    // log carries a complete nutrition snapshot. Keep the existing FK fallback
-    // used by live sync so one stale reference cannot strand a whole restore.
-    await tag('food logs', () => unwrap(foodLogUpsertWithFkFallback(foodLogRows)));
-    stepsDone++;
-  }
-  if (backup.foodFavorites?.length) {
-    prog('Uploading food favorites…');
-    await tag('food favorites', () => unwrap(foodFavoriteUpsertWithFkFallback(
-      backup.foodFavorites.map(f => ({
-        id: f.id, user_id: userId, food_id: f.foodId ?? null, food_name: f.foodName,
-        brand: f.brand ?? null, source: f.source ?? null, quantity_g: f.quantityG,
-        calories: f.calories, protein: f.protein, carbs: f.carbs, fat: f.fat,
-        fiber: f.fiber ?? null, sugar: f.sugar ?? null, sat_fat: f.satFat ?? null, sodium_mg: f.sodiumMg ?? null,
-        units: f.units ?? [],
-      }))
-    )));
-    stepsDone++;
-  }
-  if (backup.foodBarcodeOverrides?.length) {
-    prog('Restoring barcode corrections…');
-    await unwrap(_supabase.from('zane_food_barcode_overrides').upsert(
-      backup.foodBarcodeOverrides.map(o => ({
-        user_id: userId, source: o.source, source_id: o.sourceId,
-        food_name: o.foodName, brand: o.brand ?? null,
-        kcal_per_100g: o.kcalPer100g, protein_per_100g: o.proteinPer100g,
-        carbs_per_100g: o.carbsPer100g, fat_per_100g: o.fatPer100g,
-        created_at: o.createdAt ?? new Date().toISOString(),
-        updated_at: o.updatedAt ?? o.createdAt ?? new Date().toISOString(),
-      })), { onConflict: 'user_id,source,source_id' }
-    ));
-    stepsDone++;
-  }
-  if (backup.foodShoppingPrefs?.length) {
-    prog('Uploading shopping list preferences…');
-    await unwrap(_supabase.from('zane_food_shopping_prefs').upsert(
-      backup.foodShoppingPrefs.map(p => ({
-        id: p.id, user_id: userId, food_id: p.foodId, shopping_key: p.shoppingKey, name_override: p.nameOverride ?? null,
-        excluded: !!p.excluded, excluded_until: p.excludedUntil ?? null, package_size_g: p.packageSizeG ?? null,
-        low_stock_threshold_g: p.lowStockThresholdG ?? null,
-        stock_baseline_g: p.stockBaselineG ?? null, stock_set_at: p.stockSetAt ?? null,
-        food_name: p.foodName, brand: p.brand ?? null,
-        updated_at: p.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.medicationPlans?.length) {
-    prog('Uploading medication plans…');
-    await unwrap(_supabase.from('zane_medication_plans').upsert(
-      backup.medicationPlans.map(p => ({
-        id: p.id, user_id: userId, name: p.name, archived: !!p.archived, is_template: !!p.isTemplate,
-        coach_id: p.coachId ?? null,
-        // Old backups (from before migration 0221) have no `active` key at
-        // all; missing must mean "was always active", not false, so this is
-        // the one field here needing an asymmetric default vs. `!!`.
-        active: p.active !== false,
-        updated_at: p.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.medications?.length) {
-    prog('Uploading medications…');
-    await unwrap(_supabase.from('zane_medications').upsert(
-      backup.medications.map(m => ({
-        id: m.id, user_id: userId, name: m.name,
-        brand: m.brand ?? null, category: m.category ?? null, unit_label: m.unitLabel || 'pills',
-        package_size: m.packageSize ?? null, low_stock_threshold: m.lowStockThreshold ?? null,
-        stock_baseline: m.stockBaseline ?? null,
-        stock_set_at: m.stockSetAt ?? null, archived: !!m.archived,
-        exclude_from_pillbox: !!m.excludeFromPillbox,
-        exclude_from_low_stock: !!m.excludeFromLowStock,
-        // A backup from before migration 0235 has no trackStock at all
-        // (undefined, not false): infer it from stock_baseline instead of
-        // defaulting to the now-opt-in false, a restored medication that
-        // was clearly already being tracked (it has a baseline) shouldn't
-        // silently vanish from Inventory just for predating this field.
-        track_stock: m.trackStock != null ? !!m.trackStock : m.stockBaseline != null,
-        updated_at: m.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.medicationPlanItems?.length) {
-    prog('Uploading medication plan memberships…');
-    await unwrap(_supabase.from('zane_medication_plan_items').upsert(
-      backup.medicationPlanItems.map(it => ({
-        id: it.id, user_id: userId, medication_plan_id: it.medicationPlanId, medication_id: it.medicationId,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.medicationScheduleSlots?.length) {
-    prog('Uploading medication schedule…');
-    await unwrap(_supabase.from('zane_medication_schedule_slots').upsert(
-      backup.medicationScheduleSlots.map(s => ({
-        id: s.id, user_id: userId, medication_id: s.medicationId, medication_plan_id: s.medicationPlanId ?? null,
-        weekdays: s.weekdays || [],
-        hour: s.hour, dose_qty: s.doseQty, interval_days: s.intervalDays ?? null,
-        start_date: s.startDate ?? null, end_date: s.endDate ?? null,
-        updated_at: s.updatedAt ?? new Date().toISOString(),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.medicationLogs?.length) {
-    prog('Uploading medication logs…');
-    await unwrap(_supabase.from('zane_medication_logs').upsert(
-      backup.medicationLogs.map(l => ({
-        id: l.id, user_id: userId, medication_id: l.medicationId ?? null, medication_name: l.medicationName,
-        date: l.date, time: l.time, dose_qty: l.doseQty, planned: !!l.planned, skipped: !!l.skipped,
-        schedule_slot_id: l.scheduleSlotId ?? null,
-        reminder_sent_at: l.reminderSentAt ?? null, reminder_count: l.reminderCount ?? 0,
-        snoozed_until: l.snoozedUntil ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.foodTemplateDays?.length) {
-    prog('Restoring meal template history...');
-    await unwrap(_supabase.from('zane_food_template_days').upsert(
-      backup.foodTemplateDays.map(d => ({ id: d.id, user_id: userId, date: d.date }))
-    ));
-    stepsDone++;
-  }
-  if (backup.workoutTemplates?.length) {
-    prog('Uploading workout templates…');
-    await unwrap(_supabase.from('zane_workout_templates').upsert(
-      backup.workoutTemplates.map(t => ({
-        id: t.id, user_id: userId, name: t.name,
-        exercises: (t.exercises || []).map(e => (e.exId != null ? { ...e, exId: remapEx(e.exId) } : e)),
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.checkinSchemaTemplates?.length) {
-    prog('Uploading check-in schema templates…');
-    // Field definitions only (label/type/options/…), no exercise ids to remap.
-    await unwrap(_supabase.from('zane_checkin_schema_templates').upsert(
-      backup.checkinSchemaTemplates.map(t => ({
-        id: t.id, user_id: userId, name: t.name, schema: t.schema || [],
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.glucoseLogs?.length) {
-    prog('Uploading glucose logs…');
-    await unwrap(_supabase.from('zane_glucose_logs').upsert(
-      backup.glucoseLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, time: l.time,
-        value_mmol: l.valueMmol ?? null, context: l.context ?? 'other',
-        note: l.note ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.bloodPressureLogs?.length) {
-    prog('Uploading blood pressure logs…');
-    await unwrap(_supabase.from('zane_blood_pressure_logs').upsert(
-      backup.bloodPressureLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, time: l.time,
-        systolic: l.systolic ?? null, diastolic: l.diastolic ?? null,
-        note: l.note ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.bodyTempLogs?.length) {
-    prog('Uploading body temperature logs…');
-    await unwrap(_supabase.from('zane_body_temp_logs').upsert(
-      backup.bodyTempLogs.map(l => ({
-        id: l.id, user_id: userId, date: l.date, time: l.time,
-        value_c: l.valueC ?? null, note: l.note ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.cardioPlans?.length) {
-    prog('Uploading cardio plans…');
-    await unwrap(_supabase.from('zane_cardio_plans').upsert(
-      backup.cardioPlans.map(p => ({
-        id: p.id, user_id: userId, name: p.name, activity_type: p.activityType,
-        archived: p.archived ?? false, mode: p.mode ?? null,
-        days: p.days ?? {}, manual_targets: p.manualTargets ?? null,
-        goal: p.goal ?? null, goal_due_date: p.goalDueDate ?? null,
-        start_fitness: p.startFitness ?? null, generated_weeks: p.generatedWeeks ?? null,
-        plan_start_date: p.planStartDate ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.statusPeriods?.length) {
-    prog('Uploading status periods…');
-    await unwrap(_supabase.from('zane_status_periods').upsert(
-      backup.statusPeriods.map(p => ({
-        id: p.id, user_id: userId, mode: p.mode,
-        started_at: p.startedAt ?? null, ended_at: p.endedAt ?? null,
-      }))
-    ));
-    stepsDone++;
-  }
-  if (backup.mesoStates?.length) {
-    prog('Uploading mesocycle states…');
-    // id is deterministic (userId + '_' + scheduleId), regenerate for this user.
-    // schedule_id is preserved (schedules keep their ids), but the exId-keyed maps
-    // (deltas/weightBoosts/repMissCounts: exId_dayId; jointFlags/pumpLowCounts/affinity: exId)
-    // must be remapped onto the fresh exercise ids or they dangle.
-    await unwrap(_supabase.from('zane_meso_states').upsert(
-      backup.mesoStates.map(m => ({
-        id: userId + '_' + m.scheduleId, user_id: userId, schedule_id: m.scheduleId,
-        weeks: m.weeks, start_date: m.startDate ?? null,
-        start_cycle_index: m.startCycleIndex ?? 0, started_at: m.startedAt ?? null,
-        deltas: remapExDayKeyed(m.deltas), weight_boosts: convKgMap(remapExDayKeyed(m.weightBoosts)),
-        weight_boost_declines: convKgMap(remapExDayKeyed(m.weightBoostDeclines)),
-        joint_flags: remapExKeyed(m.jointFlags), pump_low_counts: remapExKeyed(m.pumpLowCounts),
-        growth_counts: remapExDayKeyed(m.growthCounts), rep_miss_counts: remapExDayKeyed(m.repMissCounts),
-        affinity: remapExKeyed(m.affinity),
-        // autoreg_state (deloadNudge / later block snapshots) is muscle/scope-keyed,
-        // not exId-keyed, so it round-trips verbatim with no remap.
-        autoreg_state: m.autoregState ?? null,
-        completions: m.completions ?? 0, pending_meso2: m.pendingMeso2 ?? false,
-      }))
-    ));
-    stepsDone++;
-  }
+  onProgress?.(90, 'Applying backup atomically…');
+  const committed = await backupRestoreRpc('commit_backup_restore', { p_operation_id: operationId });
+  assertBackupRestoreReceipt(committed, operationId, 'Commit', expectedCommit);
+  clearPendingBackupRestore(userId, operationId);
   onProgress?.(100, 'Done!');
+  return committed;
 }
 
 function mergeCompleteBackupCollection(freshRows, localRows, baseRows = null, keyOf = row => row?.id) {
@@ -15477,7 +15368,7 @@ window.LB = {
   clearPrecompileCaches, clearCachesAndReload,
   SUPABASE_URL, SUPABASE_ANON_KEY, PUSHOVER_URL, WEB_PUSH_URL, COACHING_DRIVE_URL, WORKOUT_IMPORT_URL, fnFetch,
   subscribeWebPush, unsubscribeWebPush, getWebPushSubscription,
-  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, deleteOwnedStorageObjects, exportBackup, backupToBlob, readBackupText, importFromBackup, validateBackup, BACKUP_RESTORE_AVAILABLE, BACKUP_RESTORE_UNAVAILABLE_MESSAGE, weightAxisUnit, remapExerciseDayKey,
+  signIn, signUp, signOut, signInWithPasskey, recoverAuthSession, recoverAuthSessionDetailed, rememberOfflineUser, getOfflineUser, clearOfflineUser, getAuthRecoveryState, clearAuthRecovery, registerPasskey, listPasskeys, deletePasskey, updatePasskey, resetPassword, deleteAllData, deleteOwnedStorageObjects, exportBackup, backupToBlob, readBackupText, importFromBackup, prepareBackupRestore, buildBackupRestoreChunks, validateBackup, BACKUP_RESTORE_AVAILABLE, BACKUP_RESTORE_UNAVAILABLE_MESSAGE, BACKUP_RESTORE_CHUNK_MAX_BYTES, BACKUP_RESTORE_TOTAL_MAX_BYTES, BACKUP_RESTORE_MAX_CHUNKS, weightAxisUnit, remapExerciseDayKey,
   loadFromSupabase, refreshProfileTier, syncStore, mergeSessions, resolveInProgressId, findEmptyOrphanSessionCandidates, autoArchiveMissedDays, withCarriedWindowEntries, withCarriedWindowCollections, mergeWindowedCollectionById, mergeCompleteBackupCollection, fetchAllRowsPaged, historyWindowCutoffISO, normalizeHiddenHealthCards, FOOD_HISTORY_WINDOW_DAYS,
   saveToLocal, loadFromLocal, saveBase, loadBase, loadLocalState, saveLocalState, saveSyncedState, clearLocal,
   compactLocalSnapshot, LOCAL_CACHE_VERSION, LOCAL_CACHE_WINDOWS, markLocalRowsConfirmed, encodeLocalBaseline, expandLocalBaseline,

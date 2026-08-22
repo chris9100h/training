@@ -2,6 +2,11 @@
 -- Keep the earliest recorded archive and let the unique key arbitrate future
 -- upserts independently of each device's random row id.
 
+-- Supabase branch migrations execute statements in autocommit mode. LOCK TABLE
+-- therefore needs an explicit transaction block so the dedupe and unique
+-- constraint creation remain one race-free operation on fresh branches.
+BEGIN;
+
 -- Hold concurrent client inserts out between the one-time dedupe and unique
 -- index creation. SHARE ROW EXCLUSIVE still permits reads and is retained for
 -- the remainder of this migration transaction.
@@ -40,3 +45,5 @@ BEGIN
   END IF;
 END
 $migration$;
+
+COMMIT;

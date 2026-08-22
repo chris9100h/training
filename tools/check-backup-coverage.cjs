@@ -10,9 +10,10 @@
 // shared helper in tools/lib/sql-schema.cjs: one parser, no second truth.
 //
 // Three checks:
-//   IMPORT  : actually runs importFromBackup() in a vm sandbox with a recording
-//             Supabase stub and captures which columns each upsert writes. Robust
-//             against columns built inside helpers (sessionToRow, _syncEntryRelational).
+//   IMPORT  : runs the pure prepareBackupRestore() normalizer in a vm sandbox and
+//             captures the columns in every staged restore section. The browser
+//             no longer performs direct table writes; commit_backup_restore owns
+//             the atomic delete/insert transaction on the server.
 //   EXPORT  : parses the .select('…') lists in store.js: a column that is never
 //             SELECTed never reaches the store, so it is absent from the export.
 //   SYNC    : zane_user_settings only. IMPORT/EXPORT only prove a setting round-trips
@@ -36,9 +37,47 @@ const read = (f) => fs.readFileSync(path.join(root, f), 'utf8');
 // Every zane_ table must be listed somewhere below, or the check fails: adding a
 // table forces a deliberate "belongs in the backup?" decision.
 
-// Tables restored by importFromBackup with an explicit, column-by-column upsert.
+// Every staged restore section maps to exactly one personal table. Keeping this
+// mapping explicit makes an added/removed protocol section a deliberate CI
+// decision instead of relying on a second destructive writer in JavaScript.
+const RESTORE_SECTION_TABLE = {
+  profile: 'zane_profiles',
+  exercises: 'zane_exercises',
+  schedules: 'zane_schedules',
+  sessions: 'zane_sessions',
+  settings: 'zane_user_settings',
+  session_entries: 'zane_session_entries',
+  sets: 'zane_sets',
+  skips: 'zane_skips',
+  cardio_logs: 'zane_cardio_logs',
+  daily_logs: 'zane_daily_logs',
+  water_logs: 'zane_water_logs',
+  adaptive_tdee_history: 'zane_adaptive_tdee_history',
+  food_recipes: 'zane_food_recipes',
+  food_meal_plans: 'zane_food_meal_plans',
+  food_template_slots: 'zane_food_template_slots',
+  food_logs: 'zane_food_logs',
+  food_favorites: 'zane_food_favorites',
+  food_barcode_overrides: 'zane_food_barcode_overrides',
+  food_shopping_prefs: 'zane_food_shopping_prefs',
+  medication_plans: 'zane_medication_plans',
+  medications: 'zane_medications',
+  medication_plan_items: 'zane_medication_plan_items',
+  medication_schedule_slots: 'zane_medication_schedule_slots',
+  medication_logs: 'zane_medication_logs',
+  food_template_days: 'zane_food_template_days',
+  workout_templates: 'zane_workout_templates',
+  checkin_schema_templates: 'zane_checkin_schema_templates',
+  glucose_logs: 'zane_glucose_logs',
+  blood_pressure_logs: 'zane_blood_pressure_logs',
+  body_temp_logs: 'zane_body_temp_logs',
+  cardio_plans: 'zane_cardio_plans',
+  status_periods: 'zane_status_periods',
+  meso_states: 'zane_meso_states',
+};
 const BACKUP_ENUM = [
-  'zane_profiles', 'zane_exercises', 'zane_session_entries', 'zane_sets',
+  'zane_profiles', 'zane_exercises', 'zane_schedules', 'zane_sessions',
+  'zane_session_entries', 'zane_sets',
   'zane_user_settings', 'zane_skips', 'zane_cardio_logs', 'zane_daily_logs',
   'zane_workout_templates', 'zane_glucose_logs', 'zane_cardio_plans',
   'zane_status_periods', 'zane_meso_states', 'zane_checkin_schema_templates',
@@ -50,11 +89,11 @@ const BACKUP_ENUM = [
   'zane_medication_plans', 'zane_medications', 'zane_medication_plan_items',
   'zane_medication_schedule_slots', 'zane_medication_logs',
 ];
-// Tables restored by spreading the whole store row (…s). Their column coverage is
-// governed by what loadFromSupabase SELECTs, so they are export-checked only.
-const PASSTHROUGH = ['zane_schedules', 'zane_sessions'];
+const PASSTHROUGH = [];
 // Deliberately NOT part of a personal data backup.
 const EXCLUDED = {
+  zane_backup_restore_jobs: 'private server-only staging metadata for the atomic restore protocol; never personal backup content',
+  zane_backup_restore_chunks: 'private inert restore payload staging; importing the staging protocol into itself would be recursive and unsafe',
   zane_app_config: 'admin/global config',
   zane_api_usage: 'server-side daily call counter for the food edge functions, never read by the app and meaningless once restored',
   zane_feature_map: 'admin feature-map draft/override layer (master content is in code), not per-user data',
@@ -107,6 +146,11 @@ const EXCLUDED = {
 // Columns that legitimately never round-trip.
 const GLOBAL_ALLOW = new Set(['user_id', 'created_at', 'updated_at', 'next_reminder_at']);
 const PER_TABLE_ALLOW = {
+  // Server-derived identity keys. The atomic restore binds all of them to the
+  // authenticated owner or deterministically derives them from restored data.
+  zane_profiles: new Set(['id', 'tier', 'tier_granted_at']),
+  zane_meso_states: new Set(['id']),
+  zane_adaptive_tdee_history: new Set(['id']),
   // completed_server_at: server-stamped and client-unwritable by design (it is
   // what makes the founding-member day spread forgery-resistant). Restoring it
   // from a user-editable backup file would hand that back.
@@ -118,12 +162,20 @@ const PER_TABLE_ALLOW = {
   // water_last_push_at: server-written throttle for the water reminder cron.
   // daily_log_reminder_last_date: server-written per-day throttle for the
   // daily-log-reminder cron, same status as water_last_push_at.
-  zane_user_settings: new Set(['sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes', 'time_zone', 'water_last_push_at', 'daily_log_reminder_last_date']),
-  // tier / tier_granted_at: server-authored, granted by grant_lifetime_if_qualified()
-  // and reverted on any client write by zane_profiles_protect_tier. Deliberately
-  // NOT restorable: a backup file is user-editable, so importing it would be a
-  // free "set tier = lifetime" for anyone willing to edit one line of JSON.
-  zane_profiles: new Set(['tier', 'tier_granted_at']),
+  zane_user_settings: new Set([
+    'sw_version', 'auto_close_notify', 'manual_calories', 'tz_offset_minutes',
+    'time_zone', 'water_last_push_at', 'daily_log_reminder_last_date',
+    // Device/provider, social and coaching state remains live across a personal
+    // backup restore and is intentionally absent from the staged payload.
+    'push_enabled', 'pushover_user_key', 'use_pushover', 'show_coaching_tab',
+    'show_friends_tab', 'social_push_friend_requests', 'social_push_messages',
+    'social_push_finished_comments', 'social_push_friend_started',
+    'be_your_own_coach',
+  ]),
+  // coach_id is cross-user attribution. A personal restore must neither forge
+  // nor recreate it; restored personal plans return without coach ownership.
+  zane_food_meal_plans: new Set(['coach_id']),
+  zane_medication_plans: new Set(['coach_id']),
   // Server-only transient CAS token for medication reminder compensation.
   // Restoring it would make a backup impersonate an in-flight Edge claim.
   zane_medication_logs: new Set(['reminder_claim_token', 'reminder_claimed_at']),
@@ -140,23 +192,17 @@ const SETTINGS_SYNC_ALLOW = new Set([
 // ── Schema truth ─────────────────────────────────────────────────────────────
 const schemaTables = parseSchemaTables(read('supabase/schema.sql'));
 
-// ── IMPORT coverage: run importFromBackup with a recording Supabase stub ──────
+// ── IMPORT coverage: run the pure restore normalizer in a vm sandbox ─────────
 function captureImportedColumns() {
   const written = {}; // table -> Set(columns)
   const okP = () => Promise.resolve({ data: [], error: null });
-  const record = (table, rows) => {
-    const arr = Array.isArray(rows) ? rows : [rows];
-    if (!written[table]) written[table] = new Set();
-    for (const r of arr) for (const k of Object.keys(r || {})) written[table].add(k);
-  };
   const builder = (table) => {
     const b = {
       select: () => b, eq: okP, in: okP, gte: () => b, order: okP,
       is: () => b, neq: () => b, not: () => b,
       maybeSingle: () => Promise.resolve({ data: null, error: null }),
       delete: () => b,
-      upsert: (rows) => { record(table, rows); return okP(); },
-      insert: (rows) => { record(table, rows); return okP(); },
+      upsert: () => okP(), insert: () => okP(),
     };
     return b;
   };
@@ -167,23 +213,17 @@ function captureImportedColumns() {
     channel: () => ({ on() { return this; }, subscribe() { return this; } }),
     removeChannel: () => {},
   };
+  const webcrypto = require('crypto').webcrypto;
   const sandbox = {
-    window: { supabase: { createClient: () => client }, addEventListener() {} },
+    window: { supabase: { createClient: () => client }, crypto: webcrypto, addEventListener() {} },
     localStorage: { _d: {}, getItem(k) { return this._d[k] ?? null; }, setItem(k, v) { this._d[k] = String(v); }, removeItem(k) { delete this._d[k]; } },
     console, fetch: async () => ({ ok: true }), setTimeout, clearTimeout, Math, Date, JSON,
+    crypto: webcrypto, TextEncoder, TextDecoder, AbortController,
   };
   sandbox.global = sandbox;
   vm.createContext(sandbox);
-  const restoreGuard = '  throw new Error(BACKUP_RESTORE_UNAVAILABLE_MESSAGE);\n';
   const storeSource = read('src/store.js');
-  if (!storeSource.includes(restoreGuard)) {
-    throw new Error('production backup restore fail-closed guard is missing');
-  }
-  // Production restore is deliberately fail-closed until the replacement can
-  // be transactional. Remove that one exact guard only inside this isolated
-  // recording VM so the unreachable mapping still detects schema drift. This
-  // never changes or exposes the browser's production function.
-  vm.runInContext(storeSource.replace(restoreGuard, ''), sandbox, { filename: 'store.js' });
+  vm.runInContext(storeSource, sandbox, { filename: 'store.js' });
   const LB = sandbox.window.LB;
 
   // A minimal but structurally complete backup: one row per table so every
@@ -203,7 +243,18 @@ function captureImportedColumns() {
     medicationPlans: [{}], medications: [{}], medicationPlanItems: [{}], medicationScheduleSlots: [{}], medicationLogs: [{}],
     activeScheduleId: null, activeMealTemplateId: null, cycleIndex: 0, customDayTypes: [],
   };
-  return LB.importFromBackup(backup, 'u1', () => {}).then(() => written);
+  const prepared = LB.prepareBackupRestore(backup, 'restore_ci_contract');
+  const protocolSections = Object.keys(prepared.sections);
+  const expectedSections = Object.keys(RESTORE_SECTION_TABLE);
+  if (JSON.stringify(protocolSections) !== JSON.stringify(expectedSections)) {
+    throw new Error(`restore section contract drifted: ${JSON.stringify(protocolSections)}`);
+  }
+  for (const [section, rows] of Object.entries(prepared.sections)) {
+    const table = RESTORE_SECTION_TABLE[section];
+    written[table] = new Set();
+    for (const row of rows) for (const key of Object.keys(row || {})) written[table].add(key);
+  }
+  return Promise.resolve(written);
 }
 
 // ── EXPORT coverage: which columns store.js ever SELECTs per table ────────────

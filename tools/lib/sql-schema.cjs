@@ -14,7 +14,10 @@ function stripSql(src) {
 // Scan "create table <name> (" and return each table's balanced column body.
 function createTableBlocks(sql) {
   const blocks = [];
-  const re = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:public\.)?"?(\w+)"?\s*\(/gi;
+  // Accept any explicitly qualified schema, not only public. Returning the
+  // relation name keeps the existing inventory contract while allowing
+  // private operational tables to be represented in schema.sql correctly.
+  const re = /create\s+table\s+(?:if\s+not\s+exists\s+)?(?:"?\w+"?\.)?"?(\w+)"?\s*\(/gi;
   let m;
   while ((m = re.exec(sql))) {
     let depth = 1;
@@ -29,7 +32,11 @@ function createTableBlocks(sql) {
   return blocks;
 }
 
-const CONSTRAINT_WORDS = new Set(['primary', 'unique', 'constraint', 'foreign', 'check', 'like']);
+const CONSTRAINT_WORDS = new Set([
+  'primary', 'unique', 'constraint', 'foreign', 'check', 'like',
+  // Continuation lines of multiline table constraints are not columns.
+  'references', 'on',
+]);
 
 function columnsFromBody(body) {
   const cols = [];

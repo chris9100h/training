@@ -40,7 +40,7 @@ for (const f of migFiles) {
   }
 
   // Whole ALTER TABLE statements (may carry several ADD/DROP actions).
-  const alterRe = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:public\.)?"?(\w+)"?([\s\S]*?);/gi;
+  const alterRe = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?(?:"?\w+"?\.)?"?(\w+)"?([\s\S]*?);/gi;
   let m;
   while ((m = alterRe.exec(sql))) {
     const t = m[1].toLowerCase();
@@ -66,7 +66,7 @@ for (const f of migFiles) {
     while ((a = dropRe.exec(body))) tables.get(t).delete(a[1].toLowerCase());
   }
 
-  const dropTabRe = /drop\s+table\s+(?:if\s+exists\s+)?(?:public\.)?"?(\w+)"?/gi;
+  const dropTabRe = /drop\s+table\s+(?:if\s+exists\s+)?(?:"?\w+"?\.)?"?(\w+)"?/gi;
   while ((m = dropTabRe.exec(sql))) tables.delete(m[1].toLowerCase());
 
   const fnRe = /create\s+(?:or\s+replace\s+)?function\s+(?:public\.)?"?(\w+)"?\s*\(/gi;

@@ -1044,6 +1044,7 @@ function App() {
   const inFlightSync              = useRefA(null);  // promise for the current account's sync request
   const syncGeneration             = useRefA(0);     // invalidates completions after account switches
   const signoutFlushInFlight       = useRefA(false); // prevents a parallel fire-and-forget sync
+  const backupRestoreInFlight      = useRefA(false); // exclusive destructive restore until reload/failure
   const loadSeq                   = useRefA(0);     // generation counter: only the newest loadData may write
   const userIdRef                 = useRefA(null);  // current userId for stale-closure contexts
   const phaseRef                  = useRefA('init'); // current phase for stale-closure contexts
@@ -1947,6 +1948,7 @@ function App() {
     // and upsert one account's data stamped with another's user_id.
     if (uid !== userIdRef.current) return;
     if (signoutFlushInFlight.current) return;
+    if (backupRestoreInFlight.current) return;
     // Auth recovery must finish before an RLS write is attempted. Keeping the
     // pending snapshot local is safer than firing a burst of guaranteed 401s
     // while the refresh endpoint is recovering.
@@ -2010,7 +2012,7 @@ function App() {
           // that pending target one clean chance now, but never touch the old
           // baseline or status.
           const currentUid = userIdRef.current;
-          if (currentUid && !signoutFlushInFlight.current) flushSync(currentUid);
+          if (currentUid && !signoutFlushInFlight.current && !backupRestoreInFlight.current) flushSync(currentUid);
           return;
         }
         if (ok) {
@@ -2205,6 +2207,36 @@ function App() {
     }
     return landed;
   }, []);
+
+  // A restore replaces the complete server-owned backup set. Pause the normal
+  // diff queue, land every pending local edit first, then invalidate any stale
+  // completion before Settings begins staging. On success the pause remains in
+  // place until the mandatory reload; on failure normal sync is resumed.
+  const runAtomicBackupRestore = useCallbackA(async (runner) => {
+    if (typeof runner !== 'function') throw new Error('Backup restore could not start. Reload Zane and try again.');
+    if (backupRestoreInFlight.current) throw new Error('A backup restore is already running.');
+    const uid = userIdRef.current;
+    if (!uid) throw new Error('Sign in again before restoring a backup.');
+
+    backupRestoreInFlight.current = true;
+    clearTimeout(retryTimer.current);
+    retryTimer.current = null;
+    try {
+      const landed = await flushBeforeSignOut(uid);
+      if (!landed) throw new Error('Your latest changes could not be synced safely. Check the connection and try again.');
+      if (uid !== userIdRef.current) throw new Error('The signed-in account changed before restore could start.');
+      syncGeneration.current += 1;
+      return await runner();
+    } catch (error) {
+      backupRestoreInFlight.current = false;
+      if (uid === userIdRef.current) {
+        const dirty = pendingStore.current !== syncBase.current;
+        setSyncStatus(dirty ? 'pending' : 'synced');
+        if (dirty) flushSync(uid);
+      }
+      throw error;
+    }
+  }, [flushBeforeSignOut, flushSync]);
 
   // Arms the SIGNED_OUT handler below to actually wipe local storage. Must be
   // called synchronously right before every deliberate LB.signOut(), without
@@ -3809,7 +3841,7 @@ function App() {
     && openSheetCount === 0
     && !textEntryFocused;
 
-  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, markIntentionalSignOut, tapDebugEnabled, onTapDebugChange: setTapDebug };
+  const props = { store, setStore, go, userId, runtimeConfig, syncStatus, storageFull, onRetrySync, flushBeforeSignOut, runAtomicBackupRestore, markIntentionalSignOut, tapDebugEnabled, onTapDebugChange: setTapDebug };
   const tabRoutes = ['home', 'plan', 'lib', 'cardio-plans', 'hist', 'health', 'water', 'food', 'medications', 'coaching', 'friends'];
   const showTab = tabRoutes.includes(route.name);
   // Library and cardio-plans live under the merged "Plan" tab; the water,

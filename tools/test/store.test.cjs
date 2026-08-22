@@ -6,6 +6,7 @@ const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
 const assert = require('assert');
+const { createHash, webcrypto } = require('crypto');
 
 let testFrom; // swapped per test to control what supabase calls "return"
 let testFetch = async () => ({ ok: true }); // swapped per test to control what fnFetch's raw fetch() "returns"
@@ -28,8 +29,13 @@ const windowEventLog = [];
 // is a different object entirely, setting that one has no effect in here.
 let storeWindow = null;
 
-function loadStore() {
-  const code = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
+function loadStore({ disableBackupRestore = false } = {}) {
+  let code = fs.readFileSync(path.join(__dirname, '../../src/store.js'), 'utf8');
+  if (disableBackupRestore) {
+    const guard = 'const BACKUP_RESTORE_AVAILABLE = true;';
+    if (!code.includes(guard)) throw new Error('backup restore availability guard changed');
+    code = code.replace(guard, 'const BACKUP_RESTORE_AVAILABLE = false;');
+  }
   const fakeClient = {
     auth: {
       onAuthStateChange: () => ({ data: { subscription: { unsubscribe() {} } } }),
@@ -62,6 +68,7 @@ function loadStore() {
     },
     CustomEvent: class CustomEvent { constructor(type, options) { this.type = type; this.detail = options?.detail; } },
     console, fetch: (...args) => testFetch(...args), setTimeout, clearTimeout, Math, Date, JSON, URL,
+    crypto: webcrypto, TextEncoder, TextDecoder,
   };
   sandbox.global = sandbox;
   vm.createContext(sandbox);
@@ -1351,29 +1358,397 @@ async function testAsync(name, fn) {
     assert.strictEqual(LB.remapExerciseDayKey('unrelated_day', remap), 'unrelated_day');
   });
 
-  await testAsync('backup restore fails closed before any database or RPC call', async () => {
+  await testAsync('backup restore release gate fails closed without any I/O when disabled', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
     const calls = [];
-    testFrom = table => {
-      calls.push(`from:${table}`);
-      throw new Error('restore touched the database');
-    };
-    testRpc = async name => {
-      calls.push(`rpc:${name}`);
-      throw new Error('restore called an RPC');
-    };
-    assert.strictEqual(LB.BACKUP_RESTORE_AVAILABLE, false);
-    await assert.rejects(LB.importFromBackup({
-      sessions: [], schedules: [], exercises: [],
-    }, 'u1'), /temporarily unavailable.*No account data was changed/i);
-    assert.deepStrictEqual(calls, []);
+    const originalStoreWindow = storeWindow;
+    const gatedRestoreLB = loadStore({ disableBackupRestore: true });
+    storeWindow = originalStoreWindow;
+    try {
+      testFrom = table => { calls.push(`from:${table}`); throw new Error('unexpected live-table call'); };
+      testRpc = async name => { calls.push(`rpc:${name}`); throw new Error('unexpected restore RPC'); };
+      assert.strictEqual(gatedRestoreLB.BACKUP_RESTORE_AVAILABLE, false);
+      await assert.rejects(
+        gatedRestoreLB.importFromBackup({ sessions: [], schedules: [], exercises: [] }, 'u1'),
+        /temporarily unavailable.*No account data was changed/i,
+      );
+      assert.deepStrictEqual(calls, []);
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
   });
 
-  await testAsync('backup restore still rejects malformed files without touching the database', async () => {
+  // The production build now exercises the exact atomic runner. The preceding
+  // test separately proves that its compile-time release gate still fails
+  // closed before making any request if an emergency rollback disables it.
+  const atomicRestoreLB = LB;
+
+  const atomicBackupFixture = (exerciseCount = 3) => ({
+    _version: 2,
+    user: { name: 'Atomic restore test' },
+    settings: { unit: 'kg' },
+    sessions: [],
+    schedules: [],
+    exercises: Array.from({ length: exerciseCount }, (_, index) => ({
+      id: `atomic-exercise-${String(index).padStart(4, '0')}`,
+      name: `Atomic exercise ${index}`,
+      tags: [],
+    })),
+  });
+
+  const committedRestoreReceipt = (operationId, manifest, restoreDigest, overrides = {}) => ({
+    operation_id: operationId,
+    status: 'committed',
+    restore_digest: restoreDigest,
+    row_count: manifest.totals.row_count,
+    table_counts: { zane_exercises: manifest.totals.row_count },
+    ...overrides,
+  });
+
+  const restoreDigestForManifest = manifest => createHash('sha256')
+    .update(manifest.chunks.map(chunk => chunk.hash).join(''), 'utf8')
+    .digest('hex');
+
+  await testAsync('backup restore uses only begin, stage and commit RPCs and validates the commit receipt', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
     const calls = [];
-    testFrom = table => { calls.push(`from:${table}`); throw new Error('unexpected database call'); };
-    testRpc = async name => { calls.push(`rpc:${name}`); throw new Error('unexpected RPC call'); };
-    await assert.rejects(LB.importFromBackup({ sessions: [] }, 'u1'), /missing or has an invalid "exercises" list/i);
-    assert.deepStrictEqual(calls, []);
+    let manifest = null;
+    let restoreDigest = null;
+    const backup = atomicBackupFixture();
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        calls.push({ name, args });
+        if (name === 'begin_backup_restore') {
+          manifest = args.p_manifest;
+          restoreDigest = restoreDigestForManifest(manifest);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [] }, error: null };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          return {
+            data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] },
+            error: null,
+          };
+        }
+        if (name === 'commit_backup_restore') {
+          return { data: committedRestoreReceipt(args.p_operation_id, manifest, restoreDigest), error: null };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+
+      const receipt = await atomicRestoreLB.importFromBackup(backup, 'u1');
+      assert.strictEqual(atomicRestoreLB.BACKUP_RESTORE_AVAILABLE, true);
+      assert.strictEqual(receipt.status, 'committed');
+      assert.deepStrictEqual(
+        Array.from(new Set(calls.map(call => call.name))),
+        ['begin_backup_restore', 'stage_backup_restore_chunk', 'commit_backup_restore'],
+      );
+      assert.ok(manifest && manifest.operation_id, 'begin requires a durable operation id in its manifest');
+      assert.strictEqual(calls[0].args.p_operation_id, manifest.operation_id);
+      assert.strictEqual(manifest.version, 1, 'the manifest pins the restore protocol version');
+      assert.strictEqual(manifest.normalizer_version, 1);
+      assert.strictEqual(manifest.totals.chunk_count, manifest.chunks.length);
+      assert.ok(manifest.totals.row_count >= 3);
+      assert.ok(manifest.totals.byte_count > 0);
+      assert.match(restoreDigest, /^[0-9a-f]{64}$/);
+      assert.strictEqual(new Set(manifest.chunks.map(chunk => chunk.section)).size, 33, 'all fixed sections require a descriptor, including empty sections');
+      assert.ok(manifest.chunks.some(chunk => chunk.row_count === 0), 'empty sections use explicit zero-row chunks');
+      for (const call of calls.filter(call => call.name === 'stage_backup_restore_chunk')) {
+        const descriptor = manifest.chunks.find(chunk => chunk.index === call.args.p_chunk_index);
+        assert.ok(descriptor, `staged chunk ${call.args.p_chunk_index} is absent from the manifest`);
+        assert.strictEqual(call.args.p_operation_id, manifest.operation_id);
+        assert.strictEqual(call.args.p_chunk_hash, descriptor.hash);
+        assert.deepStrictEqual(
+          Object.keys(call.args.p_chunk).sort(),
+          ['offset', 'rows', 'section'],
+          'only the canonical chunk object is staged',
+        );
+        assert.strictEqual(call.args.p_chunk.section, descriptor.section);
+        assert.strictEqual(call.args.p_chunk.offset, descriptor.offset);
+        assert.strictEqual(call.args.p_chunk.rows.length, descriptor.row_count);
+      }
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('backup restore chunk plan is deterministic for one durable operation id', async () => {
+    const backup = atomicBackupFixture(1201);
+    const operationId = `restore_${'a'.repeat(56)}`;
+    const first = await atomicRestoreLB.buildBackupRestoreChunks(
+      atomicRestoreLB.prepareBackupRestore(backup, operationId),
+      operationId,
+    );
+    const second = await atomicRestoreLB.buildBackupRestoreChunks(
+      atomicRestoreLB.prepareBackupRestore(JSON.parse(JSON.stringify(backup)), operationId),
+      operationId,
+    );
+    assert.ok(first.manifest.chunks.length > 1, 'fixture must span multiple restore chunks');
+    assert.deepStrictEqual(first.manifest, second.manifest);
+    assert.deepStrictEqual(first.chunks, second.chunks);
+    assert.strictEqual(first.restoreDigest, second.restoreDigest);
+  });
+
+  await testAsync('backup restore resumes an interrupted invocation without retransmitting staged indexes', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const backup = atomicBackupFixture(1201);
+    const operationIds = [];
+    const stagedOnRetry = [];
+    let invocation = 1;
+    let manifest = null;
+    let restoreDigest = null;
+    let firstChunkIndex = null;
+    let stagedOnce = false;
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        if (name === 'begin_backup_restore') {
+          operationIds.push(args.p_operation_id);
+          manifest = args.p_manifest;
+          restoreDigest = restoreDigestForManifest(manifest);
+          firstChunkIndex = manifest.chunks[0].index;
+          return {
+            data: {
+              operation_id: args.p_operation_id,
+              status: 'staging',
+              staged_indexes: invocation === 2 ? [firstChunkIndex] : [],
+            },
+            error: null,
+          };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          if (invocation === 1) {
+            if (!stagedOnce) {
+              stagedOnce = true;
+              return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+            }
+            return { data: null, error: { status: 400, message: 'stop after the first staged chunk' } };
+          }
+          stagedOnRetry.push(args.p_chunk_index);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+        }
+        if (name === 'commit_backup_restore') {
+          return { data: committedRestoreReceipt(args.p_operation_id, manifest, restoreDigest), error: null };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+
+      await assert.rejects(atomicRestoreLB.importFromBackup(backup, 'resume-user'), /stop after the first staged chunk/);
+      invocation = 2;
+      await atomicRestoreLB.importFromBackup(JSON.parse(JSON.stringify(backup)), 'resume-user');
+      assert.strictEqual(operationIds.length, 2);
+      assert.strictEqual(operationIds[1], operationIds[0], 'an interrupted restore must reuse its pending operation id');
+      assert.strictEqual(stagedOnRetry.includes(firstChunkIndex), false, 'the server-reported staged chunk must not be retransmitted');
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('two completed imports of the same backup use distinct operation ids', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const operationIds = [];
+    let manifest = null;
+    let restoreDigest = null;
+    const backup = atomicBackupFixture();
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        if (name === 'begin_backup_restore') {
+          operationIds.push(args.p_operation_id);
+          manifest = args.p_manifest;
+          restoreDigest = restoreDigestForManifest(manifest);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [] }, error: null };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+        }
+        if (name === 'commit_backup_restore') {
+          return { data: committedRestoreReceipt(args.p_operation_id, manifest, restoreDigest), error: null };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+      await atomicRestoreLB.importFromBackup(backup, 'repeat-user');
+      await atomicRestoreLB.importFromBackup(JSON.parse(JSON.stringify(backup)), 'repeat-user');
+      assert.strictEqual(operationIds.length, 2);
+      assert.notStrictEqual(operationIds[1], operationIds[0], 'a new intentional restore must not replay an old committed receipt');
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('backup restore remaps mesocycle recap exercise identities and converted weights', async () => {
+    const backup = atomicBackupFixture(1);
+    const oldExId = backup.exercises[0].id;
+    const oldKey = `${oldExId}_day_a`;
+    backup.sessions = [{
+      id: 'meso-session', dayId: 'day_a', entries: [],
+      mesoRecap: {
+        unit: 'kg', gains: [{ key: oldKey, name: 'Exercise', weightDelta: 2.5 }],
+        raw: {
+          repMissBase: { [oldKey]: 2 }, negOwner: { [oldKey]: 'joint' },
+          answers: {
+            joint: { [oldExId]: { exId: oldExId, contrib: { [oldKey]: -1 } } },
+            soreness: { Chest: { targets: [{ exId: oldExId, key: oldKey }], contrib: { [oldKey]: 1 } } },
+            volume: { Chest: { exIds: [oldExId], contrib: { [oldKey]: 1 } } },
+          },
+        },
+      },
+    }];
+    const operationId = `restore_${'b'.repeat(56)}`;
+    const prepared = atomicRestoreLB.prepareBackupRestore(backup, operationId, { multiplier: 2.20462, targetUnit: 'lbs' });
+    const newExId = prepared.idRemap[oldExId];
+    const newKey = `${newExId}_day_a`;
+    const recap = prepared.sections.sessions[0].meso_recap;
+    assert.strictEqual(recap.unit, 'lbs');
+    assert.strictEqual(recap.gains[0].key, newKey);
+    assert.strictEqual(recap.gains[0].weightDelta, 5.51);
+    assert.strictEqual(recap.raw.repMissBase[newKey], 2);
+    assert.strictEqual(recap.raw.negOwner[newKey], 'joint');
+    assert.strictEqual(recap.raw.answers.joint[newExId].exId, newExId);
+    assert.strictEqual(recap.raw.answers.joint[newExId].contrib[newKey], -1);
+    assert.strictEqual(recap.raw.answers.soreness.Chest.targets[0].exId, newExId);
+    assert.strictEqual(recap.raw.answers.soreness.Chest.targets[0].key, newKey);
+    assert.deepStrictEqual(Array.from(recap.raw.answers.volume.Chest.exIds), [newExId]);
+    assert.strictEqual(recap.raw.answers.volume.Chest.contrib[newKey], 1);
+  });
+
+  await testAsync('backup restore retries a transient stage failure with the identical chunk payload', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    let manifest = null;
+    let firstChunkIndex = null;
+    const attempts = [];
+    const backup = atomicBackupFixture();
+    let restoreDigest = null;
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        if (name === 'begin_backup_restore') {
+          manifest = args.p_manifest;
+          firstChunkIndex = manifest.chunks[0].index;
+          restoreDigest = restoreDigestForManifest(manifest);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [] }, error: null };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          if (args.p_chunk_index === firstChunkIndex) {
+            attempts.push(JSON.parse(JSON.stringify(args)));
+            if (attempts.length === 1) {
+              return { data: null, error: { status: 503, message: 'temporary staging outage' } };
+            }
+          }
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+        }
+        if (name === 'commit_backup_restore') {
+          return { data: committedRestoreReceipt(args.p_operation_id, manifest, restoreDigest), error: null };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+
+      await atomicRestoreLB.importFromBackup(backup, 'u1');
+      assert.strictEqual(attempts.length, 2);
+      assert.deepStrictEqual(attempts[1], attempts[0], 'retry must not rechunk or mutate the staged payload');
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('backup restore retries a lost commit response idempotently with the same operation id', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    let manifest = null;
+    let restoreDigest = null;
+    const commitArgs = [];
+    const backup = atomicBackupFixture();
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        if (name === 'begin_backup_restore') {
+          manifest = args.p_manifest;
+          restoreDigest = restoreDigestForManifest(manifest);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [] }, error: null };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+        }
+        if (name === 'commit_backup_restore') {
+          commitArgs.push({ ...args });
+          if (commitArgs.length === 1) {
+            return { data: null, error: { status: 503, message: 'response lost after commit' } };
+          }
+          return { data: committedRestoreReceipt(args.p_operation_id, manifest, restoreDigest), error: null };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+
+      const receipt = await atomicRestoreLB.importFromBackup(backup, 'u1');
+      assert.strictEqual(receipt.status, 'committed');
+      assert.strictEqual(commitArgs.length, 2);
+      assert.deepStrictEqual(commitArgs[1], commitArgs[0]);
+      assert.strictEqual(commitArgs[0].p_operation_id, manifest.operation_id);
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('backup restore rejects a mismatched commit digest instead of reporting success', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    let manifest = null;
+    let restoreDigest = null;
+    const backup = atomicBackupFixture();
+    try {
+      testFrom = table => { throw new Error(`restore made a direct live-table call to ${table}`); };
+      testRpc = async (name, args) => {
+        if (name === 'begin_backup_restore') {
+          manifest = args.p_manifest;
+          restoreDigest = restoreDigestForManifest(manifest);
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [] }, error: null };
+        }
+        if (name === 'stage_backup_restore_chunk') {
+          return { data: { operation_id: args.p_operation_id, status: 'staging', staged_indexes: [args.p_chunk_index] }, error: null };
+        }
+        if (name === 'commit_backup_restore') {
+          return {
+            data: committedRestoreReceipt(args.p_operation_id, manifest, '0'.repeat(64)),
+            error: null,
+          };
+        }
+        throw new Error(`unexpected restore RPC ${name}`);
+      };
+
+      await assert.rejects(
+        atomicRestoreLB.importFromBackup(backup, 'u1'),
+        /digest/i,
+      );
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
+  });
+
+  await testAsync('backup restore rejects malformed input without any database or RPC I/O', async () => {
+    const previousFrom = testFrom;
+    const previousRpc = testRpc;
+    const calls = [];
+    try {
+      testFrom = table => { calls.push(`from:${table}`); throw new Error('unexpected database call'); };
+      testRpc = async name => { calls.push(`rpc:${name}`); throw new Error('unexpected RPC call'); };
+      await assert.rejects(atomicRestoreLB.importFromBackup({ sessions: [] }, 'u1'), /missing or has an invalid "exercises" list/i);
+      assert.deepStrictEqual(calls, []);
+    } finally {
+      testFrom = previousFrom;
+      testRpc = previousRpc;
+    }
   });
 
   await testAsync('storage purge paginates metadata and removes every object batch', async () => {
