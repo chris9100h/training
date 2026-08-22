@@ -2,33 +2,33 @@
 -- Keep the earliest recorded archive and let the unique key arbitrate future
 -- upserts independently of each device's random row id.
 
--- Supabase branch migrations execute statements in autocommit mode. LOCK TABLE
--- therefore needs an explicit transaction block so the dedupe and unique
--- constraint creation remain one race-free operation on fresh branches.
-BEGIN;
-
--- Hold concurrent client inserts out between the one-time dedupe and unique
--- index creation. SHARE ROW EXCLUSIVE still permits reads and is retained for
--- the remainder of this migration transaction.
-LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;
-
-WITH ranked AS (
-  SELECT skip.id,
-         row_number() OVER (
-           PARTITION BY skip.user_id, skip.date, skip.day_id
-           ORDER BY skip.skipped_at ASC NULLS LAST, skip.id
-         ) AS ordinal
-  FROM public.zane_skips AS skip
-  WHERE skip.user_id IS NOT NULL
-    AND skip.day_id IS NOT NULL
-)
-DELETE FROM public.zane_skips AS skip
-USING ranked
-WHERE skip.id = ranked.id
-  AND ranked.ordinal > 1;
-
+-- Keep the lock, dedupe and constraint creation in one server-side statement.
+-- Branch replay can run individual migration statements through a transaction
+-- pooler, so a separate BEGIN; LOCK TABLE; COMMIT sequence is not guaranteed to
+-- stay on one backend and can fail with "LOCK TABLE can only be used in
+-- transaction blocks". A DO block gives the lock a single transaction context.
 DO $migration$
 BEGIN
+  -- Hold concurrent client inserts out between the one-time dedupe and unique
+  -- index creation. SHARE ROW EXCLUSIVE still permits reads for this short
+  -- migration transaction.
+  LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;
+
+  WITH ranked AS (
+    SELECT skip.id,
+           row_number() OVER (
+             PARTITION BY skip.user_id, skip.date, skip.day_id
+             ORDER BY skip.skipped_at ASC NULLS LAST, skip.id
+           ) AS ordinal
+    FROM public.zane_skips AS skip
+    WHERE skip.user_id IS NOT NULL
+      AND skip.day_id IS NOT NULL
+  )
+  DELETE FROM public.zane_skips AS skip
+  USING ranked
+  WHERE skip.id = ranked.id
+    AND ranked.ordinal > 1;
+
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
@@ -45,5 +45,3 @@ BEGIN
   END IF;
 END
 $migration$;
-
-COMMIT;

@@ -9458,28 +9458,28 @@ GRANT EXECUTE ON FUNCTION public.clear_feature_map_layers_if_unchanged(jsonb, js
 -- Keep the earliest recorded archive and let the unique key arbitrate future
 -- upserts independently of each device's random row id.
 
--- Hold concurrent client inserts out between the one-time dedupe and unique
--- index creation. SHARE ROW EXCLUSIVE still permits reads and is retained for
--- the remainder of this migration transaction.
-LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;
-
-WITH ranked AS (
-  SELECT skip.id,
-         row_number() OVER (
-           PARTITION BY skip.user_id, skip.date, skip.day_id
-           ORDER BY skip.skipped_at ASC NULLS LAST, skip.id
-         ) AS ordinal
-  FROM public.zane_skips AS skip
-  WHERE skip.user_id IS NOT NULL
-    AND skip.day_id IS NOT NULL
-)
-DELETE FROM public.zane_skips AS skip
-USING ranked
-WHERE skip.id = ranked.id
-  AND ranked.ordinal > 1;
-
+-- Keep the lock, dedupe and constraint creation in one server-side statement.
+-- The migration uses a DO block so replay through a transaction pooler keeps
+-- LOCK TABLE inside the same transaction context.
 DO $migration$
 BEGIN
+  LOCK TABLE public.zane_skips IN SHARE ROW EXCLUSIVE MODE;
+
+  WITH ranked AS (
+    SELECT skip.id,
+           row_number() OVER (
+             PARTITION BY skip.user_id, skip.date, skip.day_id
+             ORDER BY skip.skipped_at ASC NULLS LAST, skip.id
+           ) AS ordinal
+    FROM public.zane_skips AS skip
+    WHERE skip.user_id IS NOT NULL
+      AND skip.day_id IS NOT NULL
+  )
+  DELETE FROM public.zane_skips AS skip
+  USING ranked
+  WHERE skip.id = ranked.id
+    AND ranked.ordinal > 1;
+
   IF NOT EXISTS (
     SELECT 1
     FROM pg_constraint
