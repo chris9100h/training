@@ -9303,7 +9303,7 @@ GRANT EXECUTE ON FUNCTION public.finish_reminder_delivery(
   text, uuid, text, uuid, boolean
 ) TO service_role;
 
--- ── 20260822111514_feature_map_bake_cas.sql ────────────────────────────────────────────────
+-- ── feature_map_bake_cas (active definition from 20260822150101) ──────────────────────────
 -- Clear the two live feature-map layers only when both still match the exact
 -- semantic snapshots that the bake tool wrote into the generated catalog.
 -- Timestamps and JSON object key order do not participate in the comparison.
