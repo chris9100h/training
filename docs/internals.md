@@ -78,7 +78,12 @@ Nutzer: `Sheet` (`ui.jsx`, `paddingBottom` des Backdrops) und `FullSheet` (`scre
 
 **Nicht betroffen und bewusst anders:** Die App-Shell selbst (`#root` via `--app-viewport-top`/`--app-viewport-height` im Watcher in `index.html`) misst korrekt und braucht nichts. `AdminSupportChatFrame` (`screens-settings.jsx`) nutzt zwar `65vh`/`100dvh`, sitzt aber in `FullSheet`s Flex-Spalte und hält seinen Composer auf beiden Plattformen im Bild (nachgemessen). Der `keyboardHeight`-Prop von `Sheet` ist etwas anderes: die **app-eigene** Zifferntastatur ist echtes DOM, verändert keinen Viewport und muss deshalb immer voll reserviert werden.
 
-Abgesichert durch `tools/test/keyboard-viewport.test.cjs` (Unit-Test der reinen Funktion, beide Viewport-Modi).
+**Abgesichert durch zwei Gates**, weil Text allein diese Klasse zweimal nicht aufgehalten hat:
+
+- `tools/test/keyboard-viewport.test.cjs`: Unit-Test der reinen Funktion, beide Viewport-Modi.
+- `tools/check-viewport-geometry.cjs`: AST-Scan über alle `SOURCES` plus die Inline-Skripte in `index.html`. Regel A: wer `visualViewport` **und** eine Layout-Viewport-Höhe liest, muss die Antwort von `keyboardViewportReservation()` holen. Regel B: wer `visualViewport` liest, darf keine Box in `vh`/`dvh` bemessen, außer der Wert ist gegen eine Prozentgrenze geklemmt (`min(86vh, calc(100% - 48px))`). Beide historischen Regressionen werden davon gefangen (per Mutation nachgewiesen), die Fehlermeldung erklärt die Regel und verweist hierher. Allowlist mit Begründung steht oben im Tool, aktuell drei Einträge: `keepFocusedInputVisible` (misst nur, bemisst nichts), der Shell-Watcher in `index.html` (läuft vor `ui.jsx` und ist die Quelle, der alle anderen vertrauen) und `Sheet`s `82dvh`/`88dvh`-Zweige (greifen nur, wenn der Backdrop den vollen Layout-Viewport einnimmt).
+
+**Bekannte Lücke des Scans** (bewusst offen, nicht übertüncht): Er arbeitet pro benannter Top-Level-Funktion. Eine Kindkomponente, die in einem viewport-bewussten Overlay gerendert wird, aber als eigene Funktion deklariert ist, sieht er nicht (`AdminSupportChatFrame`, nachgemessen unkritisch). Den Wizard-Fall fängt er, weil dort Panel und `visualViewport`-Abo in derselben Funktion stehen.
 
 ## Screenshot-Export (`captureNodeAsPng`, html2canvas)
 

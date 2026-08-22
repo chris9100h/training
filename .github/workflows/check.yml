@@ -32,6 +32,12 @@ jobs:
       # One runner keeps the focused unit suite in one place and also includes
       # the coaching-drive storage helper test that used to be easy to miss.
       - run: npm test
+      # The keyboard/viewport bug class has shipped twice (sheets pushed off
+      # the top of the screen on Android, wizard panels cut off on iOS). Both
+      # were invisible on desktop and in every other gate, so this one walks
+      # the AST for overlays that size themselves against the layout viewport
+      # instead of the visible one.
+      - run: node tools/check-viewport-geometry.cjs
       # Replays all migrations and verifies schema.sql + docs/database.md
       # were updated alongside them (offline half of the DB drift checks;
       # the live half runs weekly via db-drift.yml).
