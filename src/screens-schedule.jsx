@@ -4526,7 +4526,6 @@ function computePlanSteps({ type, presetKey, customCount, weekdayCount }) {
 
 function PlanWizard({ store, setStore, go }) {
   const iosChrome = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-chrome');
-  const iosLocalLayer = typeof document !== 'undefined' && document.documentElement.classList.contains('ios-browser');
   const [step, setStep] = useStateS('name');
   const [confirming, setConfirming] = useStateS(false);
   // zIndex 9999: +1 over this wizard's own overlay (9998, see overlayBase
@@ -5014,7 +5013,7 @@ function PlanWizard({ store, setStore, go }) {
   return (
     <div data-zane-viewport-overlay="true" style={overlayStyle} onClick={e => { if (e.target === e.currentTarget) requestExit(); }}>
       {confirm531El}
-      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: iosLocalLayer ? 'calc(100% - 48px)' : '86vh', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
+      <div style={{ position: 'relative', width: '100%', maxWidth: 360, maxHeight: 'min(86vh, calc(100% - 48px))', overflowY: 'auto', background: UI.bgRaised, backgroundImage: 'var(--bg-texture)', border: `1px solid ${UI.hairStrong}`, borderRadius: 8, padding: '20px 20px 22px', display: 'flex', flexDirection: 'column', gap: 18, boxShadow: '0 32px 80px rgba(0,0,0,0.6)', animation: 'fadeUp 0.3s ease' }}>
         {confirming ? (
           <>
             <div style={{ fontFamily: UI.fontDisplay, fontSize: 22, color: UI.ink, fontWeight: 700, textTransform: 'uppercase' }}>Discard plan?</div>
